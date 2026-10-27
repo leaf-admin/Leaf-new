@@ -3,6 +3,7 @@ const firebaseConfig = require('../firebase-config');
 const driverSubscriptionService = require('./driver-subscription-service');
 const { logStructured } = require('../utils/logger');
 const userStore = require('./user-store');
+const { docView } = require('./rtdb-root-router');
 
 const COLLECTION = 'subscriptions';
 const GATE_CACHE_PREFIX = 'subscription:online-gate:v1:';
@@ -25,15 +26,6 @@ function cleanObject(value) {
 class SubscriptionStateService {
   getFirestore() {
     return firebaseConfig?.getFirestore?.() || (admin.apps.length > 0 ? admin.firestore() : null);
-  }
-
-  getRealtimeDB() {
-    try {
-      // Only the routed client: `subscriptions` is served from Firestore, never raw RTDB.
-      return firebaseConfig?.getRealtimeDB?.() || null;
-    } catch (_) {
-      return null;
-    }
   }
 
   getRedis() {
@@ -215,25 +207,26 @@ class SubscriptionStateService {
     return cleanObject(patch);
   }
 
-  async loadRtdbMigrationSource(driverId, { db } = {}) {
-    const realtimeDb = db || this.getRealtimeDB();
-    if (!realtimeDb || !driverId) {
-      return { subscription: {}, userData: {} };
+  // { driverId: subscription } for every driver, in the view the RTDB router
+  // served (Timestamps as ISO strings, no nulls). Bulk reads (daily billing,
+  // dashboard fallback).
+  async listSubscriptions({ firestore } = {}) {
+    const firestoreInstance = firestore || this.getFirestore();
+    if (!firestoreInstance) {
+      throw new Error('Firestore indisponível para autoridade de assinatura');
     }
-
-    const firestore = this.getFirestore();
-    const [subscriptionSnapshot, userData] = await Promise.all([
-      realtimeDb.ref(`subscriptions/${driverId}`).once('value'),
-      firestore ? userStore.readUser(firestore, driverId) : null
-    ]);
-
-    return {
-      subscription: subscriptionSnapshot.val() || {},
-      userData: userData || {}
-    };
+    const snapshot = await firestoreInstance.collection(COLLECTION).get();
+    const result = {};
+    for (const doc of snapshot?.docs || []) {
+      const view = docView(doc.data());
+      if (view !== null) result[doc.id] = view;
+    }
+    return result;
   }
 
-  async getState(driverId, { db, firestore, syncIfMissing = true } = {}) {
+  // subscriptions/{driverId} in Firestore is the only record (the RTDB copy it
+  // used to migrate from was served from this same document by the router).
+  async getState(driverId, { firestore } = {}) {
     if (!driverId) {
       return { exists: false, source: 'none', subscription: {}, userData: {} };
     }
@@ -255,32 +248,15 @@ class SubscriptionStateService {
       };
     }
 
-    const realtimeDb = db || this.getRealtimeDB();
-    const rtdbState = await this.loadRtdbMigrationSource(driverId, { db: realtimeDb });
-    const migratedSubscription = cleanObject({ ...(rtdbState.subscription || {}), driverId });
-    const exists = Object.keys(migratedSubscription).length > 1 || Boolean(
-      migratedSubscription.driverId
-      && rtdbState.subscription
-      && Object.keys(rtdbState.subscription).length > 0
-    );
-
-    if (exists && syncIfMissing) {
-      await docRef.set({
-        ...migratedSubscription,
-        migratedFrom: 'rtdb',
-        syncedAt: admin.firestore.FieldValue.serverTimestamp()
-      }, { merge: true });
-    }
-
     return {
-      exists,
-      source: exists ? 'rtdb' : 'none',
-      subscription: migratedSubscription,
-      userData: rtdbState.userData || {}
+      exists: false,
+      source: 'none',
+      subscription: { driverId },
+      userData: {}
     };
   }
 
-  async getGateState(driverId, { db, firestore, redis, bypassCache = false } = {}) {
+  async getGateState(driverId, { firestore, redis, bypassCache = false } = {}) {
     if (!driverId) {
       throw new Error('driverId ausente para gate de assinatura');
     }
@@ -290,45 +266,34 @@ class SubscriptionStateService {
       if (cached) return cached;
     }
 
-    const state = await this.getState(driverId, {
-      db,
-      firestore,
-      syncIfMissing: true
-    });
-    const migrated = state.source === 'rtdb';
-    const authoritativeUserData = migrated ? (state.userData || {}) : {};
+    const state = await this.getState(driverId, { firestore });
     const snapshot = await this.writeGateCache(
       driverId,
       state.subscription || {},
-      authoritativeUserData,
+      {},
       {
         redis,
-        authoritySource: migrated ? 'firestore_migrated' : 'firestore'
+        authoritySource: 'firestore'
       }
     );
 
-    return { ...snapshot, source: migrated ? 'firestore_migrated' : 'firestore' };
+    return { ...snapshot, source: 'firestore' };
   }
 
-  async syncMirrors(driverId, subscription, { db, userData, syncReadModel = true } = {}) {
-    const realtimeDb = db || this.getRealtimeDB();
+  // Projections of the committed subscription: the users/{id} shadow fields
+  // and the dashboard read model.
+  async syncMirrors(driverId, subscription, { userData, syncReadModel = true } = {}) {
     const sanitizedSubscription = cleanObject({ ...subscription, driverId });
 
-    if (realtimeDb) {
-      const subscriptionPatch = cleanObject({ ...sanitizedSubscription });
-      delete subscriptionPatch.syncedAt;
-      await realtimeDb.ref(`subscriptions/${driverId}`).update(subscriptionPatch);
-
-      const shadowPatch = this.buildUserShadowPatch(sanitizedSubscription, userData || {});
-      const firestore = this.getFirestore();
-      if (Object.keys(shadowPatch).length > 0 && firestore) {
-        await userStore.updateUser(firestore, driverId, shadowPatch);
-      }
+    const shadowPatch = this.buildUserShadowPatch(sanitizedSubscription, userData || {});
+    const firestore = this.getFirestore();
+    if (Object.keys(shadowPatch).length > 0 && firestore) {
+      await userStore.updateUser(firestore, driverId, shadowPatch);
     }
 
     if (syncReadModel) {
       try {
-        await driverSubscriptionService.syncDriverSubscription(driverId, { db: realtimeDb });
+        await driverSubscriptionService.syncDriverSubscription(driverId);
       } catch (error) {
         logStructured('warn', 'Falha ao sincronizar read-model de subscription', {
           service: 'subscription-state-service',
@@ -339,25 +304,19 @@ class SubscriptionStateService {
     }
   }
 
-  async runTransaction(driverId, updater, { db, firestore, syncReadModel = true } = {}) {
+  async runTransaction(driverId, updater, { firestore, syncReadModel = true } = {}) {
     const firestoreInstance = firestore || this.getFirestore();
     if (!firestoreInstance) {
       return { success: false, error: 'Firestore indisponível para autoridade de assinatura' };
     }
 
-    const realtimeDb = db || this.getRealtimeDB();
     const docRef = firestoreInstance.collection(COLLECTION).doc(driverId);
     let committedSubscription = null;
-    let userData = {};
+    const userData = {};
 
     try {
-      const seedState = await this.getState(driverId, {
-        db: realtimeDb,
-        firestore: firestoreInstance,
-        syncIfMissing: true
-      });
+      const seedState = await this.getState(driverId, { firestore: firestoreInstance });
       const seedSubscription = seedState.subscription || {};
-      userData = seedState.source === 'rtdb' ? (seedState.userData || {}) : {};
 
       await firestoreInstance.runTransaction(async (transaction) => {
         const docSnapshot = await transaction.get(docRef);
@@ -391,12 +350,11 @@ class SubscriptionStateService {
 
     try {
       await this.syncMirrors(driverId, committedSubscription, {
-        db: realtimeDb,
         userData,
         syncReadModel
       });
     } catch (error) {
-      logStructured('warn', 'Autoridade Firestore confirmada; espelho RTDB de assinatura pendente', {
+      logStructured('warn', 'Autoridade Firestore confirmada; projeção de assinatura pendente', {
         service: 'subscription-state-service',
         driverId,
         error: error.message
@@ -410,14 +368,10 @@ class SubscriptionStateService {
     };
   }
 
-  async getBillingData(driverId, { db, firestore } = {}) {
+  async getBillingData(driverId, { firestore } = {}) {
     try {
-      const { source, subscription, userData } = await this.getState(driverId, {
-        db,
-        firestore,
-        syncIfMissing: true
-      });
-      const authoritativeUserData = source === 'rtdb' ? (userData || {}) : {};
+      const { subscription } = await this.getState(driverId, { firestore });
+      const authoritativeUserData = {};
 
       return {
         authorityAvailable: true,
@@ -450,7 +404,7 @@ class SubscriptionStateService {
     }
   }
 
-  async settlePendingOnWithdrawal(driverId, settlementCents, { db, firestore } = {}) {
+  async settlePendingOnWithdrawal(driverId, settlementCents, { firestore } = {}) {
     const settledAmount = Math.max(0, Number(settlementCents || 0));
     if (!driverId || settledAmount <= 0) {
       return {
@@ -483,7 +437,7 @@ class SubscriptionStateService {
         lastSettlementAmountCents: debit,
         updatedAt: nowIso
       };
-    }, { db, firestore, syncReadModel: true });
+    }, { firestore, syncReadModel: true });
 
     if (!result.success) {
       return result;

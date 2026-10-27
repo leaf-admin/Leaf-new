@@ -18,11 +18,6 @@ function getFirestore() {
   throw new Error('Firestore indisponível para subscriptions');
 }
 
-function getRealtimeDB() {
-  if (firebaseConfig?.getRealtimeDB) return firebaseConfig.getRealtimeDB();
-  throw new Error('Realtime Database indisponível para subscriptions');
-}
-
 function toIso(value) {
   if (!value) return null;
   const date = value instanceof Date ? value : new Date(value);
@@ -151,14 +146,12 @@ class DriverSubscriptionService {
     };
   }
 
-  async syncDriverSubscription(driverId, { db } = {}) {
-    const realtimeDb = db || getRealtimeDB();
+  async syncDriverSubscription(driverId) {
     const firestore = getFirestore();
 
-    const [driverRecord, rawSubscriptionSnapshot, subscriptionSnapshot] = await Promise.all([
+    const [driverRecord, rawSubscriptionSnapshot] = await Promise.all([
       userStore.readUser(firestore, driverId),
-      firestore.collection(RAW_COLLECTION).doc(driverId).get().catch(() => null),
-      realtimeDb.ref(`subscriptions/${driverId}`).once('value')
+      firestore.collection(RAW_COLLECTION).doc(driverId).get().catch(() => null)
     ]);
 
     if (!driverRecord) {
@@ -174,21 +167,18 @@ class DriverSubscriptionService {
 
     const subscription = rawSubscriptionSnapshot?.exists
       ? (rawSubscriptionSnapshot.data() || {})
-      : (subscriptionSnapshot.val() || {});
+      : {};
     const row = this.buildRow(driverId, driver, subscription);
     await firestore.collection(COLLECTION).doc(driverId).set(row, { merge: true });
     return row;
   }
 
-  async syncAllDriverSubscriptions({ db } = {}) {
-    const realtimeDb = db || getRealtimeDB();
+  async syncAllDriverSubscriptions() {
     const firestore = getFirestore();
-    const userStore = require('./user-store');
-    const [drivers, driversAlt, rawSubscriptionsSnapshot, subscriptionsSnapshot, existingReadModelSnapshot] = await Promise.all([
+    const [drivers, driversAlt, rawSubscriptionsSnapshot, existingReadModelSnapshot] = await Promise.all([
       userStore.queryUsers(firestore, 'usertype', 'driver'),
       userStore.queryUsers(firestore, 'userType', 'driver').catch(() => null),
       firestore.collection(RAW_COLLECTION).get().catch(() => null),
-      realtimeDb.ref('subscriptions').once('value'),
       firestore.collection(COLLECTION).get().catch(() => null)
     ]);
 
@@ -199,7 +189,6 @@ class DriverSubscriptionService {
     const rawSubscriptions = rawSubscriptionsSnapshot
       ? Object.fromEntries(rawSubscriptionsSnapshot.docs.map((doc) => [doc.id, doc.data() || {}]))
       : {};
-    const subscriptions = subscriptionsSnapshot.val() || {};
     const existingReadModelDocIds = new Set(
       (existingReadModelSnapshot?.docs || []).map((doc) => doc.id)
     );
@@ -217,7 +206,7 @@ class DriverSubscriptionService {
       rows.push(this.buildRow(
         driverId,
         driver,
-        rawSubscriptions[driverId] || subscriptions[driverId] || {}
+        rawSubscriptions[driverId] || {}
       ));
     });
     const staleReadModelDocIds = Array.from(existingReadModelDocIds).filter((driverId) => !activeDriverIds.has(driverId));
@@ -258,13 +247,13 @@ class DriverSubscriptionService {
       .get();
 
     if (latestSnapshot.empty) {
-      return this.syncAllDriverSubscriptions({});
+      return this.syncAllDriverSubscriptions();
     }
 
     const latest = latestSnapshot.docs[0].data() || {};
     const syncedAt = latest.syncedAt?.toDate ? latest.syncedAt.toDate() : toDate(latest.syncedAt);
     if (!syncedAt || (Date.now() - syncedAt.getTime()) > maxAgeMs) {
-      return this.syncAllDriverSubscriptions({});
+      return this.syncAllDriverSubscriptions();
     }
 
     return null;
