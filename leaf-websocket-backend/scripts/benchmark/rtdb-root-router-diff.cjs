@@ -9,10 +9,11 @@ const withPrivateRealtime = require('./private-rtdb.cjs');
 const withPrivateFirestore = require('./private-firestore.cjs');
 const { createRouter } = require('../../services/rtdb-root-router');
 
-const ROOTS = 'vehicles,user_vehicles,vehicle_plate_index,driver_activation,driver_documents_index_stats,driver_document_mutation_locks,users,subscriptions';
+const ROOTS = 'vehicles,user_vehicles,vehicle_plate_index,driver_activation,driver_documents_index_stats,driver_document_mutation_locks,users,subscriptions,bookings,sandbox_bookings';
 const NATIVE = 'vehicles:vehicle_catalog,user_vehicles:driver_vehicle_links,vehicle_plate_index:vehicle_plate_index,'
   + 'driver_activation:driver_activation,driver_documents_index_stats:driver_document_stats,'
-  + 'driver_document_mutation_locks:driver_document_locks,users:users:merge,subscriptions:subscriptions:merge';
+  + 'driver_document_mutation_locks:driver_document_locks,users:users:merge,subscriptions:subscriptions:merge,'
+  + 'bookings:ride_annotations,sandbox_bookings:sandbox_ride_annotations';
 const quiet = () => {};
 
 async function operations(db) {
@@ -79,6 +80,16 @@ async function operations(db) {
       return next > 0 ? next : 0;
     });
   }
+  // Ride annotations (domain 6): receipt pointer, ratings in a multi-root
+  // update, safety review flags, as in receipt/rating/safety services.
+  await db.ref().update({
+    'receipts_probe/r1': { ok: true },
+    'bookings/b1/receipt': { receiptId: 'LEAF-b1', hash: 'H1', savedAt: 's1' }
+  });
+  await db.ref('bookings/b2/receipt').set({ receiptId: 'LEAF-b2', hash: 'H2', savedAt: 's2' });
+  await db.ref().update({ 'bookings/b1/rating': 5, 'bookings/b1/feedback': null, 'bookings/b2/driver_rating': 4, 'bookings/b2/driver_feedback': 'ok' });
+  await db.ref('sandbox_bookings/b3').update({ opsReviewRequired: true, opsReviewReason: 'sos', opsReviewUpdatedAt: 'o1' });
+  await db.ref('bookings/b4').update({ driver: 'd1', status: 'COMPLETED', rating: 3 });
   await db.ref('driver_documents_index_stats/cnh/pending').transaction(current => Math.max(0, (Number(current) || 0) - 1) || null);
   return {
     first: [first.committed, first.snapshot.val()?.token],
@@ -113,7 +124,16 @@ async function readAll(db) {
     locks: await value('driver_document_mutation_locks'),
     stats: await value('driver_documents_index_stats'),
     drivers: await keys(db.ref('users').orderByChild('usertype').equalTo('driver')),
-    subscriptions: await value('subscriptions')
+    subscriptions: await value('subscriptions'),
+    bookings: await value('bookings'),
+    sandboxBookings: await value('sandbox_bookings'),
+    b1: await value('bookings/b1'),
+    b2Receipt: await value('bookings/b2/receipt/receiptId'),
+    byDriver: await keys(db.ref('bookings').orderByChild('driver').equalTo('d1')),
+    byRating: await keys(db.ref('bookings').orderByChild('rating').equalTo(5)),
+    byStringRating: await keys(db.ref('bookings').orderByChild('rating').equalTo('5')),
+    byReceipt: await keys(db.ref('bookings').orderByChild('receipt/hash').equalTo('H2')),
+    noDriver: await keys(db.ref('bookings').orderByChild('driver').equalTo('nobody'))
   };
 }
 
