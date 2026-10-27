@@ -1,6 +1,5 @@
 'use strict';
 const { createHash } = require('node:crypto');
-const mapWithConcurrency = require('../utils/map-with-concurrency');
 const hash = value => createHash('sha256').update(String(value)).digest('hex');
 const error = (code, message, statusCode = 503) => Object.assign(new Error(message), { code, statusCode });
 const PROFILE_FIELDS = ['usertype', 'firstName', 'lastName', 'email', 'mobile', 'profile_image', 'createdAt', 'lastLogin',
@@ -17,7 +16,7 @@ function boundedValue(snapshot, limit, label) {
 
 // The legacy RTDB `cars` root never existed here and RTDB `bookings` never held
 // rides (only annotations without a driver), so per-driver car and trip stats
-// were always empty; they are no longer read.
+// were always empty; they are no longer read (neither page mode reads cars).
 async function readLegacy(firestore) {
   if (!firestore) throw error('DASHBOARD_LEGACY_UNAVAILABLE', 'Listagem temporariamente indisponível');
   const drivers = await require('./user-store').queryUsers(firestore, 'usertype', 'driver', { limit: 201 });
@@ -35,7 +34,7 @@ function decodeCursor(raw) {
   } catch (_) { throw error('DASHBOARD_CURSOR_INVALID', 'Cursor de motoristas inválido', 400); }
 }
 
-async function readPage({ db, firestore: providedFirestore, getFirestore, params, resolveNet }) {
+async function readPage({ firestore: providedFirestore, getFirestore, params, resolveNet }) {
   const wantsCursor = params.pagination === 'cursor' || Boolean(params.cursor);
   const complexFilter = ['status', 'planType', 'approvalStatus', 'search'].some(key => params[key] && params[key] !== 'all');
   if (!wantsCursor || process.env.ENABLE_ADMIN_DRIVER_CURSOR_READS !== 'true' || complexFilter) {
@@ -71,10 +70,6 @@ async function readPage({ db, firestore: providedFirestore, getFirestore, params
   }
   if (Buffer.byteLength(JSON.stringify(users)) > 4 * 1024 * 1024) throw error('DASHBOARD_PAGE_BYTES', 'Página excede orçamento');
   const ids = Object.keys(users);
-  const cars = await mapWithConcurrency(ids, 4, async id => {
-    const value = (await db.ref('cars').orderByChild('driver').equalTo(id).limitToFirst(1).once('value')).val() || {};
-    return [id, Object.values(value)[0] || null];
-  });
   const statsByDriver = new Map();
   if (ids.length) {
     const refs = ids.map(id => firestore.collection('ops_driver_stats_v1').doc(hash(id)));
@@ -91,7 +86,7 @@ async function readPage({ db, firestore: providedFirestore, getFirestore, params
   }
   const last = docs[docs.length - 1];
   const hasMore = snapshot.docs.length > limit;
-  return { users, carsByDriver: new Map(cars), statsByDriver, mode: 'firestore-keyset', pagination: {
+  return { users, carsByDriver: new Map(), statsByDriver, mode: 'firestore-keyset', pagination: {
     page: 1, limit, total: null, totalPages: null, hasMore,
     nextCursor: hasMore ? Buffer.from(JSON.stringify({ v: 1, scope: 'dashboard-drivers-iso-v1', id: last.id, at: users[last.id].createdAt })).toString('base64url') : null
   } };

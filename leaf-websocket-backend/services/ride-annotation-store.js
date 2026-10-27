@@ -8,7 +8,7 @@
 //
 // Callers keep naming the persistence scope root (`collections.bookings`);
 // reads return the router's view (Timestamps as ISO strings, no nulls).
-const { docView } = require('./rtdb-root-router');
+const { docView } = require('./native-record-view');
 const { commit } = require('./driver-document-store');
 
 const ROOT_COLLECTIONS = Object.freeze({

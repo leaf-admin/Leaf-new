@@ -44,7 +44,7 @@ const {
 } = require('./shared');
 
 const driverListData = require('../../services/dashboard-driver-list-data');
-const { toView } = require('../../services/rtdb-root-router');
+const { toView } = require('../../services/native-record-view');
 const adminReadBudget = require('../../utils/admin-read-budget');
 
 // ==================== GESTÃO COMPLETA DE MOTORISTAS ====================
@@ -65,14 +65,13 @@ router.get('/api/drivers/complete', authenticateJWT, requireRole(DASHBOARD_OPERA
       limit = 50
     } = req.query;
 
-    if (!firebaseConfig || !firebaseConfig.getRealtimeDB) {
+    if (!firebaseConfig || !firebaseConfig.getFirestore) {
       return res.status(500).json({ error: 'Firebase não disponível' });
     }
 
-    const db = firebaseConfig.getRealtimeDB();
     const promotionService = require('../../services/promotion-service');
 
-    const listData = await driverListData.readPage({ db, getFirestore: () => firebaseConfig.getFirestore?.(),
+    const listData = await driverListData.readPage({ getFirestore: () => firebaseConfig.getFirestore?.(),
       params: req.query || {}, resolveNet: resolveRideDriverNetAmount });
     const { users, carsByDriver, statsByDriver } = listData;
     const modernPage = listData.mode === 'firestore-keyset';
@@ -302,7 +301,7 @@ router.get('/api/drivers/:driverId/complete', authenticateJWT, requireRole(DASHB
   try {
     const { driverId } = req.params;
 
-    if (!firebaseConfig || !firebaseConfig.getRealtimeDB) {
+    if (!firebaseConfig || !firebaseConfig.getFirestore) {
       return res.status(error.statusCode || 500).json({ error: 'Firebase não disponível' });
     }
 
@@ -529,7 +528,7 @@ router.patch('/api/drivers/:driverId/plan', authenticateJWT, requireRole(DASHBOA
       return res.status(400).json({ error: 'Tipo de plano inválido' });
     }
 
-    if (!firebaseConfig || !firebaseConfig.getRealtimeDB) {
+    if (!firebaseConfig || !firebaseConfig.getFirestore) {
       return res.status(500).json({ error: 'Firebase não disponível' });
     }
 
@@ -707,7 +706,7 @@ router.post('/api/drivers/:driverId/extend-free', authenticateJWT, requireRole(D
       return res.status(400).json({ error: 'Número de dias inválido' });
     }
 
-    if (!firebaseConfig || !firebaseConfig.getRealtimeDB) {
+    if (!firebaseConfig || !firebaseConfig.getFirestore) {
       return res.status(500).json({ error: 'Firebase não disponível' });
     }
 
@@ -1241,7 +1240,7 @@ router.post('/api/drivers/:driverId/approve', authenticateJWT, requireRole(DASHB
 
     await assertDriverIdentityNotPermanentlyBlocked(driverId);
 
-    if (!firebaseConfig || !firebaseConfig.getRealtimeDB) {
+    if (!firebaseConfig || !firebaseConfig.getFirestore) {
       return res.status(500).json({ error: 'Firebase não disponível' });
     }
 

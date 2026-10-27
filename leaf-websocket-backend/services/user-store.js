@@ -11,7 +11,7 @@
 const { isDeepStrictEqual } = require('node:util');
 const { FieldPath, FieldValue } = require('@google-cloud/firestore');
 const { commit, userField } = require('./driver-document-store');
-const { docView, fromView, getIn, normalize } = require('./rtdb-root-router');
+const { docView, fromView, getIn, normalize } = require('./native-record-view');
 
 const COLLECTION = 'users';
 

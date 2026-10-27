@@ -240,7 +240,7 @@ router.get('/api/revenue/stats', async (req, res) => {
     };
 
     try {
-      if (firebaseConfig && firebaseConfig.getRealtimeDB) {
+      if (firebaseConfig && firebaseConfig.getFirestore) {
         const bookingRecords = await readBudget.recordsSnapshot(limit => rideAnnotationStore.listAnnotations(firebaseConfig.getFirestore(), 'bookings', { limit }));
         const bookings = bookingRecords || {};
         const bookingArray = Object.keys(bookings).map(key => ({ id: key, ...bookings[key] }));
@@ -379,13 +379,9 @@ router.get('/api/system/status', async (req, res) => {
     }
 
     try {
-      // Testar Firebase
-      if (firebaseConfig && firebaseConfig.getRealtimeDB) {
-        const db = firebaseConfig.getRealtimeDB();
-        const firebaseStart = Date.now();
-        await db.ref('.info/connected').once('value');
-        const firebaseLatency = Date.now() - firebaseStart;
-        services[1].latency = firebaseLatency;
+      // Firebase: cliente Firestore inicializado (sem leitura paga a cada consulta).
+      if (firebaseConfig?.getFirestore?.()) {
+        services[1].latency = 0;
         services[1].status = 'online';
       }
     } catch (error) {
