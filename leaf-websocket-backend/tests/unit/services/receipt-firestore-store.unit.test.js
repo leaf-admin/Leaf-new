@@ -98,6 +98,37 @@ describe('receipt Firestore mirror', () => {
     mirror.mockRestore();
   });
 
+  it('with the RTDB mirror off writes only Firestore (failing loudly) plus the routed ride pointer', async () => {
+    process.env.ENABLE_RECEIPT_FIRESTORE_WRITES = 'true';
+    process.env.ENABLE_RECEIPT_FIRESTORE_READS = 'true';
+    process.env.RTDB_MIRROR_WRITES = 'false';
+    try {
+      const service = new ReceiptService();
+      const order = [];
+      const firebaseDb = { ref: jest.fn(path => ({ set: jest.fn(async () => { order.push(`rtdb:${path}`); }) })) };
+      const mirror = jest.spyOn(store, 'mirror').mockImplementation(async () => { order.push('firestore'); return { mirrored: true }; });
+      service.getReceiptFirestore = () => ({});
+      const operational = { rideId: 'booking_1792947972712_owner', receiptId: 'LEAF-1', hash: 'h',
+        customer: { id: 'customer_1' }, driver: { id: 'driver_1' } };
+
+      await expect(service.saveReceiptToFirestore(operational, firebaseDb)).resolves.toBe(true);
+      expect(order).toEqual(['firestore', 'rtdb:bookings/booking_1792947972712_owner/receipt']);
+
+      mirror.mockRejectedValueOnce(Object.assign(new Error('firestore down'), { code: 'unavailable' }));
+      await expect(service.saveReceiptToFirestore(operational, firebaseDb)).rejects.toMatchObject({ code: 'RECEIPT_PERSIST_FAILED' });
+      mirror.mockRestore();
+
+      const getByRideId = jest.spyOn(store, 'getByRideId').mockResolvedValue(null);
+      firebaseDb.ref.mockClear();
+      await expect(service.getReceiptFromFirestore('booking_1', firebaseDb)).resolves.toBeNull();
+      expect(firebaseDb.ref).not.toHaveBeenCalled();
+      getByRideId.mockRestore();
+    } finally {
+      delete process.env.RTDB_MIRROR_WRITES;
+      delete process.env.ENABLE_RECEIPT_FIRESTORE_READS;
+    }
+  });
+
   it('rejects malformed history cursors', () => {
     expect(() => store.decodeCursor('not-a-cursor')).toThrow(expect.objectContaining({ code: 'RECEIPT_HISTORY_CURSOR_INVALID', statusCode: 400 }));
     const valid = Buffer.from(JSON.stringify({ v: 1, t: 1792947990000, id: 'booking_1' })).toString('base64url');

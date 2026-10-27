@@ -5,6 +5,7 @@
 // Before the read switch RTDB is the source and Firestore gets a best-effort
 // copy; after it Firestore is the source and RTDB keeps a best-effort mirror.
 const { logStructured } = require('../utils/logger');
+const { mirrorWritesEnabled } = require('./rtdb-root-router');
 
 const COLLECTION = 'operational_configs';
 // `json` encoding stores the config serialized: geofence polygons are nested
@@ -57,7 +58,7 @@ async function writeFirestore(firebaseConfig, key, value) {
 async function load(firebaseConfig, key) {
   if (enabledReads()) {
     const value = await readFirestore(firebaseConfig, key);
-    if (value) return { raw: value, source: 'firestore' };
+    if (value || !mirrorWritesEnabled()) return { raw: value, source: 'firestore' };
     logStructured('warn', 'Configuração operacional ausente no Firestore; lendo do RTDB', { service: 'ops-config-store', key });
   }
   return { raw: await firebaseConfig.getFromRealtimeDB(definition(key).rtdbPath), source: 'rtdb' };
@@ -67,6 +68,7 @@ async function persist(firebaseConfig, key, value) {
   const { rtdbPath } = definition(key);
   if (enabledReads()) {
     await writeFirestore(firebaseConfig, key, value);
+    if (!mirrorWritesEnabled()) return;
     await firebaseConfig.setRealtimeDB(rtdbPath, value).catch(error => logStructured('warn',
       'Espelho RTDB da configuração operacional falhou', { service: 'ops-config-store', key, error: error.message }));
     return;

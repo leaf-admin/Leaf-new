@@ -186,6 +186,21 @@ async function readAll(db) {
         env: { RTDB_FIRESTORE_WRITE_ROOTS: ROOTS, RTDB_FIRESTORE_READ_ROOTS: ROOTS, RTDB_FIRESTORE_NATIVE_COLLECTIONS: NATIVE } });
       results.mirrorFirestore = await readAll(reader);
     });
+    // RTDB retirement: mirror off. Reads still match RTDB semantics, the raw
+    // RTDB receives nothing for the served roots, and unrouted roots are logged.
+    await withPrivateRealtime(async raw => {
+      for (const entry of NATIVE.split(',')) {
+        for (const doc of (await firestore.collection(entry.split(':')[1]).get()).docs) await doc.ref.delete();
+      }
+      const logged = [];
+      const retiring = createRouter(raw, { getFirestore: () => firestore, log: (level, message, meta) => logged.push([message, meta?.root]),
+        env: { RTDB_FIRESTORE_WRITE_ROOTS: ROOTS, RTDB_FIRESTORE_READ_ROOTS: ROOTS, RTDB_FIRESTORE_NATIVE_COLLECTIONS: NATIVE, RTDB_MIRROR_WRITES: 'false' } });
+      results.retiringTx = await operations(retiring);
+      results.retiring = await readAll(retiring);
+      const rawTop = (await raw.ref().once('value')).val() || {};
+      results.retiringRawRoots = Object.keys(rawTop).sort();
+      results.retiringLogged = logged.filter(([message]) => message === 'rtdb_unrouted_access').map(([, root]) => root);
+    });
   });
   // `users` is not routed: through the served router it must still be plain RTDB.
   // Known RTDB quirk, not reproduced: RTDB runs the update first with a null
@@ -206,6 +221,10 @@ async function readAll(db) {
   assert.deepEqual(results.servedMirror, results.control, 'RTDB mirror of Firestore-served roots differs');
   assert.deepEqual(results.mirrorRtdb, results.control, 'Mirror mode changed RTDB results');
   assert.deepEqual(results.mirrorFirestore, results.control, 'Firestore copy in mirror mode differs from RTDB');
+  assert.deepEqual(withoutLocks(results.retiring), withoutLocks(results.control), 'Mirror-off reads differ from RTDB');
+  assert.deepEqual(withoutRelease(results.retiringTx), withoutRelease(results.controlTx), 'Mirror-off transaction outcomes differ');
+  assert.deepEqual(results.retiringRawRoots, ['receipts_probe'], 'Mirror off still wrote served roots to RTDB');
+  assert.deepEqual([...new Set(results.retiringLogged)], ['receipts_probe'], 'Unrouted access was not logged');
   console.log(JSON.stringify({ ok: true, checks: Object.keys(results.control).length, transactions: results.controlTx, control: results.control }));
   process.exit(0);
 })().catch(error => { console.error(error); process.exit(1); });
