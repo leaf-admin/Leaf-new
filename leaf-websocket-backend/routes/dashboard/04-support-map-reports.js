@@ -41,7 +41,8 @@ const {
   resolveRideOperationalFee,
   resolveRideRevenue,
   router,
-  supportTicketService
+  supportTicketService,
+  rideAnnotationStore
 } = require('./shared');
 
 // 🗺️ Real-Time Map - SISTEMA DE MAPA EM TEMPO REAL
@@ -244,7 +245,6 @@ router.get('/api/reports/comprehensive', authenticateJWT, requireRole(DASHBOARD_
 
     try {
       if (firebaseConfig && firebaseConfig.getRealtimeDB) {
-        const db = firebaseConfig.getRealtimeDB();
 
         // Calcular período
         const now = new Date();
@@ -267,12 +267,12 @@ router.get('/api/reports/comprehensive', authenticateJWT, requireRole(DASHBOARD_
 
         // Buscar dados base
         // The legacy `cars` root never existed here: no cars, as before.
-        const [bookingsSnapshot, users] = await Promise.all([
-          db.ref('bookings').once('value'),
+        const [bookingRecords, users] = await Promise.all([
+          rideAnnotationStore.listAnnotations(firebaseConfig.getFirestore(), 'bookings'),
           userStore.listUsers(firebaseConfig.getFirestore())
         ]);
 
-        const bookings = bookingsSnapshot.val() || {};
+        const bookings = bookingRecords || {};
         const cars = {};
 
         // Filtrar bookings por período

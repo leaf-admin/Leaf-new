@@ -1,5 +1,16 @@
 const { SafetyIncidentService } = require('../../../services/safety-incident-service');
 const { sealFinancialContext } = require('../../../services/financial-runtime-context');
+const rideAnnotationStore = require('../../../services/ride-annotation-store');
+
+// Ops review flags land on the ride annotation (native Firestore).
+let annotationUpdates;
+beforeEach(() => {
+  annotationUpdates = [];
+  jest.spyOn(rideAnnotationStore, 'updateAnnotation').mockImplementation(async (_firestore, root, id, patch) => {
+    annotationUpdates.push({ root, id, patch });
+  });
+});
+afterEach(() => jest.restoreAllMocks());
 
 function createFirestoreMock() {
   const store = new Map();
@@ -38,15 +49,9 @@ function createFirestoreMock() {
 describe('safety-incident-service', () => {
   it('creates incident, ticket and marks booking for ops review', async () => {
     const firestore = createFirestoreMock();
-    const bookingUpdates = [];
     const service = new SafetyIncidentService({
       firebase: {
-        getFirestore: () => firestore,
-        getRealtimeDB: () => ({
-          ref: () => ({
-            update: async (value) => bookingUpdates.push(value)
-          })
-        })
+        getFirestore: () => firestore
       },
       redis: {
         getConnection: () => ({
@@ -79,7 +84,8 @@ describe('safety-incident-service', () => {
     });
 
     expect(incident.ticketId).toBe('ticket-1');
-    expect(bookingUpdates[0]).toEqual(expect.objectContaining({
+    expect(annotationUpdates[0]).toMatchObject({ root: 'bookings', id: 'booking-1' });
+    expect(annotationUpdates[0].patch).toEqual(expect.objectContaining({
       opsReviewRequired: true,
       opsReviewIncidentId: incident.incidentId
     }));
@@ -125,7 +131,6 @@ describe('safety-incident-service', () => {
         set: async (value) => store.set(`${collectionName}/${id}`, value)
       })
     }));
-    const bookingRef = jest.fn(() => ({ update: jest.fn(async () => true) }));
     const redis = {
       hset: jest.fn(async () => 1),
       expire: jest.fn(async () => 1),
@@ -138,8 +143,7 @@ describe('safety-incident-service', () => {
     };
     const service = new SafetyIncidentService({
       firebase: {
-        getFirestore: () => ({ collection }),
-        getRealtimeDB: () => ({ ref: bookingRef })
+        getFirestore: () => ({ collection })
       },
       redis: { getConnection: () => redis },
       queueService,
@@ -164,8 +168,9 @@ describe('safety-incident-service', () => {
 
     expect(collection).toHaveBeenCalledWith('sandbox_ops_incidents');
     expect(collection).not.toHaveBeenCalledWith('ops_incidents');
-    expect(bookingRef).toHaveBeenCalledWith('sandbox_bookings/sandbox-booking-1');
-    expect(bookingRef).not.toHaveBeenCalledWith('bookings/sandbox-booking-1');
+    expect(annotationUpdates).toEqual([
+      expect.objectContaining({ root: 'sandbox_bookings', id: 'sandbox-booking-1' })
+    ]);
     expect(queueService.createSupportTicket).toHaveBeenCalledWith(expect.objectContaining({
       persistenceContext: expect.objectContaining({ namespace: 'sandbox' })
     }));

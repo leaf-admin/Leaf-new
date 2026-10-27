@@ -11,11 +11,12 @@ const mockRealtimeDb = {
     once: jest.fn(async () => ({ val: () => mockRealtimeData[path] || null }))
   }))
 };
-// users/{uid} lives in Firestore; the rest of the report still reads the router.
+// users/{uid} and the ride annotations (served as `bookings`) live in Firestore.
+const mockNativeRoots = { users: 'users', ride_annotations: 'bookings' };
 const mockFirestore = {
   collection: jest.fn((name) => ({
     get: jest.fn(async () => ({
-      docs: Object.entries(name === 'users' ? mockRealtimeData.users || {} : {})
+      docs: Object.entries(mockRealtimeData[mockNativeRoots[name]] || {})
         .map(([id, data]) => ({ id, data: () => data }))
     }))
   }))

@@ -2,6 +2,7 @@ const firebaseConfig = require('../firebase-config');
 const redisPool = require('../utils/redis-pool');
 const supportQueueService = require('./support-queue-service');
 const passengerTrustService = require('./passenger-trust-service');
+const rideAnnotationStore = require('./ride-annotation-store');
 const {
   resolvePersistenceScope
 } = require('./sandbox-persistence-context');
@@ -96,10 +97,6 @@ class SafetyIncidentService {
     return this.firebase?.getFirestore ? this.firebase.getFirestore() : null;
   }
 
-  getRealtimeDb() {
-    return this.firebase?.getRealtimeDB ? this.firebase.getRealtimeDB() : null;
-  }
-
   getRedis() {
     return this.redisPool?.getConnection ? this.redisPool.getConnection() : null;
   }
@@ -159,10 +156,9 @@ class SafetyIncidentService {
     });
     const now = new Date().toISOString();
     const redis = this.getRedis();
-    const realtimeDb = this.getRealtimeDb();
 
     // O lifecycle sandbox ainda usa Redis efêmero compartilhado no runtime.
-    // Não anexamos flags operacionais nele; a evidência fica no root RTDB isolado.
+    // Não anexamos flags operacionais nele; a evidência fica na anotação da corrida (Firestore).
     if (redis && persistenceScope.namespace === 'operational') {
       await redis.hset(`booking:${bookingId}`, {
         opsReviewRequired: 'true',
@@ -172,8 +168,9 @@ class SafetyIncidentService {
       }).catch(() => null);
     }
 
-    if (realtimeDb) {
-      await realtimeDb.ref(`${persistenceScope.collections.bookings}/${bookingId}`).update({
+    const firestore = this.getFirestore();
+    if (firestore) {
+      await rideAnnotationStore.updateAnnotation(firestore, persistenceScope.collections.bookings, bookingId, {
         opsReviewRequired: true,
         opsReviewIncidentId: incident.incidentId,
         opsReviewReason: incident.category,

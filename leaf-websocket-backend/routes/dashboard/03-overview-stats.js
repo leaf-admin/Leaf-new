@@ -17,7 +17,8 @@ const {
   rejectDashboardMockEndpointInProduction,
   resolveRideRevenue,
   router,
-  sampleRedisKeys
+  sampleRedisKeys,
+  rideAnnotationStore
 } = require('./shared');
 
 // 💳 Subscriptions
@@ -240,9 +241,8 @@ router.get('/api/revenue/stats', async (req, res) => {
 
     try {
       if (firebaseConfig && firebaseConfig.getRealtimeDB) {
-        const db = firebaseConfig.getRealtimeDB();
-        const bookingsSnapshot = await readBudget.realtimeSnapshot(db.ref('bookings'));
-        const bookings = bookingsSnapshot.val() || {};
+        const bookingRecords = await readBudget.recordsSnapshot(limit => rideAnnotationStore.listAnnotations(firebaseConfig.getFirestore(), 'bookings', { limit }));
+        const bookings = bookingRecords || {};
         const bookingArray = Object.keys(bookings).map(key => ({ id: key, ...bookings[key] }));
 
         const today = new Date();

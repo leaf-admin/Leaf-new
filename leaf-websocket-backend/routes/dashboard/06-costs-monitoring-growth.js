@@ -33,7 +33,8 @@ const {
   redisPool,
   requireRole,
   resolveRideRevenue,
-  router
+  router,
+  rideAnnotationStore
 } = require('./shared');
 
 // 💲 Operational Costs Tracking - TRACKING DE CUSTOS OPERACIONAIS POR CORRIDA
@@ -53,7 +54,6 @@ router.get('/api/costs/per-trip', async (req, res) => {
 
     try {
       if (firebaseConfig && firebaseConfig.getRealtimeDB) {
-        const db = firebaseConfig.getRealtimeDB();
 
         // Calcular período
         const now = new Date();
@@ -72,8 +72,8 @@ router.get('/api/costs/per-trip', async (req, res) => {
         }
 
         // Buscar corridas do período
-        const bookingsSnapshot = await db.ref('bookings').once('value');
-        const bookings = bookingsSnapshot.val() || {};
+        const bookingRecords = await rideAnnotationStore.listAnnotations(firebaseConfig.getFirestore(), 'bookings');
+        const bookings = bookingRecords || {};
 
         // Filtrar corridas por período e status
         let tripIds = Object.keys(bookings);
@@ -237,7 +237,6 @@ router.get('/api/costs/insights', async (req, res) => {
 
     try {
       if (firebaseConfig && firebaseConfig.getRealtimeDB) {
-        const db = firebaseConfig.getRealtimeDB();
 
         // Buscar dados históricos para análise de tendências
         const now = new Date();
@@ -255,8 +254,8 @@ router.get('/api/costs/insights', async (req, res) => {
             break;
         }
 
-        const bookingsSnapshot = await db.ref('bookings').once('value');
-        const bookings = bookingsSnapshot.val() || {};
+        const bookingRecords = await rideAnnotationStore.listAnnotations(firebaseConfig.getFirestore(), 'bookings');
+        const bookings = bookingRecords || {};
 
         const completedTrips = Object.keys(bookings)
           .filter(id => {
@@ -663,7 +662,6 @@ router.get('/api/analytics/growth', async (req, res) => {
 
     try {
       if (firebaseConfig && firebaseConfig.getRealtimeDB) {
-        const db = firebaseConfig.getRealtimeDB();
 
         // Calcular períodos
         const now = new Date();
@@ -690,12 +688,12 @@ router.get('/api/analytics/growth', async (req, res) => {
         }
 
         // Buscar dados
-        const [users, bookingsSnapshot] = await Promise.all([
+        const [users, bookingRecords] = await Promise.all([
           userStore.listUsers(firebaseConfig.getFirestore()),
-          db.ref('bookings').once('value')
+          rideAnnotationStore.listAnnotations(firebaseConfig.getFirestore(), 'bookings')
         ]);
 
-        const bookings = bookingsSnapshot.val() || {};
+        const bookings = bookingRecords || {};
 
         // Análise de crescimento de usuários
         const userGrowth = analyzeUserGrowth(users, startDate, now, compareStartDate);
@@ -774,7 +772,6 @@ router.get('/api/analytics/growth/insights', async (req, res) => {
 
     try {
       if (firebaseConfig && firebaseConfig.getRealtimeDB) {
-        const db = firebaseConfig.getRealtimeDB();
 
         const now = new Date();
         let startDate = new Date();
@@ -791,12 +788,12 @@ router.get('/api/analytics/growth/insights', async (req, res) => {
             break;
         }
 
-        const [users, bookingsSnapshot] = await Promise.all([
+        const [users, bookingRecords] = await Promise.all([
           userStore.listUsers(firebaseConfig.getFirestore()),
-          db.ref('bookings').once('value')
+          rideAnnotationStore.listAnnotations(firebaseConfig.getFirestore(), 'bookings')
         ]);
 
-        const bookings = bookingsSnapshot.val() || {};
+        const bookings = bookingRecords || {};
 
         // Análise de insights
         insights = generateGrowthInsights(users, bookings, startDate, now, period);
@@ -832,14 +829,13 @@ router.get('/api/analytics/growth/cohorts', async (req, res) => {
 
     try {
       if (firebaseConfig && firebaseConfig.getRealtimeDB) {
-        const db = firebaseConfig.getRealtimeDB();
 
-        const [users, bookingsSnapshot] = await Promise.all([
+        const [users, bookingRecords] = await Promise.all([
           userStore.listUsers(firebaseConfig.getFirestore()),
-          db.ref('bookings').once('value')
+          rideAnnotationStore.listAnnotations(firebaseConfig.getFirestore(), 'bookings')
         ]);
 
-        const bookings = bookingsSnapshot.val() || {};
+        const bookings = bookingRecords || {};
 
         cohortAnalysis = generateCohortAnalysis(users, bookings, cohortType, metric);
       }

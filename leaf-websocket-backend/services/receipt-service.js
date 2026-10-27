@@ -15,6 +15,7 @@ const PDFDocument = require('pdfkit');
 const PaymentService = require('./payment-service');
 const receiptHistoryIndex = require('./receipt-history-index');
 const receiptFirestoreStore = require('./receipt-firestore-store');
+const rideAnnotationStore = require('./ride-annotation-store');
 const { mirrorWritesEnabled } = require('./rtdb-root-router');
 // Legacy (pre-index) listing reads at most this many recent receipts.
 const LEGACY_RECEIPT_WINDOW = 200;
@@ -823,11 +824,13 @@ class ReceiptService {
             }
 
             // Se não encontrou no Redis, buscar no Firebase
-            if (!rideData && firebaseDb) {
-                const snapshot = await firebaseDb
-                    .ref(`${persistenceScope.collections.bookings}/${rideId}`)
-                    .once('value');
-                rideData = snapshot.val();
+            const annotationFirestore = rideData ? null : rideAnnotationStore.resolveFirestore();
+            if (!rideData && annotationFirestore) {
+                rideData = await rideAnnotationStore.readAnnotation(
+                    annotationFirestore,
+                    persistenceScope.collections.bookings,
+                    rideId
+                );
                 if (rideData) {
                     assertStoredRecordMatchesScope(rideData, persistenceScope);
                 }
@@ -1089,9 +1092,12 @@ class ReceiptService {
                     ownerOf: this.resolveStoredReceiptOwnerId.bind(this),
                     timestampOf: this.resolveStoredReceiptTimestamp.bind(this)
                 });
-                await firebaseDb
-                    .ref(`${persistenceScope.collections.bookings}/${receipt.rideId}/receipt`)
-                    .set(receiptPointer);
+                await rideAnnotationStore.updateAnnotation(
+                    this.getReceiptFirestore(),
+                    persistenceScope.collections.bookings,
+                    receipt.rideId,
+                    { receipt: receiptPointer }
+                );
                 logger.info(`✅ Recibo salvo no Firestore: ${receipt.receiptId}`);
                 return true;
             }
