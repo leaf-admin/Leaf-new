@@ -49,9 +49,4 @@ async function activeRideHash(redis) {
   return result;
 }
 
-function requireLegacyFallback() {
-  // An outage must not automatically move a query to the historical root.
-  if (process.env.ENABLE_LEGACY_METRICS_FALLBACK !== 'true') throw unavailable();
-}
-
-module.exports = { unavailable, assertPayload, firestoreSnapshot, realtimeSnapshot, requireLegacyFallback, admit, activeRideHash, ACTIVE_HASH };
+module.exports = { unavailable, assertPayload, firestoreSnapshot, realtimeSnapshot, admit, activeRideHash, ACTIVE_HASH };

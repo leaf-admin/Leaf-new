@@ -111,46 +111,13 @@ describe('metrics financial routes', () => {
     expect(response.status).toBe(503);
   });
 
-  it('RTDB fallback for financial rides excludes completed rides without backend_final snapshot from money totals', async () => {
-    const app = createApp();
-
-    const response = await request(app)
-      .get('/api/metrics/financial/rides')
-      .query({
-        period: 'custom',
-        startDate: '2026-04-06T00:00:00.000Z',
-        endDate: '2026-04-06T23:59:59.999Z',
-      });
-
-    expect(response.status).toBe(200);
-    expect(response.body).toMatchObject({
-      totalRides: 2,
-      reconciledRides: 1,
-      pendingReconciliationRides: 1,
-      totalValue: 81.17,
-      averageValue: 81.17,
-    });
-  });
-
-  it('RTDB fallback for operational fee excludes completed rides without backend_final snapshot from fee totals', async () => {
-    const app = createApp();
-
-    const response = await request(app)
-      .get('/api/metrics/financial/operational-fee')
-      .query({
-        period: 'custom',
-        startDate: '2026-04-06T00:00:00.000Z',
-        endDate: '2026-04-06T23:59:59.999Z',
-      });
-
-    expect(response.status).toBe(200);
-    expect(response.body).toMatchObject({
-      totalRides: 2,
-      reconciledRides: 1,
-      pendingReconciliationRides: 1,
-      totalOperationalFee: 1.49,
-      averageFee: 1.49,
-    });
+  it('never falls back to the RTDB, even with the retired legacy flag set', async () => {
+    process.env.ENABLE_LEGACY_METRICS_FALLBACK = 'true';
+    for (const route of ['/api/metrics/financial/rides', '/api/metrics/financial/operational-fee']) {
+      const response = await request(createApp()).get(route);
+      expect(response.status).toBe(503);
+    }
+    expect(metricsSource).not.toContain('requireLegacyFallback');
   });
 
   it('blocks financial simulator route unless the explicit launch flag is enabled', async () => {

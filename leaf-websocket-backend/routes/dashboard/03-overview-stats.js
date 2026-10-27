@@ -211,62 +211,9 @@ router.get('/api/rides/stats', async (req, res) => {
       const stats = await modernMetricsService.getRidesStats({ period, startDate, endDate });
       return res.json(stats);
     } catch (modernError) {
-      readBudget.requireLegacyFallback();
-      logStructured('warn', 'Fallback RTDB em /api/rides/stats', {
-        service: 'dashboard-routes',
-        reason: modernError.message
-      });
+      // Sem fallback legado: a fonte moderna é a única.
+      throw readBudget.unavailable();
     }
-
-    let stats = {
-      totalRides: 0,
-      activeRides: 0,
-      completedToday: 0,
-      averageValue: 0,
-      growthRate: 0
-    };
-
-    try {
-      if (firebaseConfig && firebaseConfig.getRealtimeDB) {
-        const db = firebaseConfig.getRealtimeDB();
-        const bookingsSnapshot = await readBudget.realtimeSnapshot(db.ref('bookings'));
-        const bookings = bookingsSnapshot.val() || {};
-        const bookingArray = Object.keys(bookings).map(key => ({ id: key, ...bookings[key] }));
-
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-
-        const completedToday = bookingArray.filter(b => {
-          const tripDate = new Date(b.tripdate || 0);
-          return tripDate >= today && (b.status === 'COMPLETE' || b.status === 'PAID');
-        });
-
-        const activeRides = bookingArray.filter(b =>
-          b.status === 'ACCEPTED' || b.status === 'IN_PROGRESS'
-        );
-
-        const completedRides = bookingArray.filter(b =>
-          b.status === 'COMPLETE' || b.status === 'PAID'
-        );
-
-        const totalValue = completedRides.reduce((sum, b) =>
-          sum + resolveRideRevenue(b), 0
-        );
-
-        stats = {
-          totalRides: bookingArray.length,
-          activeRides: activeRides.length,
-          completedToday: completedToday.length,
-          averageValue: completedRides.length > 0 ? totalValue / completedRides.length : 0,
-          growthRate: 0 // Calcular se necessário
-        };
-      }
-    } catch (error) {
-      logError(error, 'Erro ao buscar stats de corridas:', { service: 'dashboard-routes' });
-      throw error;
-    }
-
-    res.json(stats);
   } catch (error) {
     logError(error, 'Erro ao buscar stats de corridas:', { service: 'dashboard-routes' });
     res.status(error.statusCode || 500).json({ error: error.statusCode === 503 ? 'Métricas temporariamente indisponíveis' : 'Erro interno do servidor' });
@@ -337,46 +284,6 @@ router.get('/api/revenue/stats', async (req, res) => {
     res.json(stats);
   } catch (error) {
     logError(error, 'Erro ao buscar stats de receita:', { service: 'dashboard-routes' });
-    res.status(error.statusCode || 500).json({ error: error.statusCode === 503 ? 'Métricas temporariamente indisponíveis' : 'Erro interno do servidor' });
-  }
-});
-
-// 📈 Conversion Stats
-router.get('/api/conversion/stats', async (req, res) => {
-  try {
-    const stats = {
-      conversionRate: 0,
-      completionRate: 0,
-      growthRate: 0
-    };
-
-    try {
-      if (firebaseConfig && firebaseConfig.getRealtimeDB) {
-        const db = firebaseConfig.getRealtimeDB();
-        const bookingsSnapshot = await readBudget.realtimeSnapshot(db.ref('bookings'));
-        const bookings = bookingsSnapshot.val() || {};
-        const bookingArray = Object.keys(bookings).map(key => ({ id: key, ...bookings[key] }));
-
-        const total = bookingArray.length;
-        const completed = bookingArray.filter(b =>
-          b.status === 'COMPLETE' || b.status === 'PAID'
-        ).length;
-        const cancelled = bookingArray.filter(b =>
-          b.status === 'CANCELLED'
-        ).length;
-
-        stats.conversionRate = total > 0 ? (completed / total) * 100 : 0;
-        stats.completionRate = total > 0 ? ((total - cancelled) / total) * 100 : 0;
-        stats.growthRate = 0;
-      }
-    } catch (error) {
-      logError(error, 'Erro ao buscar stats de conversão:', { service: 'dashboard-routes' });
-      throw error;
-    }
-
-    res.json(stats);
-  } catch (error) {
-    logError(error, 'Erro ao buscar stats de conversão:', { service: 'dashboard-routes' });
     res.status(error.statusCode || 500).json({ error: error.statusCode === 503 ? 'Métricas temporariamente indisponíveis' : 'Erro interno do servidor' });
   }
 });
@@ -508,15 +415,6 @@ router.get('/api/activity/recent', async (req, res) => {
 
         const modernRides = modernSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
         activities = buildRecentRideActivities(modernRides, 10);
-      }
-
-      if (activities.length === 0 && firebaseConfig && firebaseConfig.getRealtimeDB) {
-        const db = firebaseConfig.getRealtimeDB();
-        const bookingsSnapshot = await readBudget.realtimeSnapshot(db.ref('bookings'));
-        const bookings = bookingsSnapshot.val() || {};
-        const bookingArray = Object.keys(bookings).map(key => ({ id: key, ...bookings[key] }));
-
-        activities = buildRecentRideActivities(bookingArray, 10);
       }
     } catch (error) {
       logError(error, 'Erro ao buscar atividades recentes:', { service: 'dashboard-routes' });
