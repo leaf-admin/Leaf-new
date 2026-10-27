@@ -684,7 +684,6 @@ function registerSocketCompleteTripHandler({
 
                         try {
                             const ReceiptService = require('../services/receipt-service');
-                            const firebaseConfig = require('../firebase-config');
                             const receiptService = new ReceiptService();
                             const bookingDataForReceipt = {
                                 ...(io.activeBookings?.get(bookingId) || {}),
@@ -731,8 +730,7 @@ function registerSocketCompleteTripHandler({
                                 completedAt: completionTimestamp,
                                 status: 'COMPLETED'
                             };
-                            const firebaseDb = firebaseConfig?.getRealtimeDB?.();
-                            await receiptService.generateAndSaveReceipt(bookingId, receiptData, firebaseDb);
+                            await receiptService.generateAndSaveReceipt(bookingId, receiptData);
                         } catch (receiptError) {
                             logStructured('warn', 'Erro ao gerar recibo', {
                                 bookingId,

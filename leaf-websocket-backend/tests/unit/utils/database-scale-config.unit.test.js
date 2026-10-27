@@ -1,7 +1,7 @@
 const errors = require('../../../utils/database-scale-config');
 describe('scale read model prerequisites', () => {
   test('defaults keep all new work disabled', () => expect(errors({})).toEqual([]));
-  test.each(['H3_REGIONAL', 'RECEIPT_HISTORY', 'OPS_METRIC'])('reader%s requires its writer', name => {
+  test.each(['H3_REGIONAL', 'OPS_METRIC'])('reader%s requires its writer', name => {
     expect(errors({ [`ENABLE_${name}_READS`]: 'true' })).toHaveLength(1);
     expect(errors({ [`ENABLE_${name}_READS`]: 'true', [`ENABLE_${name}_WRITES`]: 'true' })).toEqual([]);
   });

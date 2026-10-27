@@ -1,5 +1,7 @@
 const ReceiptService = require('../../../services/receipt-service');
 const { sealFinancialContext } = require('../../../services/financial-runtime-context');
+const receiptFirestoreStore = require('../../../services/receipt-firestore-store');
+const rideAnnotationStore = require('../../../services/ride-annotation-store');
 
 describe('ReceiptService financial snapshot', () => {
   const finalRideData = {
@@ -253,6 +255,32 @@ describe('ReceiptService financial snapshot', () => {
     expect(financial.totals.customerPaid).toBe(0);
   });
 
+  const sandboxFinancialContext = () => sealFinancialContext({
+    providerEnvironment: 'sandbox',
+    paymentProfileId: 'qa-test-users-sandbox-durable',
+    paymentProfileSource: 'firestore',
+    testUserSandbox: true
+  });
+
+  // Receipts live only in the Firestore receipt store (RTDB retired); the ride
+  // annotation keeps the pointer. Both are observed through spies.
+  const withReceiptStore = (service, { stored = null, writeError = null } = {}) => {
+    service.getReceiptFirestore = () => ({});
+    return {
+      getByRideId: jest.spyOn(receiptFirestoreStore, 'getByRideId').mockImplementation(async (_fs, scope, rideId) => (
+        typeof stored === 'function' ? stored(scope, rideId) : stored
+      )),
+      write: jest.spyOn(receiptFirestoreStore, 'write').mockImplementation(async () => {
+        if (writeError) throw writeError;
+        return { mirrored: true };
+      }),
+      listPage: jest.spyOn(receiptFirestoreStore, 'listPage').mockResolvedValue({ receipts: [], pagination: 'keyset' }),
+      pointer: jest.spyOn(rideAnnotationStore, 'updateAnnotation').mockResolvedValue(undefined)
+    };
+  };
+
+  afterEach(() => jest.restoreAllMocks());
+
   it('loads a stored final receipt before trying to regenerate from an active booking', async () => {
     const service = createReceiptService();
     const storedReceipt = {
@@ -266,80 +294,58 @@ describe('ReceiptService financial snapshot', () => {
       customer: { id: 'passenger_1' },
       driver: { id: 'driver_1' },
     };
-    const firebaseDb = {
-      ref: jest.fn((path) => ({
-        once: jest.fn(async () => ({
-          val: () => (path === 'receipts/ride_stored' ? storedReceipt : null),
-        })),
-      })),
-    };
+    const store = withReceiptStore(service, { stored: (_scope, rideId) => (rideId === 'ride_stored' ? storedReceipt : null) });
     const redis = {
       hget: jest.fn(),
     };
 
-    await expect(service.getReceiptByRideId('ride_stored', redis, firebaseDb)).resolves.toBe(storedReceipt);
+    await expect(service.getReceiptByRideId('ride_stored', redis)).resolves.toEqual(storedReceipt);
     expect(redis.hget).not.toHaveBeenCalled();
-    expect(firebaseDb.ref).toHaveBeenCalledWith('receipts/ride_stored');
+    expect(store.getByRideId.mock.calls[0][1].collections.receipts).toBe('receipts');
   });
 
   it('stores sandbox receipts only in the sandbox receipt namespace', async () => {
     const service = createReceiptService();
-    const writes = new Map();
-    const financialContext = sealFinancialContext({
-      providerEnvironment: 'sandbox',
-      paymentProfileId: 'qa-test-users-sandbox-durable',
-      paymentProfileSource: 'firestore',
-      testUserSandbox: true
-    });
-    const firebaseDb = {
-      ref: jest.fn((path) => ({
-        set: jest.fn(async (value) => writes.set(path, value))
-      }))
-    };
+    const store = withReceiptStore(service);
+    const financialContext = sandboxFinancialContext();
 
     const saved = await service.saveReceiptToFirestore({
       receiptId: 'LEAF-ride_sandbox_receipt',
       rideId: 'ride_sandbox_receipt',
       hash: 'HASH_SANDBOX',
       financialContext
-    }, firebaseDb);
+    });
 
     expect(saved).toBe(true);
-    expect(writes.has('sandbox_receipts/ride_sandbox_receipt')).toBe(true);
-    expect(writes.has('sandbox_bookings/ride_sandbox_receipt/receipt')).toBe(true);
-    expect(writes.has('receipts/ride_sandbox_receipt')).toBe(false);
-    expect(writes.has('bookings/ride_sandbox_receipt/receipt')).toBe(false);
+    expect(store.write.mock.calls[0][2].collections.receipts).toBe('sandbox_receipts');
+    expect(store.write.mock.calls[0][1]).toMatchObject({ rideId: 'ride_sandbox_receipt', financialNamespace: 'sandbox' });
+    expect(store.pointer).toHaveBeenCalledWith(expect.anything(), 'sandbox_bookings', 'ride_sandbox_receipt',
+      { receipt: expect.objectContaining({ receiptId: 'LEAF-ride_sandbox_receipt', financialNamespace: 'sandbox' }) });
   });
 
   it('fails closed before writing when a sandbox signal has no sealed context', async () => {
     const service = createReceiptService();
-    const firebaseDb = {
-      ref: jest.fn(() => ({ set: jest.fn() }))
-    };
+    const store = withReceiptStore(service);
 
     await expect(service.saveReceiptToFirestore({
       receiptId: 'LEAF-ride_sandbox_lost_context',
       rideId: 'ride_sandbox_lost_context',
       hash: 'HASH_SANDBOX',
       financialNamespace: 'sandbox'
-    }, firebaseDb)).rejects.toMatchObject({
+    })).rejects.toMatchObject({
       code: 'RECEIPT_PERSIST_FAILED',
       details: expect.objectContaining({
         stage: 'financial_context',
         contextCode: 'FINANCIAL_SANDBOX_CONTEXT_LOST'
       })
     });
-    expect(firebaseDb.ref).not.toHaveBeenCalled();
+    expect(store.write).not.toHaveBeenCalled();
+    expect(store.pointer).not.toHaveBeenCalled();
   });
 
   it('reads a sandbox receipt only from its resolved namespace', async () => {
     const service = createReceiptService();
-    const financialContext = sealFinancialContext({
-      providerEnvironment: 'sandbox',
-      paymentProfileId: 'qa-test-users-sandbox-durable',
-      paymentProfileSource: 'firestore',
-      testUserSandbox: true
-    });
+    const financialContext = sandboxFinancialContext();
     const storedReceipt = {
       receiptId: 'LEAF-ride_sandbox_read',
       rideId: 'ride_sandbox_read',
@@ -347,37 +353,19 @@ describe('ReceiptService financial snapshot', () => {
       financialNamespace: 'sandbox',
       financialContextId: financialContext.contextId
     };
-    const firebaseDb = {
-      ref: jest.fn((path) => ({
-        once: jest.fn(async () => ({
-          val: () => path === 'sandbox_receipts/ride_sandbox_read' ? storedReceipt : null
-        }))
-      }))
-    };
+    const store = withReceiptStore(service, {
+      stored: (scope, rideId) => (scope.collections.receipts === 'sandbox_receipts' && rideId === 'ride_sandbox_read' ? storedReceipt : null)
+    });
 
-    await expect(service.getReceiptFromFirestore(
-      'ride_sandbox_read',
-      firebaseDb,
-      { financialContext }
-    )).resolves.toEqual(storedReceipt);
-    expect(firebaseDb.ref).toHaveBeenCalledTimes(1);
-    expect(firebaseDb.ref).toHaveBeenCalledWith('sandbox_receipts/ride_sandbox_read');
-    expect(firebaseDb.ref).not.toHaveBeenCalledWith('receipts/ride_sandbox_read');
+    await expect(service.getReceiptFromFirestore('ride_sandbox_read', { financialContext })).resolves.toEqual(storedReceipt);
+    expect(store.getByRideId).toHaveBeenCalledTimes(1);
+    expect(store.getByRideId.mock.calls[0][1].collections.receipts).toBe('sandbox_receipts');
   });
 
   it('rejects an operational active-booking cache hit during sandbox receipt recovery', async () => {
     const service = createReceiptService();
-    const sandboxContext = sealFinancialContext({
-      providerEnvironment: 'sandbox',
-      paymentProfileId: 'qa-test-users-sandbox-durable',
-      paymentProfileSource: 'firestore',
-      testUserSandbox: true
-    });
-    const firebaseDb = {
-      ref: jest.fn(() => ({
-        once: jest.fn(async () => ({ val: () => null }))
-      }))
-    };
+    const store = withReceiptStore(service);
+    const readAnnotation = jest.spyOn(rideAnnotationStore, 'readAnnotation');
     const redis = {
       hget: jest.fn(async () => JSON.stringify({
         id: 'ride_cross_scope_cache',
@@ -389,200 +377,46 @@ describe('ReceiptService financial snapshot', () => {
     await expect(service.getReceiptByRideId(
       'ride_cross_scope_cache',
       redis,
-      firebaseDb,
-      sandboxContext
+      sandboxFinancialContext()
     )).rejects.toMatchObject({
       code: 'SANDBOX_RECORD_CONTEXT_INVALID'
     });
-    expect(firebaseDb.ref).toHaveBeenCalledWith('sandbox_receipts/ride_cross_scope_cache');
-    expect(firebaseDb.ref).not.toHaveBeenCalledWith('receipts/ride_cross_scope_cache');
-    expect(firebaseDb.ref).not.toHaveBeenCalledWith('bookings/ride_cross_scope_cache');
+    expect(store.getByRideId.mock.calls[0][1].collections.receipts).toBe('sandbox_receipts');
+    expect(readAnnotation).not.toHaveBeenCalled();
   });
 
-  it('lists only persisted passenger receipts from the resolved sandbox namespace', async () => {
+  it('lists persisted receipts from the resolved sandbox namespace and owner role', async () => {
     const service = createReceiptService();
-    const sandboxContext = sealFinancialContext({
-      providerEnvironment: 'sandbox',
-      paymentProfileId: 'qa-test-users-sandbox-durable',
-      paymentProfileSource: 'firestore',
-      testUserSandbox: true
-    });
-    const operationalContext = sealFinancialContext({
-      providerEnvironment: 'production',
-      paymentProfileId: 'env-default',
-      paymentProfileSource: 'env'
-    });
-    const differentSandboxContext = sealFinancialContext({
-      providerEnvironment: 'sandbox',
-      paymentProfileId: 'another-sandbox-profile',
-      paymentProfileSource: 'firestore',
-      testUserSandbox: true
-    });
-    const orderByChild = jest.fn();
-    const equalTo = jest.fn();
-    const once = jest.fn(async () => ({
-      val: () => ({
-        ride_newer: {
-          receiptId: 'LEAF-ride_newer',
-          rideId: 'ride_newer',
-          customer: { id: 'passenger_1' },
-          driver: { id: 'driver_1' },
-          trip: { dateTime: '2026-07-12T12:00:00.000Z' },
-          financialContext: sandboxContext
-        },
-        ride_older: {
-          receiptId: 'LEAF-ride_older',
-          rideId: 'ride_older',
-          customer: { id: 'passenger_1' },
-          driver: { id: 'driver_1' },
-          trip: { dateTime: '2026-07-11T12:00:00.000Z' },
-          financialContext: sandboxContext
-        },
-        ride_wrong_owner: {
-          receiptId: 'LEAF-ride_wrong_owner',
-          rideId: 'ride_wrong_owner',
-          customer: { id: 'passenger_2' },
-          trip: { dateTime: '2026-07-13T12:00:00.000Z' },
-          financialContext: sandboxContext
-        },
-        ride_crossed_namespace: {
-          receiptId: 'LEAF-ride_crossed_namespace',
-          rideId: 'ride_crossed_namespace',
-          customer: { id: 'passenger_1' },
-          trip: { dateTime: '2026-07-14T12:00:00.000Z' },
-          financialContext: operationalContext
-        },
-        ride_crossed_sandbox_context: {
-          receiptId: 'LEAF-ride_crossed_sandbox_context',
-          rideId: 'ride_crossed_sandbox_context',
-          customer: { id: 'passenger_1' },
-          trip: { dateTime: '2026-07-15T12:00:00.000Z' },
-          financialContext: differentSandboxContext
-        }
-      })
-    }));
-    equalTo.mockReturnValue({ limitToLast: jest.fn(() => ({ once })) });
-    orderByChild.mockReturnValue({ equalTo });
-    const firebaseDb = {
-      ref: jest.fn(() => ({ orderByChild }))
-    };
+    const store = withReceiptStore(service);
+    const sandboxContext = sandboxFinancialContext();
 
-    const result = await service.listStoredReceiptsByUser({
-      firebaseDb,
+    await service.listStoredReceiptsByUser({
       userId: 'passenger_1',
       role: 'customer',
       financialContext: sandboxContext,
       limit: 1,
       offset: 1
     });
-
-    expect(firebaseDb.ref).toHaveBeenCalledTimes(1);
-    expect(firebaseDb.ref).toHaveBeenCalledWith('sandbox_receipts');
-    expect(firebaseDb.ref).not.toHaveBeenCalledWith('receipts');
-    expect(firebaseDb.ref).not.toHaveBeenCalledWith('bookings');
-    expect(orderByChild).toHaveBeenCalledWith('customer/id');
-    expect(equalTo).toHaveBeenCalledWith('passenger_1');
-    expect(result).toMatchObject({
-      total: 2,
-      limit: 1,
-      offset: 1,
-      nextOffset: 2,
-      hasMore: false,
-      financialNamespace: 'sandbox'
-    });
-    expect(result.receipts.map((receipt) => receipt.rideId)).toEqual(['ride_older']);
-  });
-
-  it('serves the newest legacy receipts when a driver passes the legacy window', async () => {
-    const service = createReceiptService();
-    const sandboxContext = sealFinancialContext({
-      providerEnvironment: 'sandbox',
-      paymentProfileId: 'qa-test-users-sandbox-durable',
-      paymentProfileSource: 'firestore',
-      testUserSandbox: true
-    });
-    const base = Date.UTC(2026, 9, 1);
-    const window = {};
-    // limitToLast(201) returns the newest 201 keys of a longer history.
-    for (let index = 0; index < 201; index += 1) {
-      const at = base + index * 60000;
-      window[`booking_${at}_passenger`] = {
-        receiptId: `LEAF-${index}`,
-        rideId: `booking_${at}_passenger`,
-        driver: { id: 'driver_1' },
-        trip: { dateTime: new Date(at).toISOString() },
-        financialContext: sandboxContext
-      };
-    }
-    const limitToLast = jest.fn(() => ({ once: async () => ({ val: () => window }) }));
-    const firebaseDb = { ref: jest.fn(() => ({ orderByChild: () => ({ equalTo: () => ({ limitToLast }) }) })) };
-
-    const first = await service.listStoredReceiptsByUser({
-      firebaseDb, userId: 'driver_1', role: 'driver', financialContext: sandboxContext, limit: 10
-    });
-    expect(limitToLast).toHaveBeenCalledWith(201);
-    expect(first.receipts[0].receiptId).toBe('LEAF-200');
-    expect(first).toMatchObject({ total: null, hasMore: true, historyWindow: 'recent' });
-
-    const last = await service.listStoredReceiptsByUser({
-      firebaseDb, userId: 'driver_1', role: 'driver', financialContext: sandboxContext, limit: 10, offset: 190
-    });
-    expect(last.receipts.map((receipt) => receipt.receiptId).at(-1)).toBe('LEAF-1');
-    expect(last.hasMore).toBe(false);
-
-    await expect(service.listStoredReceiptsByUser({
-      firebaseDb, userId: 'driver_1', role: 'driver', financialContext: sandboxContext, offset: 200
-    })).rejects.toMatchObject({ statusCode: 503, code: 'RECEIPT_HISTORY_MIGRATION_REQUIRED' });
-  });
-
-  it('scopes persisted receipt listing by driver owner path', async () => {
-    const service = createReceiptService();
-    const sandboxContext = sealFinancialContext({
-      providerEnvironment: 'sandbox',
-      paymentProfileId: 'qa-test-users-sandbox-durable',
-      paymentProfileSource: 'firestore',
-      testUserSandbox: true
-    });
-    const once = jest.fn(async () => ({
-      val: () => ({
-        ride_driver: {
-          receiptId: 'LEAF-ride_driver',
-          rideId: 'ride_driver',
-          customer: { id: 'passenger_1' },
-          driver: { id: 'driver_1' },
-          trip: { dateTime: '2026-07-12T12:00:00.000Z' },
-          financialContext: sandboxContext
-        }
-      })
-    }));
-    const equalTo = jest.fn(() => ({ limitToLast: () => ({ once }) }));
-    const orderByChild = jest.fn(() => ({ equalTo }));
-    const firebaseDb = { ref: jest.fn(() => ({ orderByChild })) };
-
-    const result = await service.listStoredReceiptsByUser({
-      firebaseDb,
+    await service.listStoredReceiptsByUser({
       userId: 'driver_1',
       role: 'driver',
       financialContext: sandboxContext
     });
 
-    expect(orderByChild).toHaveBeenCalledWith('driver/id');
-    expect(equalTo).toHaveBeenCalledWith('driver_1');
-    expect(result.receipts.map((receipt) => receipt.rideId)).toEqual(['ride_driver']);
+    const [customerCall, driverCall] = store.listPage.mock.calls.map(([, query]) => query);
+    expect(customerCall).toMatchObject({ role: 'customer', userId: 'passenger_1', limit: 1, offset: 1 });
+    expect(customerCall.scope).toMatchObject({ namespace: 'sandbox', financialContextId: sandboxContext.contextId });
+    expect(customerCall.scope.collections.receipts).toBe('sandbox_receipts');
+    expect(driverCall).toMatchObject({ role: 'driver', userId: 'driver_1', limit: 10, offset: 0 });
+    expect(customerCall.ownerOf({ customer: { id: 'passenger_1' } }, 'customer')).toBe('passenger_1');
   });
 
   it('fails generation with a typed persistence error when the receipt write fails', async () => {
     const service = createReceiptService();
-    const firebaseDb = {
-      ref: jest.fn(() => ({
-        set: jest.fn(async () => {
-          throw new Error('RTDB write unavailable');
-        })
-      }))
-    };
+    withReceiptStore(service, { writeError: new Error('Firestore write unavailable') });
 
     await expect(
-      service.generateAndSaveReceipt('ride_persist_failure', finalRideData, firebaseDb)
+      service.generateAndSaveReceipt('ride_persist_failure', finalRideData)
     ).rejects.toMatchObject({
       name: 'ReceiptPersistenceError',
       code: 'RECEIPT_PERSIST_FAILED',
@@ -596,21 +430,16 @@ describe('ReceiptService financial snapshot', () => {
 
   it('returns null instead of throwing when neither stored receipt nor active booking exists', async () => {
     const service = createReceiptService();
-    const firebaseDb = {
-      ref: jest.fn(() => ({
-        once: jest.fn(async () => ({
-          val: () => null,
-        })),
-      })),
-    };
+    const store = withReceiptStore(service);
+    const readAnnotation = jest.spyOn(rideAnnotationStore, 'readAnnotation').mockResolvedValue(null);
+    jest.spyOn(rideAnnotationStore, 'resolveFirestore').mockReturnValue({});
     const redis = {
       hget: jest.fn(async () => null),
     };
 
-    await expect(service.getReceiptByRideId('ride_missing', redis, firebaseDb)).resolves.toBeNull();
-    expect(firebaseDb.ref).toHaveBeenCalledWith('receipts/ride_missing');
-    // The ride annotation is native Firestore now; never read through the RTDB client.
-    expect(firebaseDb.ref).not.toHaveBeenCalledWith('bookings/ride_missing');
+    await expect(service.getReceiptByRideId('ride_missing', redis)).resolves.toBeNull();
+    expect(store.getByRideId).toHaveBeenCalledTimes(1);
+    expect(readAnnotation).toHaveBeenCalledWith({}, 'bookings', 'ride_missing');
   });
 
   it('uses passenger and driver ids as receipt owners when legacy customer/driver fields are absent', async () => {

@@ -144,17 +144,16 @@ describe('receipts routes auth', () => {
     expect(response.body).toMatchObject({ success: true, receipt });
   });
 
-  it('falls back to Realtime Database when app locals do not expose firebaseDb', async () => {
+  it('reads the receipt without any Realtime Database client', async () => {
     const response = await request(createApp())
       .get('/api/receipts/ride_1')
       .set('Authorization', 'Bearer passenger_1');
 
     expect(response.status).toBe(200);
-    expect(mockGetRealtimeDB).toHaveBeenCalled();
+    expect(mockGetRealtimeDB).not.toHaveBeenCalled();
     expect(mockGetReceiptByRideId).toHaveBeenCalledWith(
       'ride_1',
       undefined,
-      mockRealtimeDb,
       expect.objectContaining({
         namespace: 'operational',
         providerEnvironment: 'production'
@@ -178,7 +177,6 @@ describe('receipts routes auth', () => {
     expect(mockGetReceiptByRideId).toHaveBeenCalledWith(
       'ride_1',
       undefined,
-      mockRealtimeDb,
       expect.objectContaining({
         namespace: 'sandbox',
         providerEnvironment: 'sandbox',
@@ -315,7 +313,6 @@ describe('receipts routes auth', () => {
       uid: 'passenger_1'
     }));
     expect(mockListStoredReceiptsByUser).toHaveBeenCalledWith(expect.objectContaining({
-      firebaseDb: mockRealtimeDb,
       userId: 'passenger_1',
       role: 'customer',
       limit: 1,

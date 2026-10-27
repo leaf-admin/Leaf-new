@@ -253,8 +253,7 @@ describe('register-socket-complete-trip-handler receipt generation', () => {
         authoritativeSnapshot: true,
         financialSnapshotSource: 'backend_final',
         financialSnapshot
-      }),
-      mockFirebaseDb
+      })
     );
   });
 
@@ -419,8 +418,7 @@ describe('register-socket-complete-trip-handler receipt generation', () => {
           completionType: 'EARLY_ENDED_BY_DRIVER',
           settlement,
           status: 'COMPLETED'
-        }),
-        mockFirebaseDb
+        })
       );
     });
 

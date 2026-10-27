@@ -1,14 +1,12 @@
 'use strict';
 
-// Firestore store for persisted receipts (RTDB exit). The receipt body is kept
-// exactly as in RTDB; query fields live under `historyIndex` and are stripped
-// on read, so API responses keep the same shape after the switch.
+// Firestore store for persisted receipts, the only receipt store (RTDB
+// retired). The receipt body keeps its original shape; query fields live under
+// `historyIndex` and are stripped on read.
 const admin = require('firebase-admin');
 
 const MAX_DOCUMENT_BYTES = 900 * 1024; // Firestore limit is 1 MiB per document.
 const MAX_LEGACY_OFFSET = 200;
-const enabledWrites = () => process.env.ENABLE_RECEIPT_FIRESTORE_WRITES === 'true';
-const enabledReads = () => enabledWrites() && process.env.ENABLE_RECEIPT_FIRESTORE_READS === 'true';
 
 function fail(code, message, statusCode = 409) {
   return Object.assign(new Error(message), { code, statusCode });
@@ -63,11 +61,6 @@ async function write(firestore, receiptData, scope, options) {
     tx.set(ref, document);
   });
   return { mirrored: true, rideId };
-}
-
-async function mirror(firestore, receiptData, scope, options) {
-  if (!enabledWrites()) return { mirrored: false, reason: 'disabled' };
-  return write(firestore, receiptData, scope, options);
 }
 
 async function getByRideId(firestore, scope, rideId) {
@@ -125,6 +118,6 @@ async function listPage(firestore, { scope, role, userId, limit, offset = 0, cur
 }
 
 module.exports = {
-  enabledWrites, enabledReads, buildDocument, readBody, write, mirror, getByRideId, listPage,
+  buildDocument, readBody, write, getByRideId, listPage,
   encodeCursor, decodeCursor, MAX_DOCUMENT_BYTES, MAX_LEGACY_OFFSET
 };
