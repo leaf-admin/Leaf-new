@@ -53,12 +53,11 @@ router.get('/api/subscriptions/drivers', authenticateJWT, requireRole(DASHBOARD_
     }
 
     const db = firebaseConfig.getRealtimeDB();
-    const [usersSnapshot, subscriptionsSnapshot] = await Promise.all([
-      db.ref('users').orderByChild('usertype').equalTo('driver').once('value'),
+    const [users, subscriptionsSnapshot] = await Promise.all([
+      userStore.queryUsers(firebaseConfig.getFirestore(), 'usertype', 'driver'),
       db.ref('subscriptions').once('value')
     ]);
 
-    const users = usersSnapshot.val() || {};
     const subscriptionsData = subscriptionsSnapshot.val() || {};
     const now = new Date();
 

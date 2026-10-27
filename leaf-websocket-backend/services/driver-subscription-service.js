@@ -183,17 +183,18 @@ class DriverSubscriptionService {
   async syncAllDriverSubscriptions({ db } = {}) {
     const realtimeDb = db || getRealtimeDB();
     const firestore = getFirestore();
-    const [usersSnapshot, usersAltSnapshot, rawSubscriptionsSnapshot, subscriptionsSnapshot, existingReadModelSnapshot] = await Promise.all([
-      realtimeDb.ref('users').orderByChild('usertype').equalTo('driver').once('value'),
-      realtimeDb.ref('users').orderByChild('userType').equalTo('driver').once('value').catch(() => null),
+    const userStore = require('./user-store');
+    const [drivers, driversAlt, rawSubscriptionsSnapshot, subscriptionsSnapshot, existingReadModelSnapshot] = await Promise.all([
+      userStore.queryUsers(firestore, 'usertype', 'driver'),
+      userStore.queryUsers(firestore, 'userType', 'driver').catch(() => null),
       firestore.collection(RAW_COLLECTION).get().catch(() => null),
       realtimeDb.ref('subscriptions').once('value'),
       firestore.collection(COLLECTION).get().catch(() => null)
     ]);
 
     const users = {
-      ...(usersSnapshot?.val() || {}),
-      ...(usersAltSnapshot?.val() || {})
+      ...(drivers || {}),
+      ...(driversAlt || {})
     };
     const rawSubscriptions = rawSubscriptionsSnapshot
       ? Object.fromEntries(rawSubscriptionsSnapshot.docs.map((doc) => [doc.id, doc.data() || {}]))

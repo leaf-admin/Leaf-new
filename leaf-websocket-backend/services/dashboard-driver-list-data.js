@@ -18,8 +18,10 @@ function boundedValue(snapshot, limit, label) {
 // The legacy RTDB `cars` root never existed here and RTDB `bookings` never held
 // rides (only annotations without a driver), so per-driver car and trip stats
 // were always empty; they are no longer read.
-async function readLegacy(db) {
-  const users = boundedValue(await db.ref('users').orderByChild('usertype').equalTo('driver').limitToFirst(201).once('value'), 200, 'motoristas');
+async function readLegacy(firestore) {
+  if (!firestore) throw error('DASHBOARD_LEGACY_UNAVAILABLE', 'Listagem temporariamente indisponível');
+  const drivers = await require('./user-store').queryUsers(firestore, 'usertype', 'driver', { limit: 201 });
+  const users = boundedValue({ val: () => drivers }, 200, 'motoristas');
   return { users, carsByDriver: new Map(), statsByDriver: new Map(), mode: 'legacy-bounded' };
 }
 
@@ -40,7 +42,7 @@ async function readPage({ db, firestore: providedFirestore, getFirestore, params
     if (params.cursor) throw error('DASHBOARD_CURSOR_REFRESH', 'Atualize os filtros para continuar', 409);
     // Legacy substring/derived subscription filters remain exact only in their
     // controlled dataset; never scan a large database to emulate them.
-    return readLegacy(db);
+    return readLegacy(providedFirestore || getFirestore?.());
   }
   const firestore = providedFirestore || getFirestore?.();
   if (!firestore) throw error('DASHBOARD_CURSOR_UNAVAILABLE', 'Listagem temporariamente indisponível');

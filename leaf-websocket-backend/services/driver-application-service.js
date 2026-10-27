@@ -726,13 +726,12 @@ class DriverApplicationService {
 
   async syncAllDriverApplications({ db = null } = {}) {
     const realtimeDb = db || this.getRealtimeDb();
-    const [usersSnapshot, userVehiclesSnapshot, vehiclesSnapshot] = await Promise.all([
-      realtimeDb.ref('users').orderByChild('usertype').equalTo('driver').once('value'),
+    const [users, userVehiclesSnapshot, vehiclesSnapshot] = await Promise.all([
+      require('./user-store').queryUsers(this.getFirestore(), 'usertype', 'driver'),
       realtimeDb.ref('user_vehicles').once('value'),
       realtimeDb.ref('vehicles').once('value')
     ]);
 
-    const users = usersSnapshot.val() || {};
     const allUserVehicles = userVehiclesSnapshot.val() || {};
     const allVehicles = vehiclesSnapshot.val() || {};
 

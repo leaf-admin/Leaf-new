@@ -293,30 +293,23 @@ describe('driver activation routes document upload storage boundary', () => {
       exists: false,
       data: () => null
     });
-    mockUserOnce.mockResolvedValueOnce({
-      val: () => null
-    });
-
     const response = await uploadCrlv();
 
     expect(response.status).toBe(202);
-    expect(mockUserOnce).toHaveBeenCalledTimes(1);
+    expect(mockUserOnce).not.toHaveBeenCalled();
     expect(mockQueueEnqueue).toHaveBeenCalledTimes(1);
   });
 
-  it('does not authorize a driver role that exists only in the legacy RTDB profile', async () => {
+  it('does not authorize a driver without the canonical profile or claim', async () => {
     mockFirestoreUserGet.mockResolvedValueOnce({
       exists: false,
       data: () => null
-    });
-    mockUserOnce.mockResolvedValueOnce({
-      val: () => ({ usertype: 'driver' })
     });
 
     const response = await uploadCrlv();
 
     expect(response.status).toBe(403);
-    expect(mockUserOnce).toHaveBeenCalledTimes(1);
+    expect(mockUserOnce).not.toHaveBeenCalled();
     expect(mockStorageFileSave).not.toHaveBeenCalled();
     expect(mockQueueEnqueue).not.toHaveBeenCalled();
   });

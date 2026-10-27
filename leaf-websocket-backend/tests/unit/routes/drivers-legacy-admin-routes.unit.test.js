@@ -127,6 +127,10 @@ function buildFirestore(collections = {}, { failDocumentIdFilterWith = null, fai
     where: jest.fn((field, op, value) => buildQuery(collectionName, [...filters, { field, op, value }], log)),
     doc: jest.fn((docId) => ({
       path: `${collectionName}/${docId}`,
+      get: jest.fn(async () => {
+        const data = (collections[collectionName] || {})[docId];
+        return { id: docId, exists: data !== undefined, data: () => data };
+      }),
       collection: jest.fn((subcollectionName) =>
         buildQuery(`${collectionName}/${docId}/${subcollectionName}`, [], subcollectionQueries))
     })),
@@ -181,9 +185,6 @@ function mockRealtimeDb({
       if (path === 'cars') {
         return buildSnapshot(cars);
       }
-      if (path.startsWith('users/')) {
-        return buildSnapshot(users[path.slice('users/'.length)]);
-      }
       return buildSnapshot(null);
     }),
     orderByChild: jest.fn((child) => ({
@@ -208,7 +209,7 @@ function mockRealtimeDb({
     { ...booking, driverId: booking.driver }
   ]));
   const firestore = buildFirestore(
-    { rides: { ...asRides, ...rides }, sandbox_rides: sandboxRides, ...firestoreCollections },
+    { users, rides: { ...asRides, ...rides }, sandbox_rides: sandboxRides, ...firestoreCollections },
     firestoreOptions
   );
   firebaseConfig.getFirestore.mockReturnValue(firestore);

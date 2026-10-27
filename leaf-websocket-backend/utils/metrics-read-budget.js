@@ -41,6 +41,13 @@ table.insert(rows, 1, 1)
 return rows
 `;
 
+// read(limit) -> { id: record }; one over the budget fails like realtimeSnapshot.
+async function recordsSnapshot(read, limit = 2000) {
+  const value = (await admit(() => read(limit + 1))) || {};
+  assertPayload(value, Object.keys(value).length, limit);
+  return value;
+}
+
 async function activeRideHash(redis) {
   const [allowed, ...rows] = await redis.eval(ACTIVE_HASH, 1, 'bookings:active');
   if (Number(allowed) !== 1) throw unavailable();
@@ -49,4 +56,4 @@ async function activeRideHash(redis) {
   return result;
 }
 
-module.exports = { unavailable, assertPayload, firestoreSnapshot, realtimeSnapshot, admit, activeRideHash, ACTIVE_HASH };
+module.exports = { unavailable, assertPayload, firestoreSnapshot, realtimeSnapshot, recordsSnapshot, admit, activeRideHash, ACTIVE_HASH };

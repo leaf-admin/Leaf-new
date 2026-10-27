@@ -2,6 +2,7 @@
 // Custos, monitoramento e crescimento
 
 const {
+  userStore,
   DASHBOARD_MONITORING_ROLES,
   analyzeDriverGrowth,
   analyzeRevenueGrowth,
@@ -689,12 +690,11 @@ router.get('/api/analytics/growth', async (req, res) => {
         }
 
         // Buscar dados
-        const [usersSnapshot, bookingsSnapshot] = await Promise.all([
-          db.ref('users').once('value'),
+        const [users, bookingsSnapshot] = await Promise.all([
+          userStore.listUsers(firebaseConfig.getFirestore()),
           db.ref('bookings').once('value')
         ]);
 
-        const users = usersSnapshot.val() || {};
         const bookings = bookingsSnapshot.val() || {};
 
         // Análise de crescimento de usuários
@@ -791,12 +791,11 @@ router.get('/api/analytics/growth/insights', async (req, res) => {
             break;
         }
 
-        const [usersSnapshot, bookingsSnapshot] = await Promise.all([
-          db.ref('users').once('value'),
+        const [users, bookingsSnapshot] = await Promise.all([
+          userStore.listUsers(firebaseConfig.getFirestore()),
           db.ref('bookings').once('value')
         ]);
 
-        const users = usersSnapshot.val() || {};
         const bookings = bookingsSnapshot.val() || {};
 
         // Análise de insights
@@ -835,12 +834,11 @@ router.get('/api/analytics/growth/cohorts', async (req, res) => {
       if (firebaseConfig && firebaseConfig.getRealtimeDB) {
         const db = firebaseConfig.getRealtimeDB();
 
-        const [usersSnapshot, bookingsSnapshot] = await Promise.all([
-          db.ref('users').once('value'),
+        const [users, bookingsSnapshot] = await Promise.all([
+          userStore.listUsers(firebaseConfig.getFirestore()),
           db.ref('bookings').once('value')
         ]);
 
-        const users = usersSnapshot.val() || {};
         const bookings = bookingsSnapshot.val() || {};
 
         cohortAnalysis = generateCohortAnalysis(users, bookings, cohortType, metric);

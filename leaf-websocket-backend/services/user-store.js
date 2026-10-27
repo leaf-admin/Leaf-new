@@ -110,6 +110,30 @@ async function transactUser(firestore, uid, updater) {
   });
 }
 
+// { uid: record } for every user (bounded by `limit` when given), in the view
+// readUser returns. For whole-collection reads the RTDB API used to serve.
+async function listUsers(firestore, { limit } = {}) {
+  let query = requireFirestore(firestore, { write: false }).collection(COLLECTION);
+  if (Number.isInteger(limit)) query = query.limit(limit);
+  return viewsOf(await query.get());
+}
+
+// { uid: record } whose top-level `field` equals `value` (single-field index).
+async function queryUsers(firestore, field, value, { limit } = {}) {
+  let query = requireFirestore(firestore, { write: false }).collection(COLLECTION).where(field, '==', value);
+  if (Number.isInteger(limit)) query = query.limit(limit);
+  return viewsOf(await query.get());
+}
+
+function viewsOf(snapshot) {
+  const result = {};
+  for (const doc of snapshot?.docs || []) {
+    const view = docView(doc.data());
+    if (view !== null) result[doc.id] = view;
+  }
+  return result;
+}
+
 // Create users/{uid} with `profile` only when the record does not exist yet
 // (account creation). An existing record is never replaced. Returns
 // { created, value } with the stored record.
@@ -130,6 +154,8 @@ async function createUserIfMissing(firestore, uid, profile) {
 module.exports = {
   COLLECTION,
   createUserIfMissing,
+  listUsers,
+  queryUsers,
   resolveFirestore,
   readUser,
   readUserField,
