@@ -2014,7 +2014,8 @@ async function monitorRedisService() {
 
 async function monitorFirebaseService() {
   try {
-    if (!firebaseConfig || !firebaseConfig.getRealtimeDB) {
+    // Cliente Firestore inicializado (sem leitura paga a cada consulta).
+    if (!firebaseConfig?.getFirestore?.()) {
       return {
         name: 'Firebase',
         status: 'unavailable',
@@ -2023,17 +2024,10 @@ async function monitorFirebaseService() {
       };
     }
 
-    const db = firebaseConfig.getRealtimeDB();
-    const startTime = Date.now();
-
-    // Teste de conexão simples
-    await db.ref('.info/connected').once('value');
-    const responseTime = Date.now() - startTime;
-
     return {
-      name: 'Firebase Realtime Database',
+      name: 'Firebase Firestore',
       status: 'healthy',
-      responseTime: responseTime + 'ms',
+      responseTime: '0ms',
       region: 'us-central1',
       lastCheck: new Date().toISOString()
     };

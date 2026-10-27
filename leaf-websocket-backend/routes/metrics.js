@@ -1,5 +1,5 @@
 const readBudget = require('../utils/metrics-read-budget');
-const { toView } = require('../services/rtdb-root-router');
+const { toView } = require('../services/native-record-view');
 const userStore = require('../services/user-store');
 const express = require('express');
 const admin = require('firebase-admin');

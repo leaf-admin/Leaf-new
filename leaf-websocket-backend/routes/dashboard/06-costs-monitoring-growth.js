@@ -53,7 +53,7 @@ router.get('/api/costs/per-trip', async (req, res) => {
     };
 
     try {
-      if (firebaseConfig && firebaseConfig.getRealtimeDB) {
+      if (firebaseConfig && firebaseConfig.getFirestore) {
 
         // Calcular período
         const now = new Date();
@@ -236,7 +236,7 @@ router.get('/api/costs/insights', async (req, res) => {
     };
 
     try {
-      if (firebaseConfig && firebaseConfig.getRealtimeDB) {
+      if (firebaseConfig && firebaseConfig.getFirestore) {
 
         // Buscar dados históricos para análise de tendências
         const now = new Date();
@@ -488,13 +488,11 @@ router.get('/api/monitoring/health', authenticateJWT, requireRole(DASHBOARD_MONI
 
     // Firebase health check
     try {
-      if (firebaseConfig && firebaseConfig.getRealtimeDB) {
-        const db = firebaseConfig.getRealtimeDB();
-        const startTime = Date.now();
-        await db.ref('.info/connected').once('value');
+      // Cliente Firestore inicializado (sem leitura paga a cada consulta).
+      if (firebaseConfig?.getFirestore?.()) {
         healthChecks.checks.firebase = {
           status: 'healthy',
-          responseTime: Date.now() - startTime + 'ms'
+          responseTime: '0ms'
         };
       } else {
         healthChecks.checks.firebase = { status: 'unavailable' };
@@ -661,7 +659,7 @@ router.get('/api/analytics/growth', async (req, res) => {
     };
 
     try {
-      if (firebaseConfig && firebaseConfig.getRealtimeDB) {
+      if (firebaseConfig && firebaseConfig.getFirestore) {
 
         // Calcular períodos
         const now = new Date();
@@ -771,7 +769,7 @@ router.get('/api/analytics/growth/insights', async (req, res) => {
     };
 
     try {
-      if (firebaseConfig && firebaseConfig.getRealtimeDB) {
+      if (firebaseConfig && firebaseConfig.getFirestore) {
 
         const now = new Date();
         let startDate = new Date();
@@ -828,7 +826,7 @@ router.get('/api/analytics/growth/cohorts', async (req, res) => {
     };
 
     try {
-      if (firebaseConfig && firebaseConfig.getRealtimeDB) {
+      if (firebaseConfig && firebaseConfig.getFirestore) {
 
         const [users, bookingRecords] = await Promise.all([
           userStore.listUsers(firebaseConfig.getFirestore()),

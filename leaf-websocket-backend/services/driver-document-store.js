@@ -18,7 +18,7 @@
 // Writes replace exactly the given field paths (RTDB `set` semantics at that
 // path) inside one transaction; null or an empty object deletes the field.
 const { FieldPath, FieldValue } = require('@google-cloud/firestore');
-const { docView, fromView, getIn, normalize, setIn } = require('./rtdb-root-router');
+const { docView, fromView, getIn, normalize, setIn } = require('./native-record-view');
 
 const COLLECTIONS = Object.freeze({
   activation: 'driver_activation',

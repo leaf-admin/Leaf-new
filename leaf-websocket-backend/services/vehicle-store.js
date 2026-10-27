@@ -11,7 +11,7 @@
 // commitUpdates takes the RTDB multi-root update the callers already build
 // ({ 'vehicles/<id>/a': v, 'user_vehicles/<driver>/<link>': v, 'users/<id>/f': v })
 // and applies it in one transaction; null deletes.
-const { docView } = require('./rtdb-root-router');
+const { docView } = require('./native-record-view');
 const driverDocumentStore = require('./driver-document-store');
 
 const { COLLECTIONS } = driverDocumentStore;

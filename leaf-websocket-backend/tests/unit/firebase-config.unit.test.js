@@ -1,4 +1,4 @@
-describe('firebase-config legacy metrics', () => {
+describe('firebase-config', () => {
   const credentialEnvKeys = [
     'FIREBASE_SERVICE_ACCOUNT_JSON',
     'GOOGLE_APPLICATION_CREDENTIALS_JSON',
@@ -23,7 +23,7 @@ describe('firebase-config legacy metrics', () => {
     serviceAccountJson,
     googleCredentialsJson,
     googleCredentialsPath,
-    databaseFailures = 0,
+    storageFailures = 0,
     credentialFileContent = JSON.stringify({
       project_id: 'leaf-app',
       client_email: 'firebase-admin@leaf-app.iam.gserviceaccount.com',
@@ -75,22 +75,15 @@ describe('firebase-config legacy metrics', () => {
     const storageInstance = {};
     const firebaseAppInstance = {};
     const realtimeDatabaseInstance = { ref: refMock };
-    let remainingDatabaseFailures = databaseFailures;
+    let remainingStorageFailures = storageFailures;
 
     const firestoreFn = jest.fn(() => firestoreInstance);
     firestoreFn.FieldValue = {
       serverTimestamp: jest.fn(() => 'server-ts')
     };
 
-    const databaseFn = jest.fn(() => {
-      if (remainingDatabaseFailures > 0) {
-        remainingDatabaseFailures -= 1;
-        const error = new Error("Cannot find module '@firebase/app'");
-        error.code = 'MODULE_NOT_FOUND';
-        throw error;
-      }
-      return realtimeDatabaseInstance;
-    });
+    // The Realtime Database is retired: the module must never open it.
+    const databaseFn = jest.fn(() => realtimeDatabaseInstance);
     databaseFn.ServerValue = {
       TIMESTAMP: 'server-ts'
     };
@@ -107,7 +100,13 @@ describe('firebase-config legacy metrics', () => {
       },
       firestore: firestoreFn,
       database: databaseFn,
-      storage: jest.fn(() => storageInstance)
+      storage: jest.fn(() => {
+        if (remainingStorageFailures > 0) {
+          remainingStorageFailures -= 1;
+          throw new Error('storage peer unavailable');
+        }
+        return storageInstance;
+      })
     };
     jest.doMock('firebase-admin', () => firebaseAdminMock);
 
@@ -199,136 +198,29 @@ describe('firebase-config legacy metrics', () => {
     );
   });
 
-  test('registra acesso bem-sucedido ao obter Realtime DB', () => {
-    const firebaseConfig = loadModule();
-
-    const db = firebaseConfig.getRealtimeDB();
-
-    expect(db).toBeTruthy();
-    expect(metricsMock.recordLegacyDependencyAccess).toHaveBeenCalledWith(expect.objectContaining({
-      dependency: 'realtime_db',
-      operation: 'get_instance',
-      result: 'success'
-    }));
-  });
-
   test('não publica clientes parciais e reaproveita o app ao repetir inicialização', () => {
-    const firebaseConfig = loadModule({ databaseFailures: 1 });
+    const firebaseConfig = loadModule({ storageFailures: 1 });
 
     expect(firebaseConfig.initializeFirebase()).toBeNull();
     expect(firebaseConfig.initializeFirebase()).toBeTruthy();
     expect(firebaseConfig.getFirestore()).toBeTruthy();
-    expect(firebaseConfig.getRealtimeDB()).toBeTruthy();
     expect(firebaseConfig.getStorage()).toBeTruthy();
 
     expect(firebaseAdminMock.initializeApp).toHaveBeenCalledTimes(1);
     expect(firebaseAdminMock.app).toHaveBeenCalledTimes(1);
     expect(firebaseAdminMock.firestore).toHaveBeenCalledTimes(2);
-    expect(firebaseAdminMock.database).toHaveBeenCalledTimes(2);
-    expect(firebaseAdminMock.storage).toHaveBeenCalledTimes(1);
-    expect(metricsMock.recordLegacyDependencyAccess).toHaveBeenCalledWith(expect.objectContaining({
-      dependency: 'realtime_db',
-      operation: 'initialize',
-      result: 'failure'
-    }));
-    expect(metricsMock.recordLegacyDependencyAccess).toHaveBeenCalledWith(expect.objectContaining({
-      dependency: 'realtime_db',
-      operation: 'initialize',
-      result: 'success'
-    }));
+    expect(firebaseAdminMock.storage).toHaveBeenCalledTimes(2);
   });
 
-  test('registra escrita bem-sucedida no Realtime DB', async () => {
+  test('nunca abre o Realtime Database nem expõe os helpers RTDB', () => {
     const firebaseConfig = loadModule();
-    firebaseConfig.getRealtimeDB();
 
-    const result = await firebaseConfig.setRealtimeDB('vehicles/test/status', { online: true });
-
-    expect(result).toBe(true);
-    expect(refMock).toHaveBeenCalledWith('vehicles/test/status');
-    expect(setMock).toHaveBeenCalled();
-    expect(metricsMock.recordLegacyDependencyAccess).toHaveBeenCalledWith(expect.objectContaining({
-      dependency: 'realtime_db',
-      operation: 'set',
-      result: 'success'
-    }));
-  });
-
-  test('registra leitura vazia quando snapshot não existe', async () => {
-    const firebaseConfig = loadModule({
-      snapshotExists: false,
-      snapshotValue: null
-    });
-    firebaseConfig.getRealtimeDB();
-
-    const result = await firebaseConfig.getFromRealtimeDB('drivers/test');
-
-    expect(result).toBeNull();
-    expect(onceMock).toHaveBeenCalledWith('value');
-    expect(metricsMock.recordLegacyDependencyAccess).toHaveBeenCalledWith(expect.objectContaining({
-      dependency: 'realtime_db',
-      operation: 'read',
-      result: 'empty'
-    }));
-  });
-
-  test('registra update bem-sucedido no Realtime DB', async () => {
-    const firebaseConfig = loadModule();
-    firebaseConfig.getRealtimeDB();
-
-    const result = await firebaseConfig.updateRealtimeDB('users/test-driver', {
-      kycStatus: 'approved'
-    });
-
-    expect(result).toBe(true);
-    expect(refMock).toHaveBeenCalledWith('users/test-driver');
-    expect(updateMock).toHaveBeenCalledWith({
-      kycStatus: 'approved'
-    });
-    expect(metricsMock.recordLegacyDependencyAccess).toHaveBeenCalledWith(expect.objectContaining({
-      dependency: 'realtime_db',
-      operation: 'update',
-      result: 'success'
-    }));
-  });
-
-  test('registra set bem-sucedido no Realtime DB', async () => {
-    const firebaseConfig = loadModule();
-    firebaseConfig.getRealtimeDB();
-
-    const result = await firebaseConfig.setRealtimeDB('operations/test', {
-      enabled: true
-    });
-
-    expect(result).toBe(true);
-    expect(refMock).toHaveBeenCalledWith('operations/test');
-    expect(setMock).toHaveBeenCalledWith({
-      enabled: true
-    });
-    expect(metricsMock.recordLegacyDependencyAccess).toHaveBeenCalledWith(expect.objectContaining({
-      dependency: 'realtime_db',
-      operation: 'set',
-      result: 'success'
-    }));
-  });
-
-  test('registra update raiz bem-sucedido no Realtime DB', async () => {
-    const firebaseConfig = loadModule();
-    firebaseConfig.getRealtimeDB();
-
-    const result = await firebaseConfig.updateRealtimeDBRoot({
-      'ratings/rating-1': { rating: 5 }
-    });
-
-    expect(result).toBe(true);
-    expect(refMock).toHaveBeenCalledWith();
-    expect(rootUpdateMock).toHaveBeenCalledWith({
-      'ratings/rating-1': { rating: 5 }
-    });
-    expect(metricsMock.recordLegacyDependencyAccess).toHaveBeenCalledWith(expect.objectContaining({
-      dependency: 'realtime_db',
-      operation: 'update_root',
-      result: 'success'
-    }));
+    expect(firebaseConfig.initializeFirebase()).toBeTruthy();
+    expect(firebaseAdminMock.database).not.toHaveBeenCalled();
+    expect(firebaseAdminMock.initializeApp).toHaveBeenCalledWith(expect.not.objectContaining({ databaseURL: expect.anything() }));
+    for (const legacy of ['getRealtimeDB', 'isRealtimeDBAvailable', 'getFromRealtimeDB', 'setRealtimeDB', 'updateRealtimeDB', 'updateRealtimeDBRoot']) {
+      expect(firebaseConfig[legacy]).toBeUndefined();
+    }
+    expect(metricsMock.recordLegacyDependencyAccess).not.toHaveBeenCalled();
   });
 });

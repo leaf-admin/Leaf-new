@@ -1,5 +1,7 @@
-jest.mock('../../../firebase-config', () => ({
-  getFromRealtimeDB: jest.fn()
+// The persistent fallback reads the ride annotation (native Firestore).
+jest.mock('../../../services/ride-annotation-store', () => ({
+  resolveFirestore: jest.fn(() => ({})),
+  readAnnotation: jest.fn()
 }));
 jest.mock('../../../services/sandbox-persistence-context', () => ({
   resolvePersistenceScope: jest.fn(() => ({
@@ -13,7 +15,7 @@ jest.mock('../../../services/sandbox-persistence-context', () => ({
   assertStoredRecordMatchesScope: jest.fn()
 }));
 
-const firebaseConfig = require('../../../firebase-config');
+const rideAnnotationStore = require('../../../services/ride-annotation-store');
 const {
   resolveUserPersistenceScope,
   assertStoredRecordMatchesScope
@@ -67,7 +69,7 @@ describe('socket-scope-guard', () => {
   });
 
   it('falls back to realtime booking data when memory and redis do not have the ride', async () => {
-    firebaseConfig.getFromRealtimeDB.mockResolvedValueOnce({
+    rideAnnotationStore.readAnnotation.mockResolvedValueOnce({
       customerId: 'passenger_1',
       driverId: 'driver_1',
       status: 'COMPLETED'
@@ -79,7 +81,7 @@ describe('socket-scope-guard', () => {
       bookingId: 'ride_2'
     });
 
-    expect(firebaseConfig.getFromRealtimeDB).toHaveBeenCalledWith('bookings/ride_2');
+    expect(rideAnnotationStore.readAnnotation).toHaveBeenCalledWith({}, 'bookings', 'ride_2');
     expect(result).toMatchObject({
       allowed: true,
       participantRole: 'driver',
@@ -96,8 +98,8 @@ describe('socket-scope-guard', () => {
       financialContext: { namespace: 'sandbox', contextId: 'ctx_sandbox' }
     };
     resolveUserPersistenceScope.mockResolvedValueOnce(sandboxScope);
-    firebaseConfig.getFromRealtimeDB.mockImplementation(async (path) => (
-      path === 'sandbox_bookings/ride_sandbox_terminal'
+    rideAnnotationStore.readAnnotation.mockImplementation(async (_firestore, root, id) => (
+      `${root}/${id}` === 'sandbox_bookings/ride_sandbox_terminal'
         ? {
           customerId: 'passenger_sandbox',
           driverId: 'driver_sandbox',
@@ -122,13 +124,8 @@ describe('socket-scope-guard', () => {
         persistenceScope: sandboxScope
       })
     });
-    expect(firebaseConfig.getFromRealtimeDB).toHaveBeenCalledTimes(1);
-    expect(firebaseConfig.getFromRealtimeDB).toHaveBeenCalledWith(
-      'sandbox_bookings/ride_sandbox_terminal'
-    );
-    expect(firebaseConfig.getFromRealtimeDB).not.toHaveBeenCalledWith(
-      'bookings/ride_sandbox_terminal'
-    );
+    expect(rideAnnotationStore.readAnnotation).toHaveBeenCalledTimes(1);
+    expect(rideAnnotationStore.readAnnotation).toHaveBeenCalledWith({}, 'sandbox_bookings', 'ride_sandbox_terminal');
     expect(assertStoredRecordMatchesScope).toHaveBeenCalledWith(
       expect.objectContaining({ status: 'COMPLETED' }),
       sandboxScope
@@ -168,7 +165,7 @@ describe('socket-scope-guard', () => {
       allowed: false,
       code: 'SANDBOX_RECORD_CONTEXT_INVALID'
     });
-    expect(firebaseConfig.getFromRealtimeDB).not.toHaveBeenCalled();
+    expect(rideAnnotationStore.readAnnotation).not.toHaveBeenCalled();
   });
 
   it('prefers a terminal persistent scope over stale in-memory scope when requested', async () => {

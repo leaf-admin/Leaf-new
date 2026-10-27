@@ -3,7 +3,6 @@
 const assert = require('node:assert/strict');
 const { performance } = require('node:perf_hooks');
 const withFirestore = require('./private-firestore.cjs');
-const withRealtime = require('./private-rtdb.cjs');
 const loadUsers = require('./isolated-dashboard-users.cjs');
 const { readPage, aggregateLegacy } = require('../../services/dashboard-driver-list-data');
 const { createHash } = require('node:crypto');
@@ -34,7 +33,7 @@ async function run() {
     cpuRows.push({ drivers, trips, before, after: { ms: performance.now() - start, driverFieldReads: touches } });
   }
   process.env.ENABLE_ADMIN_DRIVER_CURSOR_READS = 'true';
-  return withFirestore(async firestore => withRealtime(async db => {
+  return withFirestore(async firestore => {
     await firestore.collection('ops_read_models').doc('driver_directory_v1').set({ schema: 1, ready: true, createdAtStorage: 'iso' });
     const calls = [];
     const measuredFirestore = {
@@ -59,24 +58,11 @@ async function run() {
         calls.push({ store: 'firestore', records: result.length }); return result;
       }
     };
-    const measuredRealtime = { ref: path => {
-      assert.equal(path, 'cars', 'Cursor page cannot read global bookings/users/payments');
-      const wrap = query => new Proxy(query, { get(target, method) {
-        if (method === 'once') return async (...args) => {
-          const snapshot = await target.once(...args);
-          calls.push({ store: 'realtime', records: snapshot.numChildren() }); return snapshot;
-        };
-        if (['orderByChild', 'equalTo', 'limitToFirst'].includes(method)) return (...args) => wrap(target[method](...args));
-        return typeof target[method] === 'function' ? target[method].bind(target) : target[method];
-      } });
-      return wrap(db.ref(path));
-    } };
     const queryRows = [];
     let previous = 0;
     for (const count of [100, 1000, 10000]) {
       for (let start = previous; start < count; start += 100) {
         const batch = firestore.batch();
-        const cars = {};
         for (let i = start; i < Math.min(count, start + 100); i++) {
           const driverId = id(i);
           batch.set(firestore.collection('users').doc(driverId), {
@@ -86,27 +72,24 @@ async function run() {
           });
           batch.set(firestore.collection('ops_driver_stats_v1').doc(hash(driverId)), { schema: 1, complete: true,
             namespace: 'operational', source: 'ride_finalization_v1', driverId, completedTrips: 1, driverNetMinor: 2877 });
-          cars[`cars/car-${i}`] = { driver: driverId, carNumber: `SYN-${i}` };
         }
-        await batch.commit(); await db.ref().update(cars);
+        await batch.commit();
       }
       previous = count; calls.length = 0;
-      const page = await readPage({ db: measuredRealtime, firestore: measuredFirestore, params: { pagination: 'cursor', limit: 20 },
+      const page = await readPage({ firestore: measuredFirestore, params: { pagination: 'cursor', limit: 20 },
         resolveNet: () => { throw new Error('No history reduction in cursor page'); } });
       assert.equal(Object.keys(page.users).length, 20);
       assert.ok(Object.values(page.users).every(user => !user.unusedLargeField));
       assert.equal([...page.statsByDriver.values()][0].totalEarnings, 28.77);
       queryRows.push({ totalDrivers: count, page: 20, firestoreRecords: calls.filter(row => row.store === 'firestore').reduce((sum, row) => sum + row.records, 0),
-        realtimeRecords: calls.filter(row => row.store === 'realtime').reduce((sum, row) => sum + row.records, 0),
-        realtimeQueries: calls.filter(row => row.store === 'realtime').length, globalRideReads: 0 });
+        globalRideReads: 0 });
     }
     assert.deepEqual(queryRows.map(row => row.firestoreRecords), [42, 42, 42]);
-    assert.deepEqual(queryRows.map(row => row.realtimeRecords), [20, 20, 20]);
     const seen = new Set();
     let cursor;
     // Walk the same-timestamp boundary across several real indexed pages.
     for (let page = 0; page < 5; page++) {
-      const result = await readPage({ db: measuredRealtime, firestore: measuredFirestore,
+      const result = await readPage({ firestore: measuredFirestore,
         params: { pagination: 'cursor', limit: 20, cursor }, resolveNet: () => 0 });
       Object.keys(result.users).forEach(key => { assert.ok(!seen.has(key)); seen.add(key); });
       cursor = result.pagination.nextCursor;
@@ -130,11 +113,11 @@ async function run() {
     assert.equal(boundedCount.pagination.total, null);
     assert.equal(boundedCount.pagination.totalMode, 'bounded-unknown');
 
-    console.log(JSON.stringify({ environment: 'Private Firestore1.19.8 and RTDB4.11.2 emulators,256MiB heap each, loopback; no ADC or providers',
+    console.log(JSON.stringify({ environment: 'Private Firestore1.19.8 emulator, 256MiB heap, loopback; no ADC or providers',
       cpuRows, queryRows, checks: ['Equal-date cursor pages do not repeat drivers', 'Only requested profile fields returned', 'No global ride read in cursor mode', 'Primary user list uses scoped cursor and rejects deep offsets', 'Legacy aggregate total is unknown above10000 instead of counting an arbitrary database'],
       limitations: ['Legacy CPU is a local synthetic microbenchmark; largest baseline skipped to respect lab budget',
         'Emulator queries validate SDK/limits, not production composite indexes, billing, latency or host capacity',
         'Synthetic aggregate fixtures do not prove the finalization projection writer'] }, null, 2));
-  }));
+  });
 }
 run().catch(error => { console.error(error); process.exitCode = 1; });

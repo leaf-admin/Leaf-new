@@ -1,4 +1,4 @@
-const firebaseConfig = require('../firebase-config');
+const rideAnnotationStore = require('./ride-annotation-store');
 const {
   resolvePersistenceScope,
   resolveUserPersistenceScope,
@@ -277,9 +277,11 @@ async function resolveRideScope({
     return memoryScope;
   }
 
-  const fromRealtime = await firebaseConfig.getFromRealtimeDB?.(
-    `${persistenceScope.collections.bookings}/${safeBookingId}`
-  );
+  // Persistent fallback: the ride annotation (`bookings` root, native Firestore).
+  const annotationFirestore = rideAnnotationStore.resolveFirestore();
+  const fromRealtime = annotationFirestore
+    ? await rideAnnotationStore.readAnnotation(annotationFirestore, persistenceScope.collections.bookings, safeBookingId)
+    : null;
   if (fromRealtime) {
     if (!deferPersistenceBoundaryToCaller) {
       try {

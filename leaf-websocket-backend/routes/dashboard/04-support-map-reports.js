@@ -244,7 +244,7 @@ router.get('/api/reports/comprehensive', authenticateJWT, requireRole(DASHBOARD_
     let reportData = {};
 
     try {
-      if (firebaseConfig && firebaseConfig.getRealtimeDB) {
+      if (firebaseConfig && firebaseConfig.getFirestore) {
 
         // Calcular período
         const now = new Date();

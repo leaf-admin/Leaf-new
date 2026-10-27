@@ -3,7 +3,7 @@ const firebaseConfig = require('../firebase-config');
 const driverSubscriptionService = require('./driver-subscription-service');
 const { logStructured } = require('../utils/logger');
 const userStore = require('./user-store');
-const { docView } = require('./rtdb-root-router');
+const { docView } = require('./native-record-view');
 
 const COLLECTION = 'subscriptions';
 const GATE_CACHE_PREFIX = 'subscription:online-gate:v1:';

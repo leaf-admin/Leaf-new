@@ -501,58 +501,14 @@ class HealthCheckService {
     }
   }
 
-  waitForRealtimeConnection(realtimeDB, timeoutMs) {
-    // Retired RTDB: there is no connection to wait for; the API is served by Firestore.
-    if (realtimeDB?.__rtdbRetired || require('./rtdb-root-router').rtdbRetired()) return Promise.resolve(true);
-    return new Promise((resolve, reject) => {
-      const connectedRef = realtimeDB.ref('.info/connected');
-      let settled = false;
-
-      const cleanup = () => {
-        clearTimeout(timeout);
-        connectedRef.off('value', onValue);
-      };
-      const finish = (error = null) => {
-        if (settled) return;
-        settled = true;
-        cleanup();
-        if (error) {
-          reject(error);
-          return;
-        }
-        resolve(true);
-      };
-      const onValue = (snapshot) => {
-        if (snapshot?.val?.() === true) {
-          finish();
-        }
-      };
-      const onError = (error) => finish(error);
-      const timeout = setTimeout(() => {
-        const error = new Error(`timeout aguardando conexão RTDB (${timeoutMs}ms)`);
-        error.code = 'FIREBASE_RTDB_HEALTH_TIMEOUT';
-        finish(error);
-      }, timeoutMs);
-      timeout.unref?.();
-
-      try {
-        connectedRef.on('value', onValue, onError);
-      } catch (error) {
-        finish(error);
-      }
-    });
-  }
-
+  // Readiness stays network-free: the Firebase clients must be initialized.
+  // The Realtime Database is retired; Firestore and Storage are the stores.
   async checkFirebaseReadiness() {
     const thresholds = this.getFirebaseThresholds();
     try {
-      const firestore = firebaseConfig.getFirestore();
-      const realtimeDB = firebaseConfig.getRealtimeDB();
-      const storage = firebaseConfig.getStorage();
       const components = {
-        firestore: Boolean(firestore),
-        realtimeDB: Boolean(realtimeDB),
-        storage: Boolean(storage)
+        firestore: Boolean(firebaseConfig.getFirestore()),
+        storage: Boolean(firebaseConfig.getStorage())
       };
 
       if (Object.values(components).some((ready) => ready !== true)) {
@@ -563,21 +519,15 @@ class HealthCheckService {
         };
       }
 
-      const startTime = Date.now();
-      await this.waitForRealtimeConnection(realtimeDB, thresholds.unhealthyMs);
-      const responseTime = Date.now() - startTime;
       return {
-        status: responseTime >= thresholds.unhealthyMs ? 'unhealthy' : 'healthy',
+        status: 'healthy',
         components,
-        realtimeConnected: true,
-        responseTime: `${responseTime}ms`,
         thresholds,
-        message: 'Clientes Firebase e conexão RTDB prontos'
+        message: 'Clientes Firebase prontos'
       };
     } catch (error) {
       return {
         status: 'unhealthy',
-        realtimeConnected: false,
         error: error.message,
         message: 'Firebase não está pronto para receber tráfego'
       };
@@ -587,12 +537,10 @@ class HealthCheckService {
   async runFirebaseHealthCheck() {
     try {
       const firestore = firebaseConfig.getFirestore();
-      const realtimeDB = firebaseConfig.getRealtimeDB();
       const thresholds = this.getFirebaseThresholds();
 
       const results = {
-        firestore: { status: 'unhealthy', message: 'Firestore não inicializado' },
-        realtimeDB: { status: 'unhealthy', message: 'Realtime DB não inicializado' }
+        firestore: { status: 'unhealthy', message: 'Firestore não inicializado' }
       };
 
       // Check Firestore
@@ -617,33 +565,6 @@ class HealthCheckService {
             status: 'unhealthy',
             error: error.message,
             message: 'Firestore não está respondendo'
-          };
-        }
-      }
-
-      // Check Realtime DB
-      if (realtimeDB) {
-        try {
-          const startTime = Date.now();
-          await this.waitForRealtimeConnection(realtimeDB, thresholds.unhealthyMs);
-          const responseTime = Date.now() - startTime;
-          results.realtimeDB = {
-            status: responseTime >= thresholds.unhealthyMs
-              ? 'unhealthy'
-              : responseTime >= thresholds.warningMs
-                ? 'warning'
-                : 'healthy',
-            responseTime: `${responseTime}ms`,
-            thresholds,
-            connected: true,
-            message: 'Realtime DB está saudável'
-          };
-        } catch (error) {
-          results.realtimeDB = {
-            status: 'unhealthy',
-            connected: false,
-            error: error.message,
-            message: 'Realtime DB não está respondendo'
           };
         }
       }
