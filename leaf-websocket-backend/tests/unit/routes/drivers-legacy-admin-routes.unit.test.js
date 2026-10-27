@@ -161,7 +161,8 @@ function buildFirestore(collections = {}, { failDocumentIdFilterWith = null, fai
   };
 }
 
-// `rides`/`sandboxRides` são as coleções do Firestore; `bookings` é o nó legado do Realtime Database.
+// `rides`/`sandboxRides` são as coleções do Firestore. `bookings` descreve corridas no formato
+// antigo (driver, tripdate) e vira documento de `rides`: o nó legado do RTDB não é mais lido.
 function mockRealtimeDb({
   users = {},
   cars = {},
@@ -173,15 +174,12 @@ function mockRealtimeDb({
   firestoreOptions = {}
 } = {}) {
   const realtimeQueries = [];
-  const indexedNodes = { cars, bookings };
+  const indexedNodes = { cars };
   const createRef = path => ({
     once: jest.fn(async () => {
       realtimeQueries.push({ path, orderByChild: null });
       if (path === 'cars') {
         return buildSnapshot(cars);
-      }
-      if (path === 'bookings') {
-        return buildSnapshot(bookings);
       }
       if (path.startsWith('users/')) {
         return buildSnapshot(users[path.slice('users/'.length)]);
@@ -205,8 +203,12 @@ function mockRealtimeDb({
     ref: jest.fn(createRef)
   });
 
+  const asRides = Object.fromEntries(Object.entries(bookings).map(([key, booking]) => [
+    `booking_${Date.parse(booking.completedAt || booking.tripdate || new Date().toISOString())}_${key}`,
+    { ...booking, driverId: booking.driver }
+  ]));
   const firestore = buildFirestore(
-    { rides, sandbox_rides: sandboxRides, ...firestoreCollections },
+    { rides: { ...asRides, ...rides }, sandbox_rides: sandboxRides, ...firestoreCollections },
     firestoreOptions
   );
   firebaseConfig.getFirestore.mockReturnValue(firestore);
@@ -967,7 +969,7 @@ describe('drivers earnings route settled rides source (Firestore rides, namespac
     expect(report.financialSnapshotPendingCount).toBe(1);
   });
 
-  it('não soma duas vezes a corrida que existe no Firestore e no nó legado', async () => {
+  it('conta a corrida do Firestore uma vez e nunca consulta o nó legado', async () => {
     const app = createApp();
     const sharedRideId = rideId('2026-10-11T12:10:00.000Z');
     const { realtimeQueries } = mockRealtimeDb({
@@ -975,20 +977,6 @@ describe('drivers earnings route settled rides source (Firestore rides, namespac
       rides: {
         [sharedRideId]: completedRide('2026-10-11T12:40:00.000Z')
       },
-      bookings: {
-        [sharedRideId]: {
-          driver: 'driver_1',
-          status: 'COMPLETED',
-          completedAt: '2026-10-11T12:40:00.000Z',
-          financialSnapshot: completedSnapshot()
-        },
-        legacy_only: {
-          driver: 'driver_1',
-          status: 'COMPLETED',
-          completedAt: '2026-10-10T12:40:00.000Z',
-          financialSnapshot: completedSnapshot()
-        }
-      }
     });
 
     const response = await getEarnings(app);
@@ -1001,20 +989,12 @@ describe('drivers earnings route settled rides source (Firestore rides, namespac
     expect(realtimeQueries.some((query) => query.path === 'bookings')).toBe(false);
   });
 
-  it('usa o nó legado só quando o Firestore não tem corrida do motorista operacional', async () => {
+  it('motorista operacional sem corrida no Firestore responde zeros sem consultar o nó legado', async () => {
     const app = createApp();
     const { firestore, realtimeQueries } = mockRealtimeDb({
       users: { driver_1: driverProfile },
       rides: {
         [rideId('2026-10-11T12:10:00.000Z')]: completedRide('2026-10-11T12:40:00.000Z', { driverId: 'driver_2' })
-      },
-      bookings: {
-        legacy_only: {
-          driver: 'driver_1',
-          status: 'COMPLETED',
-          completedAt: '2026-10-10T12:40:00.000Z',
-          financialSnapshot: buildBackendFinalSnapshot()
-        }
       }
     });
 
@@ -1022,10 +1002,8 @@ describe('drivers earnings route settled rides source (Firestore rides, namespac
 
     const { report } = response.body;
     expect(firestore.queries[0].collection).toBe('rides');
-    expect(report.totalCompletedRides).toBe(1);
-    expect(report.totalNetAmount).toBeCloseTo(20.51, 2);
-    expect(slotOf(report, '2026-10-10').completedCount).toBe(1);
-    expect(realtimeQueries).toContainEqual({ path: 'bookings', orderByChild: 'driver', equalTo: 'driver_1' });
+    expect(report.totalCompletedRides).toBe(0);
+    expect(realtimeQueries.some((query) => query.path === 'bookings')).toBe(false);
   });
 
   it('não mistura namespaces: sandbox ignora outro contexto e operacional ignora registro sandbox', async () => {
@@ -1075,15 +1053,7 @@ describe('drivers earnings route settled rides source (Firestore rides, namespac
     const app = createApp();
     const { realtimeQueries } = mockRealtimeDb({
       users: { driver_1: driverProfile },
-      profile: SANDBOX_QA_PROFILE,
-      bookings: {
-        legacy_1: {
-          driver: 'driver_1',
-          status: 'COMPLETED',
-          tripdate: NOW,
-          financialSnapshot: buildBackendFinalSnapshot()
-        }
-      }
+      profile: SANDBOX_QA_PROFILE
     });
 
     const response = await getEarnings(app);
@@ -1181,7 +1151,7 @@ describe('drivers earnings route settled rides source (Firestore rides, namespac
     expect(response.body.report).toBeUndefined();
   });
 
-  it('lê o carro do motorista pela consulta indexada, não o nó inteiro', async () => {
+  it('não lê o nó legado de carros, que nunca existiu nesta base', async () => {
     const app = createApp();
     const { realtimeQueries } = mockRealtimeDb({
       users: { driver_1: driverProfile },
@@ -1193,9 +1163,8 @@ describe('drivers earnings route settled rides source (Firestore rides, namespac
 
     const response = await getEarnings(app);
 
-    expect(response.body.report.activeCar).toEqual({ brand: 'Toyota', model: 'Corolla', year: '2024', engine: 'Sedan' });
-    expect(realtimeQueries).toContainEqual({ path: 'cars', orderByChild: 'driver', equalTo: 'driver_1' });
-    expect(realtimeQueries).not.toContainEqual({ path: 'cars', orderByChild: null });
+    expect(response.body.report.activeCar).toBeNull();
+    expect(realtimeQueries.some((query) => query.path === 'cars')).toBe(false);
   });
 
   it('mantém o formato da resposta', async () => {

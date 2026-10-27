@@ -17,7 +17,7 @@ PRs empilhados: #425 → #426 → #427 → #428 → #429 → #430 → #432 → #
 | Listagem principal de usuários | Fonte atual | `ENABLE_ADMIN_USER_CURSOR_READS` | Queries/índices de filtros conferidos, forward/reverse no contrato real |
 | Inicialização de usuário novo | `ENABLE_NEW_USER_READ_MODEL_INIT` | Flags acima | Somente retorno novo de Admin Auth `createUser`, nunca data mutável do perfil |
 
-`ENABLE_LEGACY_METRICS_FALLBACK=false`: falha não deve transferir a carga para uma raiz histórica. Limites de legado permanecem mesmo se esse fallback for explicitamente aprovado. Não ligar todos os leitores de uma vez.
+O fallback de métricas para o RTDB (`ENABLE_LEGACY_METRICS_FALLBACK`) foi removido na saída do RTDB (domínio 7): sem a fonte moderna, a rota responde 503.
 
 ## Autorizações e pré-voo
 

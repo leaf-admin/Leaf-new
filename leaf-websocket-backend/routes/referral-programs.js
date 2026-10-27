@@ -465,22 +465,7 @@ async function countDriverTripsWithinWindow(driverId, startTs, endTs) {
     }
   }
 
-  if (!firebaseConfig || typeof firebaseConfig.getFromRealtimeDB !== 'function') {
-    return 0;
-  }
-
-  const bookings = await firebaseConfig.getFromRealtimeDB('bookings') || {};
-
-  return Object.values(bookings).filter((booking) => {
-    const bookingDriver = normalizeIdentifier(booking.driver || booking.driverId);
-    if (!bookingDriver || bookingDriver !== normalizeIdentifier(driverId)) return false;
-    if (!bookingStatusIsCompleted(booking.status)) return false;
-    const ts = parseTimestamp(booking.tripdate || booking.createdAt || booking.timestamp || booking.paidAt || booking.completedAt);
-    if (!Number.isFinite(ts)) return false;
-    if (ts < startTs) return false;
-    if (endTs && ts > endTs) return false;
-    return true;
-  }).length;
+  return 0;
 }
 
 async function applyPassengerBenefit(invite, config) {

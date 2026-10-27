@@ -15,32 +15,12 @@ function boundedValue(snapshot, limit, label) {
   return value;
 }
 
-function aggregateLegacy(cars, bookings, resolveNet) {
-  const carsByDriver = new Map();
-  const statsByDriver = new Map();
-  for (const car of Object.values(cars)) if (typeof car.driver === 'string' && !carsByDriver.has(car.driver)) carsByDriver.set(car.driver, car);
-  for (const booking of Object.values(bookings)) {
-    if (typeof booking.driver !== 'string') continue;
-    const stats = statsByDriver.get(booking.driver) || { totalTrips: 0, completedTrips: 0, totalEarnings: 0 };
-    stats.totalTrips++;
-    if (booking.status === 'COMPLETED') { stats.completedTrips++; stats.totalEarnings += resolveNet(booking); }
-    statsByDriver.set(booking.driver, stats);
-  }
-  return { carsByDriver, statsByDriver };
-}
-
-async function readLegacy(db, resolveNet) {
+// The legacy RTDB `cars` root never existed here and RTDB `bookings` never held
+// rides (only annotations without a driver), so per-driver car and trip stats
+// were always empty; they are no longer read.
+async function readLegacy(db) {
   const users = boundedValue(await db.ref('users').orderByChild('usertype').equalTo('driver').limitToFirst(201).once('value'), 200, 'motoristas');
-  if (!Object.keys(users).length) return { users, carsByDriver: new Map(), statsByDriver: new Map(), mode: 'legacy-bounded' };
-  const results = await Promise.allSettled([
-    db.ref('cars').limitToFirst(2001).once('value'),
-    db.ref('bookings').limitToFirst(2001).once('value')
-  ]);
-  const failed = results.find(result => result.status === 'rejected');
-  if (failed) throw failed.reason;
-  const cars = boundedValue(results[0].value, 2000, 'veículos');
-  const bookings = boundedValue(results[1].value, 2000, 'corridas');
-  return { users, ...aggregateLegacy(cars, bookings, resolveNet), mode: 'legacy-bounded' };
+  return { users, carsByDriver: new Map(), statsByDriver: new Map(), mode: 'legacy-bounded' };
 }
 
 function decodeCursor(raw) {
@@ -60,7 +40,7 @@ async function readPage({ db, firestore: providedFirestore, getFirestore, params
     if (params.cursor) throw error('DASHBOARD_CURSOR_REFRESH', 'Atualize os filtros para continuar', 409);
     // Legacy substring/derived subscription filters remain exact only in their
     // controlled dataset; never scan a large database to emulate them.
-    return readLegacy(db, resolveNet);
+    return readLegacy(db);
   }
   const firestore = providedFirestore || getFirestore?.();
   if (!firestore) throw error('DASHBOARD_CURSOR_UNAVAILABLE', 'Listagem temporariamente indisponível');
@@ -115,4 +95,4 @@ async function readPage({ db, firestore: providedFirestore, getFirestore, params
   } };
 }
 
-module.exports = { readPage, readLegacy, aggregateLegacy, decodeCursor, boundedValue, PROFILE_FIELDS };
+module.exports = { readPage, readLegacy, decodeCursor, boundedValue, PROFILE_FIELDS };

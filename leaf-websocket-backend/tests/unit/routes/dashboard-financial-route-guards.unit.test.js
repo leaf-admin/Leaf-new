@@ -34,7 +34,8 @@ function expectBackendFinalRevenueGuard(block) {
 
 describe('dashboard financial route guards', () => {
   it('keeps legacy dashboard stats from summing mutable fare fields for completed rides', () => {
-    expectBackendFinalRevenueGuard(extractBlockAfterMarker(source, "router.get('/api/rides/stats'"));
+    // /api/rides/stats has no legacy RTDB fallback anymore; only the modern source.
+    expect(extractBlockAfterMarker(source, "router.get('/api/rides/stats'")).not.toMatch(/\.ref\(/);
     expectBackendFinalRevenueGuard(extractBlockAfterMarker(source, "router.get('/api/revenue/stats'"));
   });
 

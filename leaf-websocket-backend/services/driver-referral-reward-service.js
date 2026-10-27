@@ -84,23 +84,6 @@ class DriverReferralRewardService {
       });
     }
 
-    if (firebaseConfig?.getFromRealtimeDB) {
-      const bookings = await firebaseConfig.getFromRealtimeDB('bookings') || {};
-      Object.entries(bookings).forEach(([bookingId, booking]) => {
-        const bookingDriver = normalizeId(booking?.driver || booking?.driverId);
-        if (!bookingDriver || bookingDriver !== safeDriverId) return;
-        if (!bookingStatusIsCompleted(booking?.status)) return;
-        const ts = parseTimestamp(
-          booking?.tripdate ||
-          booking?.createdAt ||
-          booking?.timestamp ||
-          booking?.paidAt ||
-          booking?.completedAt
-        );
-        addCompletedRideId(rideIds, bookingId, ts, startTs, endTs);
-      });
-    }
-
     if (currentBookingId) {
       addCompletedRideId(rideIds, currentBookingId, Date.now(), startTs, endTs);
     }

@@ -1,4 +1,5 @@
 const readBudget = require('../utils/metrics-read-budget');
+const { toView } = require('../services/rtdb-root-router');
 const express = require('express');
 const admin = require('firebase-admin');
 const { logger, logStructured, logError } = require('../utils/logger');
@@ -218,77 +219,9 @@ router.get('/api/metrics/rides/daily', async (req, res) => {
       res.set('X-Leaf-Metrics-Cache', 'MISS');
       return res.json(stats);
     } catch (modernError) {
-      readBudget.requireLegacyFallback();
-      logStructured('warn', 'Fallback RTDB em /api/metrics/rides/daily', {
-        service: 'metrics-routes',
-        reason: modernError.message
-      });
+      // Sem fallback legado: a fonte moderna é a única.
+      throw readBudget.unavailable();
     }
-
-    let stats = {
-      totalToday: 0,
-      completedToday: 0,
-      cancelledAfterAcceptance: 0,
-      cancellationRate: 0,
-      activeRides: 0
-    };
-
-    if (!firebaseConfig || !firebaseConfig.getRealtimeDB) {
-      return res.json(stats);
-    }
-
-    const db = firebaseConfig.getRealtimeDB();
-
-    // Buscar todas as corridas
-    const bookingsSnapshot = await readBudget.realtimeSnapshot(db.ref('bookings'));
-    const bookings = bookingsSnapshot.val() || {};
-    const bookingArray = Object.keys(bookings).map(key => ({ id: key, ...bookings[key] }));
-
-    // Filtrar corridas do dia atual
-    const today = new Date();
-    const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-    const todayEnd = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
-
-    const todayBookings = bookingArray.filter(booking => {
-      const tripDate = booking.tripdate ? new Date(booking.tripdate) :
-        booking.createdAt ? new Date(booking.createdAt) : null;
-      if (!tripDate) return false;
-      return tripDate >= todayStart && tripDate < todayEnd;
-    });
-
-    stats.totalToday = todayBookings.length;
-
-    // Corridas completadas hoje
-    const completedToday = todayBookings.filter(b =>
-      b.status === 'COMPLETE' || b.status === 'PAID' || b.status === 'COMPLETED'
-    );
-    stats.completedToday = completedToday.length;
-
-    // Corridas canceladas APÓS motorista aceitar (status estava em ACCEPTED, ARRIVED, IN_PROGRESS)
-    const cancelledAfterAcceptance = todayBookings.filter(b => {
-      if (b.status !== 'CANCELLED' && b.status !== 'CANCELED') return false;
-      // Verificar se tinha driver atribuído (motorista aceitou)
-      return b.driver && b.driver !== '' && b.driver !== null;
-    });
-    stats.cancelledAfterAcceptance = cancelledAfterAcceptance.length;
-
-    // Calcular taxa de cancelamento (após aceitar)
-    if (stats.totalToday > 0) {
-      const totalAccepted = todayBookings.filter(b => b.driver && b.driver !== '').length;
-      stats.cancellationRate = totalAccepted > 0
-        ? parseFloat((stats.cancelledAfterAcceptance / totalAccepted * 100).toFixed(2))
-        : 0;
-    }
-
-    // Corridas ativas (SEARCHING, ACCEPTED, ARRIVED, IN_PROGRESS)
-    const activeStatuses = ['SEARCHING', 'ACCEPTED', 'ARRIVED', 'IN_PROGRESS', 'MATCHED'];
-    stats.activeRides = bookingArray.filter(b =>
-      activeStatuses.includes(b.status)
-    ).length;
-
-    await writeMetricsCache(cacheKey, stats);
-    res.set('X-Leaf-Metrics-Cache', 'MISS');
-    res.json(stats);
   } catch (error) {
     logError(error, 'Erro ao buscar métricas de corridas diárias:', { service: 'metrics-routes' });
     res.status(error.statusCode || 500).json({ error: error.statusCode === 503 ? 'Métricas temporariamente indisponíveis' : 'Erro interno do servidor' });
@@ -306,93 +239,9 @@ router.get('/api/metrics/users/status', async (req, res) => {
       const stats = await modernMetricsService.getUsersStatusStats();
       return res.json(stats);
     } catch (modernError) {
-      readBudget.requireLegacyFallback();
-      logStructured('warn', 'Fallback RTDB em /api/metrics/users/status', {
-        service: 'metrics-routes',
-        reason: modernError.message
-      });
+      // Sem fallback legado: a fonte moderna é a única.
+      throw readBudget.unavailable();
     }
-
-    let stats = {
-      customers: {
-        total: 0,
-        online: 0,
-        offline: 0
-      },
-      drivers: {
-        total: 0,
-        online: 0,
-        offline: 0
-      },
-      newCustomersToday: 0,
-      newDriversToday: 0
-    };
-
-    if (!firebaseConfig || !firebaseConfig.getRealtimeDB) {
-      return res.json(stats);
-    }
-
-    const db = firebaseConfig.getRealtimeDB();
-    const redis = redisPool.getConnection();
-
-    try {
-      // Buscar usuários do Firebase
-      const usersSnapshot = await readBudget.realtimeSnapshot(db.ref('users'));
-      const users = usersSnapshot.val() || {};
-      const userArray = Object.keys(users).map(key => ({ id: key, ...users[key] }));
-
-      // Separar customers e drivers
-      const customers = userArray.filter(user => user.usertype === 'customer');
-      const drivers = userArray.filter(user => user.usertype === 'driver');
-
-      stats.customers.total = customers.length;
-      stats.drivers.total = drivers.length;
-
-      // Verificar usuários online no Redis
-      // Padrão: online_users contém IDs dos usuários online
-      const onlineUsersSet = await redis.smembers('online_users').catch(() => []);
-      const onlineUsers = new Set(onlineUsersSet || []);
-
-      // Verificar drivers online (pode estar em outra chave)
-      const onlineDriversSet = await redis.smembers('online_drivers').catch(() => []);
-      const onlineDrivers = new Set(onlineDriversSet || []);
-
-      // Contar customers online/offline
-      const customersOnline = customers.filter(c =>
-        onlineUsers.has(c.id) || c.status === 'online'
-      ).length;
-      stats.customers.online = customersOnline;
-      stats.customers.offline = stats.customers.total - customersOnline;
-
-      // Contar drivers online/offline
-      const driversOnline = drivers.filter(d =>
-        onlineDrivers.has(d.id) || onlineUsers.has(d.id) || d.status === 'online'
-      ).length;
-      stats.drivers.online = driversOnline;
-      stats.drivers.offline = stats.drivers.total - driversOnline;
-
-      // Novos usuários hoje
-      const today = new Date();
-      const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-
-      const newCustomersToday = customers.filter(c => {
-        const createdAt = c.createdAt ? new Date(c.createdAt) : null;
-        return createdAt && createdAt >= todayStart;
-      }).length;
-      stats.newCustomersToday = newCustomersToday;
-
-      const newDriversToday = drivers.filter(d => {
-        const createdAt = d.createdAt ? new Date(d.createdAt) : null;
-        return createdAt && createdAt >= todayStart;
-      }).length;
-      stats.newDriversToday = newDriversToday;
-
-    } catch (error) {
-      logStructured('warn', '⚠️ Erro ao buscar status de usuários:', error.message, { service: 'metrics-routes' });
-      throw error;
-    }
-
-    res.json(stats);
   } catch (error) {
     logError(error, 'Erro ao buscar métricas de usuários:', { service: 'metrics-routes' });
     res.status(error.statusCode || 500).json({ error: error.statusCode === 503 ? 'Métricas temporariamente indisponíveis' : 'Erro interno do servidor' });
@@ -412,94 +261,9 @@ router.get('/api/metrics/financial/rides', async (req, res) => {
       const stats = await modernMetricsService.getFinancialRidesStats({ period, startDate, endDate });
       return res.json(stats);
     } catch (modernError) {
-      readBudget.requireLegacyFallback();
-      logStructured('warn', 'Fallback RTDB em /api/metrics/financial/rides', {
-        service: 'metrics-routes',
-        reason: modernError.message
-      });
+      // Sem fallback legado: a fonte moderna é a única.
+      throw readBudget.unavailable();
     }
-
-    let stats = {
-      totalValue: 0,
-      totalRides: 0,
-      averageValue: 0,
-      reserveFundLosses: 0,
-      period: period,
-      startDate: null,
-      endDate: null
-    };
-
-    if (!firebaseConfig || !firebaseConfig.getRealtimeDB) {
-      return res.json(stats);
-    }
-
-    const db = firebaseConfig.getRealtimeDB();
-    const redis = redisPool.getConnection();
-
-    // Buscar corridas
-    const bookingsSnapshot = await readBudget.realtimeSnapshot(db.ref('bookings'));
-    const bookings = bookingsSnapshot.val() || {};
-    const bookingArray = Object.keys(bookings).map(key => ({ id: key, ...bookings[key] }));
-
-    // Filtrar por período
-    const now = new Date();
-    let start = new Date();
-    let end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
-
-    if (period === 'custom' && startDate && endDate) {
-      start = new Date(startDate);
-      end = new Date(endDate);
-    } else if (period === 'today') {
-      start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    } else if (period === 'week') {
-      start = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-    } else if (period === 'month') {
-      start = new Date(now.getFullYear(), now.getMonth(), 1);
-    }
-
-    stats.startDate = start.toISOString();
-    stats.endDate = end.toISOString();
-
-    // Filtrar corridas completadas no período
-    const completedBookings = bookingArray.filter(booking => {
-      const tripDate = booking.tripdate ? new Date(booking.tripdate) :
-        booking.createdAt ? new Date(booking.createdAt) : null;
-      if (!tripDate) return false;
-
-      const isCompleted = booking.status === 'COMPLETE' ||
-        booking.status === 'PAID' ||
-        booking.status === 'COMPLETED';
-
-      return isCompleted && tripDate >= start && tripDate <= end;
-    });
-
-    // Calcular valores
-    stats.totalRides = completedBookings.length;
-    const reconciledBookings = completedBookings.filter(
-      (booking) => !isRideRevenuePendingFinalSnapshot(booking)
-    );
-    stats.reconciledRides = reconciledBookings.length;
-    stats.pendingReconciliationRides = completedBookings.length - reconciledBookings.length;
-
-    stats.totalValue = completedBookings.reduce((sum, booking) => {
-      return sum + resolveRideRevenue(booking);
-    }, 0);
-
-    stats.averageValue = stats.reconciledRides > 0
-      ? parseFloat((stats.totalValue / stats.reconciledRides).toFixed(2))
-      : 0;
-
-    try {
-      // Buscar fundo de reserva (perdas pré-aceitação) do Redis
-      const costStr = await redis.hget('metrics:financial', 'assumed_cancellation_costs');
-      if (costStr) {
-        stats.reserveFundLosses = parseFloat(costStr);
-      }
-    } catch (redisErr) {
-      // Falha silenciosa no banco de dados em memória
-    }
-
-    res.json(stats);
   } catch (error) {
     logError(error, 'Erro ao buscar métricas financeiras de corridas:', { service: 'metrics-routes' });
     res.status(error.statusCode || 500).json({ error: error.statusCode === 503 ? 'Métricas temporariamente indisponíveis' : 'Erro interno do servidor' });
@@ -519,81 +283,9 @@ router.get('/api/metrics/financial/operational-fee', async (req, res) => {
       const stats = await modernMetricsService.getOperationalFeeStats({ period, startDate, endDate });
       return res.json(stats);
     } catch (modernError) {
-      readBudget.requireLegacyFallback();
-      logStructured('warn', 'Fallback RTDB em /api/metrics/financial/operational-fee', {
-        service: 'metrics-routes',
-        reason: modernError.message
-      });
+      // Sem fallback legado: a fonte moderna é a única.
+      throw readBudget.unavailable();
     }
-
-    let stats = {
-      totalOperationalFee: 0,
-      totalRides: 0,
-      averageFee: 0,
-      period: period,
-      startDate: null,
-      endDate: null
-    };
-
-    if (!firebaseConfig || !firebaseConfig.getRealtimeDB) {
-      return res.json(stats);
-    }
-
-    const db = firebaseConfig.getRealtimeDB();
-
-    // Buscar corridas
-    const bookingsSnapshot = await readBudget.realtimeSnapshot(db.ref('bookings'));
-    const bookings = bookingsSnapshot.val() || {};
-    const bookingArray = Object.keys(bookings).map(key => ({ id: key, ...bookings[key] }));
-
-    // Filtrar por período
-    const now = new Date();
-    let start = new Date();
-    let end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
-
-    if (period === 'custom' && startDate && endDate) {
-      start = new Date(startDate);
-      end = new Date(endDate);
-    } else if (period === 'today') {
-      start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    } else if (period === 'week') {
-      start = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-    } else if (period === 'month') {
-      start = new Date(now.getFullYear(), now.getMonth(), 1);
-    }
-
-    stats.startDate = start.toISOString();
-    stats.endDate = end.toISOString();
-
-    // Filtrar corridas completadas no período
-    const completedBookings = bookingArray.filter(booking => {
-      const tripDate = booking.tripdate ? new Date(booking.tripdate) :
-        booking.createdAt ? new Date(booking.createdAt) : null;
-      if (!tripDate) return false;
-
-      const isCompleted = booking.status === 'COMPLETE' ||
-        booking.status === 'PAID' ||
-        booking.status === 'COMPLETED';
-
-      return isCompleted && tripDate >= start && tripDate <= end;
-    });
-
-    stats.totalRides = completedBookings.length;
-    const reconciledBookings = completedBookings.filter(
-      (booking) => !isRideRevenuePendingFinalSnapshot(booking)
-    );
-    stats.reconciledRides = reconciledBookings.length;
-    stats.pendingReconciliationRides = completedBookings.length - reconciledBookings.length;
-
-    stats.totalOperationalFee = completedBookings.reduce((sum, booking) => {
-      return sum + resolveRideOperationalFee(booking);
-    }, 0);
-
-    stats.averageFee = stats.reconciledRides > 0
-      ? parseFloat((stats.totalOperationalFee / stats.reconciledRides).toFixed(2))
-      : 0;
-
-    res.json(stats);
   } catch (error) {
     logError(error, 'Erro ao buscar taxa operacional:', { service: 'metrics-routes' });
     res.status(error.statusCode || 500).json({ error: error.statusCode === 503 ? 'Métricas temporariamente indisponíveis' : 'Erro interno do servidor' });
@@ -603,98 +295,6 @@ router.get('/api/metrics/financial/operational-fee', async (req, res) => {
 // ==========================================
 // 🗺️ MAPAS - CORRIDAS POR REGIÃO
 // ==========================================
-
-// GET /api/metrics/maps/rides-by-region - Corridas por região
-router.get('/api/metrics/maps/rides-by-region', async (req, res) => {
-  try {
-    let regions = {};
-
-    if (!firebaseConfig || !firebaseConfig.getRealtimeDB) {
-      return res.json({ regions: {} });
-    }
-
-    const db = firebaseConfig.getRealtimeDB();
-
-    // Buscar corridas
-    const bookingsSnapshot = await readBudget.realtimeSnapshot(db.ref('bookings'));
-    const bookings = bookingsSnapshot.val() || {};
-    const bookingArray = Object.keys(bookings).map(key => ({ id: key, ...bookings[key] }));
-
-    // Agrupar por região (usar cidade ou região geográfica)
-    bookingArray.forEach(booking => {
-      // Tentar identificar região pela localização ou cidade
-      let regionKey = 'unknown';
-
-      if (booking.region) {
-        regionKey = booking.region;
-      } else if (booking.city) {
-        regionKey = booking.city;
-      } else if (booking.pickupLocation) {
-        // Usar coordenadas para agrupar em regiões (simplificado)
-        try {
-          const pickup = typeof booking.pickupLocation === 'string'
-            ? JSON.parse(booking.pickupLocation)
-            : booking.pickupLocation;
-
-          if (pickup && pickup.lat && pickup.lng) {
-            // Agrupar por grid aproximado (ex: -22.9 -> -22.9x-43.1)
-            const latGrid = Math.floor(pickup.lat * 10) / 10;
-            const lngGrid = Math.floor(pickup.lng * 10) / 10;
-            regionKey = `${latGrid}x${lngGrid}`;
-          }
-        } catch (e) {
-          // Ignorar erro de parsing
-        }
-      }
-
-      if (!regions[regionKey]) {
-        regions[regionKey] = {
-          region: regionKey,
-          totalRides: 0,
-          completedRides: 0,
-          activeRides: 0,
-          cancelledRides: 0,
-          totalValue: 0,
-          coordinates: null
-        };
-      }
-
-      regions[regionKey].totalRides++;
-
-      if (booking.status === 'COMPLETE' || booking.status === 'PAID' || booking.status === 'COMPLETED') {
-        regions[regionKey].completedRides++;
-        regions[regionKey].totalValue += resolveRideRevenue(booking);
-      } else if (booking.status === 'CANCELLED' || booking.status === 'CANCELED') {
-        regions[regionKey].cancelledRides++;
-      } else {
-        regions[regionKey].activeRides++;
-      }
-
-      // Armazenar coordenadas se disponível
-      if (!regions[regionKey].coordinates && booking.pickupLocation) {
-        try {
-          const pickup = typeof booking.pickupLocation === 'string'
-            ? JSON.parse(booking.pickupLocation)
-            : booking.pickupLocation;
-
-          if (pickup && pickup.lat && pickup.lng) {
-            regions[regionKey].coordinates = {
-              lat: pickup.lat,
-              lng: pickup.lng
-            };
-          }
-        } catch (e) {
-          // Ignorar
-        }
-      }
-    });
-
-    res.json({ regions: Object.values(regions) });
-  } catch (error) {
-    logError(error, 'Erro ao buscar corridas por região:', { service: 'metrics-routes' });
-    res.status(error.statusCode || 500).json({ error: error.statusCode === 503 ? 'Métricas temporariamente indisponíveis' : 'Erro interno do servidor' });
-  }
-});
 
 // ==========================================
 // 🗺️ MAPAS - DEMANDA POR REGIÃO
@@ -817,80 +417,9 @@ router.get('/api/metrics/subscriptions/active', async (req, res) => {
       const stats = await driverSubscriptionService.getActiveSubscriptionMetrics();
       return res.json(stats);
     } catch (modernError) {
-      readBudget.requireLegacyFallback();
-      logStructured('warn', 'Fallback RTDB em /api/metrics/subscriptions/active', {
-        service: 'metrics-routes',
-        reason: modernError.message
-      });
+      // Sem fallback legado: a fonte moderna é a única.
+      throw readBudget.unavailable();
     }
-
-    let stats = {
-      totalActiveSubscriptions: 0,
-      subscriptionsByPlan: {},
-      totalWeeklyRevenue: 0,
-      overdueSubscriptions: 0
-    };
-
-    if (!firebaseConfig || !firebaseConfig.getRealtimeDB) {
-      return res.json(stats);
-    }
-
-    const db = firebaseConfig.getRealtimeDB();
-
-    // Buscar motoristas
-    const usersSnapshot = await readBudget.realtimeSnapshot(db.ref('users'));
-    const users = usersSnapshot.val() || {};
-
-    // Buscar assinaturas
-    const subscriptionsSnapshot = await readBudget.realtimeSnapshot(db.ref('subscriptions'));
-    const subscriptions = subscriptionsSnapshot.val() || {};
-
-    const now = new Date();
-
-    Object.keys(users).forEach(userId => {
-      const user = users[userId];
-      if (user.usertype !== 'driver') return;
-
-      // Verificar se tem assinatura ativa
-      const subscription = subscriptions[userId];
-      let isActive = false;
-      let planType = 'none';
-      let weeklyFee = 0;
-
-      if (subscription) {
-        // Verificar status da assinatura
-        if (subscription.status === 'active') {
-          isActive = true;
-          planType = subscription.planType || 'plus';
-          weeklyFee = parseFloat(subscription.weeklyFee || 0);
-        } else if (subscription.status === 'overdue') {
-          stats.overdueSubscriptions++;
-        }
-      } else {
-        // Verificar trial ou meses grátis
-        const freeTrialEnd = user.free_trial_end ? new Date(user.free_trial_end) : null;
-        const freeMonthsEnd = user.free_months_end ? new Date(user.free_months_end) : null;
-
-        if ((freeTrialEnd && now < freeTrialEnd) || (freeMonthsEnd && now < freeMonthsEnd)) {
-          isActive = true;
-          planType = 'trial';
-          weeklyFee = 0;
-        }
-      }
-
-      if (isActive) {
-        stats.totalActiveSubscriptions++;
-
-        if (!stats.subscriptionsByPlan[planType]) {
-          stats.subscriptionsByPlan[planType] = 0;
-        }
-        stats.subscriptionsByPlan[planType]++;
-
-        stats.totalWeeklyRevenue += weeklyFee;
-      }
-    });
-
-    res.json(stats);
   } catch (error) {
     logError(error, 'Erro ao buscar assinaturas ativas:', { service: 'metrics-routes' });
     res.status(error.statusCode || 500).json({ error: error.statusCode === 503 ? 'Métricas temporariamente indisponíveis' : 'Erro interno do servidor' });
@@ -1476,13 +1005,18 @@ router.get('/api/metrics/marketplace', async (req, res) => {
         return null;
       });
 
-    const [bookingsSnapshot, usersSnapshot, supportSummary] = await Promise.all([
-      readBudget.realtimeSnapshot(db.ref('bookings')),
+    // Corridas vêm de `rides` no Firestore (o nó `bookings` do RTDB nunca teve
+    // corridas), só a janela atual + anterior, pelo índice automático de createdAt.
+    const ridesQuery = firebaseConfig.getFirestore().collection('rides')
+      .where('createdAt', '>=', previous.start)
+      .where('createdAt', '<=', current.end);
+    const [ridesSnapshot, usersSnapshot, supportSummary] = await Promise.all([
+      readBudget.firestoreSnapshot(ridesQuery),
       readBudget.realtimeSnapshot(db.ref('users')),
       supportSummaryPromise
     ]);
 
-    const bookings = bookingsSnapshot.val() || {};
+    const bookings = Object.fromEntries(ridesSnapshot.docs.map((doc) => [doc.id, toView(doc.data())]));
     const users = usersSnapshot.val() || {};
 
     const normalizedBookings = Object.keys(bookings).map((id) => {
@@ -1503,7 +1037,7 @@ router.get('/api/metrics/marketplace', async (req, res) => {
       );
       const status = String(b.status || '').toUpperCase();
       const driverId = b.driver || b.driverId || null;
-      const customerId = b.customer || b.customerId || b.user || b.userId || null;
+      const customerId = b.customer || b.customerId || b.passengerId || b.user || b.userId || null;
       const fare = resolveRideRevenue(b);
       const farePendingReconciliation = isRideRevenuePendingFinalSnapshot(b);
       const convenienceFee = toNumber(b.convenience_fees, 0);
