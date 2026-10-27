@@ -217,12 +217,13 @@ class DeviceFaceEmbeddingVerificationService {
 
   async getCnhFaceEmbeddingFromRealtimeDb(userId) {
     try {
-      const firebaseConfig = require('../firebase-config');
-      if (!firebaseConfig?.getFromRealtimeDB) {
+      const userStore = require('./user-store');
+      const firestore = userStore.resolveFirestore();
+      if (!firestore) {
         return null;
       }
 
-      const payload = await firebaseConfig.getFromRealtimeDB(`users/${userId}/biometrics/cnhFace`);
+      const payload = await userStore.readUserField(firestore, userId, 'biometrics/cnhFace');
       if (!payload || typeof payload !== 'object') {
         return null;
       }

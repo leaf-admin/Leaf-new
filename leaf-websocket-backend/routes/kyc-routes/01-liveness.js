@@ -23,6 +23,14 @@ const {
   sendLivenessAttemptRateLimit,
   isLivenessAttemptRateLimited,
 } = require('./shared');
+const userStore = require('../../services/user-store');
+
+// Current identity reverification challenge on users/{uid}; null when unreadable.
+async function readIdentityReverification(userId) {
+  const firestore = userStore.resolveFirestore();
+  if (!firestore) return null;
+  return userStore.readUserField(firestore, userId, 'identityReverification').catch(() => null);
+}
 
 class KYCRoutesLiveness {
   registerLivenessRoutes() {
@@ -151,9 +159,7 @@ class KYCRoutesLiveness {
             : (identityReviewGate.retryAuthorizationKind === 'orphan_hold'
               ? 'orphan_hold_retry_'
               : '');
-          const identityState = await Promise.resolve(
-            firebaseConfig?.getFromRealtimeDB?.(`users/${userId}/identityReverification`)
-          ).catch(() => null);
+          const identityState = await readIdentityReverification(userId);
           canonicalRetryIdentityState = identityState;
           const canonicalChallengeId = String(identityState?.challengeId || '').trim();
           const canonicalRequirement = String(identityState?.requirement || '').trim();
@@ -197,9 +203,7 @@ class KYCRoutesLiveness {
         } else if (isIdentityReverification) {
           const identityState = kycRuntime.namespace === 'sandbox'
             ? await policyService.getStepUpChallenge(effectiveChallengeId, userId)
-            : (canonicalRetryIdentityState || await Promise.resolve(
-              firebaseConfig?.getFromRealtimeDB?.(`users/${userId}/identityReverification`)
-            ).catch(() => null));
+            : (canonicalRetryIdentityState || await readIdentityReverification(userId));
           identityChallengeAlreadyValidating = identityState?.status === 'validating';
           const identityChallengeIsActive = Boolean(
             effectiveChallengeId

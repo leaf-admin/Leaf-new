@@ -10,7 +10,8 @@
 const admin = require('firebase-admin');
 const https = require('https');
 const http = require('http');
-const { getFirestore, getFromRealtimeDB } = require('../firebase-config');
+const { getFirestore } = require('../firebase-config');
+const userStore = require('./user-store');
 const { logStructured, logError } = require('../utils/logger');
 
 class FirebaseStorageService {
@@ -121,30 +122,18 @@ class FirebaseStorageService {
             }
           }
         } catch (firestoreError) {
-          logStructured('warn', 'Erro ao buscar no Firestore, tentando Realtime DB', { service: 'firebase-storage-service', error: firestoreError.message, userId });
+          logStructured('warn', 'Erro ao buscar no Firestore', { service: 'firebase-storage-service', error: firestoreError.message, userId });
         }
-      }
 
-      // Fallback: Realtime Database
-      if (typeof getFromRealtimeDB === 'function') {
+        // Documento da CNH no próprio cadastro: users/{userId}.documents.cnh
         try {
-          // Estrutura nova: users/{userId}/documents/cnh
-          const cnhData = await getFromRealtimeDB(`users/${userId}/documents/cnh`);
-          
+          const cnhData = await userStore.readUserField(firestore, userId, 'documents/cnh');
           if (cnhData && cnhData.fileUrl) {
-            logStructured('info', 'URL da CNH encontrada no Realtime DB (estrutura nova)', { service: 'firebase-storage-service', userId });
+            logStructured('info', 'URL da CNH encontrada no cadastro do usuário', { service: 'firebase-storage-service', userId });
             return cnhData.fileUrl;
           }
-          
-          // Estrutura antiga: users/{userId}.licenseImage
-          const userData = await getFromRealtimeDB(`users/${userId}`);
-          
-          if (userData && userData.licenseImage) {
-            logStructured('info', 'URL da CNH encontrada no Realtime DB (estrutura antiga)', { service: 'firebase-storage-service', userId });
-            return userData.licenseImage;
-          }
         } catch (dbError) {
-          logStructured('warn', 'Erro ao buscar no Realtime DB', { service: 'firebase-storage-service', error: dbError.message, userId });
+          logStructured('warn', 'Erro ao buscar documento da CNH no cadastro', { service: 'firebase-storage-service', error: dbError.message, userId });
         }
       }
 
