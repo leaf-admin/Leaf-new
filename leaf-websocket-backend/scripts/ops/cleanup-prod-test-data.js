@@ -11,6 +11,7 @@
 const fs = require('fs');
 const path = require('path');
 const admin = require('firebase-admin');
+const vehicleStore = require('../../services/vehicle-store');
 
 const apply = process.argv.includes('--apply');
 const financialOnly = process.argv.includes('--financial-only');
@@ -68,12 +69,10 @@ function loadServiceAccount() {
 const serviceAccount = loadServiceAccount();
 
 admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
-  databaseURL: process.env.FIREBASE_DATABASE_URL || 'https://leaf-reactnative-default-rtdb.firebaseio.com'
+  credential: admin.credential.cert(serviceAccount)
 });
 
 const auth = admin.auth();
-const rtdb = admin.database();
 const firestore = admin.firestore();
 
 const STRICT_TEST_EMAIL_PATTERNS = [
@@ -227,13 +226,12 @@ function resolveRideIdFromFinancialDoc(id, data = {}, knownTestUIDs = new Set())
 async function collectTargets() {
   const targets = {
     authUsers: [],
-    rtdbUsers: [],
-    rtdbVehicles: [],
+    vehicles: [],
     firestoreUsers: [],
     firestoreAdminUsers: [],
     firestoreFinancialDocs: [],
     legacyOperationalFinancialDocs: [],
-    rtdbSandboxReceipts: []
+    sandboxReceipts: []
   };
   const knownTestUIDs = new Set();
 
@@ -253,23 +251,7 @@ async function collectTargets() {
     }
   }
 
-  const usersSnap = await rtdb.ref('users').once('value');
-  const usersVal = usersSnap.val() || {};
-  for (const [uid, v] of Object.entries(usersVal)) {
-    const row = {
-      uid,
-      email: v?.email || null,
-      phone: v?.mobile || v?.phone || v?.phoneNumber || null,
-      displayName: v?.name || [v?.firstName, v?.lastName].filter(Boolean).join(' ') || null,
-      usertype: v?.usertype || v?.userType || null,
-      createdAt: safeDate(v?.createdAt)
-    };
-    if (isStrictTestIdentity(row)) {
-      knownTestUIDs.add(row.uid);
-      if (!financialOnly) targets.rtdbUsers.push(row);
-    }
-  }
-
+  // users/{uid} lives only in Firestore (RTDB retired): scanned below.
   const fsUsersSnap = await firestore.collection('users').get();
   fsUsersSnap.forEach((doc) => {
     const v = doc.data() || {};
@@ -310,12 +292,10 @@ async function collectTargets() {
 
   const deleteUIDs = new Set();
   for (const row of targets.authUsers) deleteUIDs.add(row.uid);
-  for (const row of targets.rtdbUsers) deleteUIDs.add(row.uid);
   for (const row of targets.firestoreUsers) deleteUIDs.add(row.uid);
 
   if (!financialOnly) {
-    const vehiclesSnap = await rtdb.ref('vehicles').once('value');
-    const vehiclesVal = vehiclesSnap.val() || {};
+    const vehiclesVal = await vehicleStore.listVehicles(firestore);
     for (const [id, v] of Object.entries(vehiclesVal)) {
       const driver = v?.driver || null;
       const note = v?.other_info || null;
@@ -323,7 +303,7 @@ async function collectTargets() {
         (driver && deleteUIDs.has(driver)) ||
         matchesAny(note, STRICT_VEHICLE_NOTE_PATTERNS);
       if (shouldDelete) {
-        targets.rtdbVehicles.push({
+        targets.vehicles.push({
           id,
           driver,
           plate: v?.vehicleNumber || v?.carPlate || null,
@@ -367,10 +347,10 @@ async function collectTargets() {
       });
     }
 
-    const sandboxReceiptsSnapshot = await rtdb.ref('sandbox_receipts').once('value');
-    const sandboxReceipts = sandboxReceiptsSnapshot.val() || {};
-    Object.keys(sandboxReceipts).forEach((rideId) => {
-      targets.rtdbSandboxReceipts.push({ rideId });
+    // Sandbox receipts live in Firestore sandbox_receipts (doc id = rideId).
+    const sandboxReceiptsSnapshot = await firestore.collection('sandbox_receipts').select().get();
+    sandboxReceiptsSnapshot.forEach((doc) => {
+      targets.sandboxReceipts.push({ rideId: doc.id });
     });
   }
 
@@ -397,15 +377,14 @@ async function removeWithIgnore(fn) {
 async function applyCleanup({ targets, deleteUIDs }) {
   const stats = {
     authDeleted: 0,
-    rtdbUsersDeleted: 0,
-    rtdbVehiclesDeleted: 0,
+    subscriptionsDeleted: 0,
+    vehiclesDeleted: 0,
     firestoreUsersDeleted: 0,
     firestoreAdminUsersDeleted: 0,
     firestoreFinancialDocsDeleted: 0,
     sandboxBalanceTransactionsDeleted: 0,
-    rtdbSandboxReceiptsDeleted: 0,
+    sandboxReceiptsDeleted: 0,
     legacyOperationalFinancialDocsSkipped: targets.legacyOperationalFinancialDocs.length,
-    rtdbAuxDeleted: 0,
     errors: []
   };
 
@@ -415,30 +394,18 @@ async function applyCleanup({ targets, deleteUIDs }) {
     else stats.errors.push({ scope: 'auth.deleteUser', uid, error: authRes.message });
   }
 
+  // users/{uid} is deleted with the Firestore users below; the subscription
+  // record of a test identity goes with it (RTDB retired: no aux roots).
   for (const uid of deleteUIDs) {
-    const r1 = await removeWithIgnore(() => rtdb.ref(`users/${uid}`).remove());
-    if (r1.ok) stats.rtdbUsersDeleted += 1;
-    else stats.errors.push({ scope: 'rtdb.users', uid, error: r1.message });
-
-    const auxPaths = [
-      `locations/${uid}`,
-      `drivers/${uid}`,
-      `subscriptions/${uid}`,
-      `driverSubscriptions/${uid}`,
-      `usersOnline/${uid}`,
-      `driverOnline/${uid}`
-    ];
-    for (const p of auxPaths) {
-      const rAux = await removeWithIgnore(() => rtdb.ref(p).remove());
-      if (rAux.ok) stats.rtdbAuxDeleted += 1;
-      else stats.errors.push({ scope: 'rtdb.aux', path: p, error: rAux.message });
-    }
+    const r = await removeWithIgnore(() => firestore.collection('subscriptions').doc(uid).delete());
+    if (r.ok) stats.subscriptionsDeleted += 1;
+    else stats.errors.push({ scope: 'firestore.subscriptions', uid, error: r.message });
   }
 
-  for (const v of targets.rtdbVehicles) {
-    const r = await removeWithIgnore(() => rtdb.ref(`vehicles/${v.id}`).remove());
-    if (r.ok) stats.rtdbVehiclesDeleted += 1;
-    else stats.errors.push({ scope: 'rtdb.vehicles', id: v.id, error: r.message });
+  for (const v of targets.vehicles) {
+    const r = await removeWithIgnore(() => firestore.collection(vehicleStore.COLLECTIONS.vehicles).doc(v.id).delete());
+    if (r.ok) stats.vehiclesDeleted += 1;
+    else stats.errors.push({ scope: 'firestore.vehicle_catalog', id: v.id, error: r.message });
   }
 
   for (const uid of deleteUIDs) {
@@ -526,10 +493,10 @@ async function applyCleanup({ targets, deleteUIDs }) {
     }
   }
 
-  for (const row of targets.rtdbSandboxReceipts) {
-    const r = await removeWithIgnore(() => rtdb.ref(`sandbox_receipts/${row.rideId}`).remove());
-    if (r.ok) stats.rtdbSandboxReceiptsDeleted += 1;
-    else stats.errors.push({ scope: 'rtdb.sandbox_receipts', rideId: row.rideId, error: r.message });
+  for (const row of targets.sandboxReceipts) {
+    const r = await removeWithIgnore(() => firestore.collection('sandbox_receipts').doc(row.rideId).delete());
+    if (r.ok) stats.sandboxReceiptsDeleted += 1;
+    else stats.errors.push({ scope: 'firestore.sandbox_receipts', rideId: row.rideId, error: r.message });
   }
 
   return stats;
@@ -545,29 +512,26 @@ async function main() {
     scope: financialOnly ? 'financial-only' : identityOnly ? 'identity-only' : 'all',
     targets: {
       authUsers: targets.authUsers.length,
-      rtdbUsers: targets.rtdbUsers.length,
-      rtdbVehicles: targets.rtdbVehicles.length,
+      vehicles: targets.vehicles.length,
       firestoreUsers: targets.firestoreUsers.length,
       firestoreAdminUsers: targets.firestoreAdminUsers.length,
       firestoreFinancialDocs: targets.firestoreFinancialDocs.length,
       legacyOperationalFinancialDocsAuditOnly: targets.legacyOperationalFinancialDocs.length,
-      rtdbSandboxReceipts: targets.rtdbSandboxReceipts.length,
+      sandboxReceipts: targets.sandboxReceipts.length,
       distinctUIDs: deleteUIDs.length
     },
     samples: {
       authUsers: targets.authUsers.slice(0, 15),
-      rtdbUsers: targets.rtdbUsers.slice(0, 15),
-      rtdbVehicles: targets.rtdbVehicles.slice(0, 15),
+      vehicles: targets.vehicles.slice(0, 15),
       firestoreUsers: targets.firestoreUsers.slice(0, 15),
       firestoreAdminUsers: targets.firestoreAdminUsers.slice(0, 15),
       firestoreFinancialDocs: targets.firestoreFinancialDocs.slice(0, 20),
       legacyOperationalFinancialDocs: targets.legacyOperationalFinancialDocs.slice(0, 20),
-      rtdbSandboxReceipts: targets.rtdbSandboxReceipts.slice(0, 20)
+      sandboxReceipts: targets.sandboxReceipts.slice(0, 20)
     },
     targetIds: {
       authUsers: targets.authUsers.map((row) => row.uid),
-      rtdbUsers: targets.rtdbUsers.map((row) => row.uid),
-      rtdbVehicles: targets.rtdbVehicles.map((row) => row.id),
+      vehicles: targets.vehicles.map((row) => row.id),
       firestoreUsers: targets.firestoreUsers.map((row) => row.uid),
       firestoreAdminUsers: targets.firestoreAdminUsers.map((row) => row.id),
       firestoreFinancialDocs: targets.firestoreFinancialDocs.map((row) => ({
@@ -580,7 +544,7 @@ async function main() {
         id: row.id,
         rideId: row.rideId
       })),
-      rtdbSandboxReceipts: targets.rtdbSandboxReceipts.map((row) => row.rideId)
+      sandboxReceipts: targets.sandboxReceipts.map((row) => row.rideId)
     }
   };
 

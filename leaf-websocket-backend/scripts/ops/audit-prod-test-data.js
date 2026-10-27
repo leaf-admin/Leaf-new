@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 /**
- * Auditoria de dados de teste em produção (Firebase Auth + RTDB + Firestore).
+ * Auditoria de dados de teste em produção (Firebase Auth + Firestore).
  * Não remove nada, apenas gera relatório.
  */
 
 const fs = require('fs');
 const path = require('path');
 const admin = require('firebase-admin');
+const vehicleStore = require('../../services/vehicle-store');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const REPORT_DIR = path.join(ROOT, 'reports');
@@ -24,12 +25,10 @@ if (!fs.existsSync(serviceAccountPath)) {
 const serviceAccount = require(serviceAccountPath);
 
 admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
-  databaseURL: process.env.FIREBASE_DATABASE_URL || 'https://leaf-reactnative-default-rtdb.firebaseio.com'
+  credential: admin.credential.cert(serviceAccount)
 });
 
 const auth = admin.auth();
-const rtdb = admin.database();
 const firestore = admin.firestore();
 
 const EMAIL_PATTERNS = [
@@ -101,8 +100,7 @@ async function main() {
     generatedAt: new Date().toISOString(),
     collections: {
       auth: { total: 0, suspicious: [] },
-      rtdbUsers: { total: 0, suspicious: [] },
-      rtdbVehicles: { total: 0, suspicious: [] },
+      vehicles: { total: 0, suspicious: [] },
       firestoreUsers: { total: 0, suspicious: [] },
       firestoreAdminUsers: { total: 0, suspicious: [] }
     }
@@ -122,26 +120,11 @@ async function main() {
     if (isSuspicious(row)) report.collections.auth.suspicious.push(row);
   }
 
-  const usersSnap = await rtdb.ref('users').once('value');
-  const usersVal = usersSnap.val() || {};
-  const userEntries = Object.entries(usersVal);
-  report.collections.rtdbUsers.total = userEntries.length;
-  for (const [uid, v] of userEntries) {
-    const row = {
-      uid,
-      email: v?.email || null,
-      phone: v?.mobile || v?.phone || v?.phoneNumber || null,
-      displayName: v?.name || [v?.firstName, v?.lastName].filter(Boolean).join(' ') || null,
-      usertype: v?.usertype || v?.userType || null,
-      createdAt: safeDate(v?.createdAt)
-    };
-    if (isSuspicious(row)) report.collections.rtdbUsers.suspicious.push(row);
-  }
-
-  const vehiclesSnap = await rtdb.ref('vehicles').once('value');
-  const vehiclesVal = vehiclesSnap.val() || {};
+  // Vehicles live in Firestore vehicle_catalog (RTDB retired); users are
+  // audited below from Firestore users.
+  const vehiclesVal = await vehicleStore.listVehicles(firestore);
   const vehicleEntries = Object.entries(vehiclesVal);
-  report.collections.rtdbVehicles.total = vehicleEntries.length;
+  report.collections.vehicles.total = vehicleEntries.length;
   for (const [id, v] of vehicleEntries) {
     const row = {
       id,
@@ -154,7 +137,7 @@ async function main() {
       isSuspicious({ uid: row.driver, email: null, phone: null, displayName: row.note }) ||
       NAME_PATTERN.test(String(row.note || ''))
     ) {
-      report.collections.rtdbVehicles.suspicious.push(row);
+      report.collections.vehicles.suspicious.push(row);
     }
   }
 
@@ -203,10 +186,8 @@ async function main() {
     totals: {
       authTotal: report.collections.auth.total,
       authSuspicious: report.collections.auth.suspicious.length,
-      rtdbUsersTotal: report.collections.rtdbUsers.total,
-      rtdbUsersSuspicious: report.collections.rtdbUsers.suspicious.length,
-      rtdbVehiclesTotal: report.collections.rtdbVehicles.total,
-      rtdbVehiclesSuspicious: report.collections.rtdbVehicles.suspicious.length,
+      vehiclesTotal: report.collections.vehicles.total,
+      vehiclesSuspicious: report.collections.vehicles.suspicious.length,
       firestoreUsersTotal: report.collections.firestoreUsers.total,
       firestoreUsersSuspicious: report.collections.firestoreUsers.suspicious.length,
       firestoreAdminUsersTotal: report.collections.firestoreAdminUsers.total,
@@ -214,8 +195,7 @@ async function main() {
     },
     samples: {
       auth: report.collections.auth.suspicious.slice(0, 12),
-      rtdbUsers: report.collections.rtdbUsers.suspicious.slice(0, 12),
-      rtdbVehicles: report.collections.rtdbVehicles.suspicious.slice(0, 12),
+      vehicles: report.collections.vehicles.suspicious.slice(0, 12),
       firestoreUsers: report.collections.firestoreUsers.suspicious.slice(0, 12),
       firestoreAdminUsers: report.collections.firestoreAdminUsers.suspicious.slice(0, 12)
     }

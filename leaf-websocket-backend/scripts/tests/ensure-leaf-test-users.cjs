@@ -1,6 +1,17 @@
 #!/usr/bin/env node
 
 const admin = require('firebase-admin');
+const userStore = require('../../services/user-store');
+const vehicleStore = require('../../services/vehicle-store');
+const { commitPaths } = require('../lib/native-path-writes.cjs');
+
+// RTDB-style `ref(base).update(patch)` on the native Firestore records
+// (users, vehicle_catalog, driver_vehicle_links, driver_activation).
+async function updatePath(firestore, base, patch) {
+  await commitPaths(firestore, Object.fromEntries(
+    Object.entries(patch).map(([key, value]) => [`${base}/${key}`, value])
+  ));
+}
 const path = require('path');
 
 const serviceAccountPath = path.join(__dirname, '..', '..', 'leaf-reactnative-firebase-adminsdk-fbsvc-456a95e2fc.json');
@@ -97,16 +108,14 @@ async function ensureAuthUserByPhone(auth, phone, displayName) {
   }
 }
 
-async function ensurePassengerProfile({ db, firestore, uid, phone, nowIso }) {
-  const userRef = db.ref(`users/${uid}`);
-  const snap = await userRef.once('value');
-  const current = snap.val() || {};
+async function ensurePassengerProfile({ firestore, uid, phone, nowIso }) {
+  const current = await userStore.readUser(firestore, uid) || {};
 
   const firstName = current.firstName || 'Passageiro';
   const lastName = current.lastName || titleFromPhone(phone, 'Teste');
   const name = `${firstName} ${lastName}`.trim();
 
-  await userRef.update({
+  await userStore.updateUser(firestore, uid, {
     uid,
     firstName,
     lastName,
@@ -139,10 +148,8 @@ async function ensurePassengerProfile({ db, firestore, uid, phone, nowIso }) {
   }, { merge: true });
 }
 
-async function ensureDriverProfile({ db, firestore, uid, phone, nowIso }) {
-  const userRef = db.ref(`users/${uid}`);
-  const userSnap = await userRef.once('value');
-  const current = userSnap.val() || {};
+async function ensureDriverProfile({ firestore, uid, phone, nowIso }) {
+  const current = await userStore.readUser(firestore, uid) || {};
 
   const firstName = current.firstName || 'Motorista';
   const lastName = current.lastName || titleFromPhone(phone, 'Teste');
@@ -151,9 +158,7 @@ async function ensureDriverProfile({ db, firestore, uid, phone, nowIso }) {
   const carPlate = (current.carPlate || current.vehicleNumber || current.vehiclePlate || `TES${suffix}`).toUpperCase();
   const carType = current.carType || 'Leaf Plus';
   const vehicleId = current.vehicleId || `test_vehicle_${uid.slice(0, 12)}`;
-  const vehicleRef = db.ref(`vehicles/${vehicleId}`);
-  const vehicleSnapshot = await vehicleRef.once('value');
-  const currentVehicle = vehicleSnapshot.val() || {};
+  const currentVehicle = await vehicleStore.readVehicle(firestore, vehicleId) || {};
   const {
     vehicleMake,
     vehicleModel,
@@ -162,7 +167,7 @@ async function ensureDriverProfile({ db, firestore, uid, phone, nowIso }) {
     vehicleOcrData
   } = resolveTestVehicleIdentity({ currentVehicle, carPlate, nowIso });
 
-  await userRef.update({
+  await userStore.updateUser(firestore, uid, {
     uid,
     firstName,
     lastName,
@@ -193,7 +198,7 @@ async function ensureDriverProfile({ db, firestore, uid, phone, nowIso }) {
     lastLogin: nowIso
   });
 
-  await vehicleRef.update({
+  await updatePath(firestore, `vehicles/${vehicleId}`, {
     id: vehicleId,
     ownerId: uid,
     driver: uid,
@@ -216,24 +221,20 @@ async function ensureDriverProfile({ db, firestore, uid, phone, nowIso }) {
     createdAt: current.createdAt || nowIso
   });
 
-  const userVehiclesRef = db.ref(`user_vehicles/${uid}`);
-  const userVehiclesSnap = await userVehiclesRef.once('value');
+  const userVehicles = await vehicleStore.readVehicleLinks(firestore, uid) || {};
   let userVehicleId = null;
 
-  if (userVehiclesSnap.exists()) {
-    userVehiclesSnap.forEach((child) => {
-      const data = child.val() || {};
-      if (!userVehicleId && (data.vehicleId === vehicleId || data.isActive === true)) {
-        userVehicleId = child.key;
-      }
-    });
+  for (const [linkId, data] of Object.entries(userVehicles)) {
+    if (!userVehicleId && (data?.vehicleId === vehicleId || data?.isActive === true)) {
+      userVehicleId = linkId;
+    }
   }
 
   if (!userVehicleId) {
     userVehicleId = `uv_${vehicleId}`;
   }
 
-  await db.ref(`user_vehicles/${uid}/${userVehicleId}`).update({
+  await updatePath(firestore, `user_vehicles/${uid}/${userVehicleId}`, {
     id: userVehicleId,
     driverId: uid,
     userId: uid,
@@ -256,22 +257,13 @@ async function ensureDriverProfile({ db, firestore, uid, phone, nowIso }) {
     assignedAt: nowIso
   });
 
-  await db.ref(`vehicle_active_assignment/${vehicleId}`).set({
-    userId: uid,
-    driverId: uid,
-    vehicleId,
-    status: 'active',
-    updatedAt: nowIso,
-    createdAt: nowIso
-  });
-
-  await db.ref(`users/${uid}/documents`).update({
+  await updatePath(firestore, `users/${uid}/documents`, {
     cnh: { status: 'approved', approved: true, updatedAt: nowIso },
     crlv: { status: 'approved', approved: true, updatedAt: nowIso },
     mei: { status: 'approved', approved: true, updatedAt: nowIso }
   });
 
-  await db.ref(`driver_activation/${uid}/status`).update({
+  await updatePath(firestore, `driver_activation/${uid}/status`, {
     state: 'ACTIVE',
     activationState: 'ACTIVE',
     activationStateLabel: 'Aprovado',
@@ -304,19 +296,19 @@ async function ensureDriverProfile({ db, firestore, uid, phone, nowIso }) {
     }
   });
 
-  await db.ref(`driver_activation/${uid}/documents`).update({
+  await updatePath(firestore, `driver_activation/${uid}/documents`, {
     cnh: { status: 'approved', updatedAt: nowIso },
     crlv: { status: 'approved', updatedAt: nowIso },
     mei: { status: 'approved', updatedAt: nowIso }
   });
 
-  await db.ref(`driver_activation/${uid}/consent/backgroundCheck`).update({
+  await updatePath(firestore, `driver_activation/${uid}/consent/backgroundCheck`, {
     accepted: true,
     acceptedAt: nowIso,
     updatedAt: nowIso
   });
 
-  await db.ref(`users/${uid}/driverActivation`).update({
+  await updatePath(firestore, `users/${uid}/driverActivation`, {
     state: 'ACTIVE',
     activationState: 'ACTIVE',
     activationStateLabel: 'Aprovado',
@@ -401,13 +393,11 @@ async function main() {
 
   if (!admin.apps.length) {
     admin.initializeApp({
-      credential: admin.credential.cert(serviceAccountPath),
-      databaseURL: 'https://leaf-reactnative-default-rtdb.firebaseio.com'
+      credential: admin.credential.cert(serviceAccountPath)
     });
   }
 
   const auth = admin.auth();
-  const db = admin.database();
   const firestore = admin.firestore();
 
   const passengerAuth = await ensureAuthUserByPhone(auth, passengerPhone, 'Leaf Passageiro Teste');
@@ -418,20 +408,18 @@ async function main() {
   const driverTwoAuth = await ensureAuthUserByPhone(auth, driverTwoPhone, 'Leaf Motorista Teste 2');
   const driverThreeAuth = await ensureAuthUserByPhone(auth, driverThreePhone, 'Leaf Motorista Teste 3');
 
-  await ensurePassengerProfile({ db, firestore, uid: passengerAuth.uid, phone: passengerPhone, nowIso });
-  await ensurePassengerProfile({ db, firestore, uid: passengerTwoAuth.uid, phone: passengerTwoPhone, nowIso });
-  await ensurePassengerProfile({ db, firestore, uid: passengerThreeAuth.uid, phone: passengerThreePhone, nowIso });
-  await ensurePassengerProfile({ db, firestore, uid: passengerFourAuth.uid, phone: passengerFourPhone, nowIso });
-  const driverDetails = await ensureDriverProfile({ db, firestore, uid: driverAuth.uid, phone: driverPhone, nowIso });
+  await ensurePassengerProfile({ firestore, uid: passengerAuth.uid, phone: passengerPhone, nowIso });
+  await ensurePassengerProfile({ firestore, uid: passengerTwoAuth.uid, phone: passengerTwoPhone, nowIso });
+  await ensurePassengerProfile({ firestore, uid: passengerThreeAuth.uid, phone: passengerThreePhone, nowIso });
+  await ensurePassengerProfile({ firestore, uid: passengerFourAuth.uid, phone: passengerFourPhone, nowIso });
+  const driverDetails = await ensureDriverProfile({ firestore, uid: driverAuth.uid, phone: driverPhone, nowIso });
   const driverTwoDetails = await ensureDriverProfile({
-    db,
     firestore,
     uid: driverTwoAuth.uid,
     phone: driverTwoPhone,
     nowIso,
   });
   const driverThreeDetails = await ensureDriverProfile({
-    db,
     firestore,
     uid: driverThreeAuth.uid,
     phone: driverThreePhone,

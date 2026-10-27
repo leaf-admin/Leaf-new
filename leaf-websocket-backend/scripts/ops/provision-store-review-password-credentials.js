@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const admin = require('firebase-admin');
 const firebaseConfig = require('../../firebase-config');
+const userStore = require('../../services/user-store');
 
 const PASSWORD_COLLECTION = 'auth_password_credentials';
 const BCRYPT_ROUNDS = Number.parseInt(process.env.AUTH_PASSWORD_BCRYPT_ROUNDS || '12', 10);
@@ -93,7 +94,7 @@ function maskPhone(phoneDigits) {
 
 async function resolveProfileUserType(uid, fallback) {
   try {
-    const profile = await firebaseConfig.getFromRealtimeDB(`users/${uid}`);
+    const profile = await userStore.readUser(firebaseConfig.getFirestore(), uid);
     return normalizeUserType(profile?.userType || profile?.usertype || profile?.type, fallback);
   } catch (_error) {
     return normalizeUserType(fallback, 'customer');
@@ -150,7 +151,7 @@ async function upsertAccountCredential(firestore, account) {
     { merge: true }
   );
 
-  await firebaseConfig.updateRealtimeDB(`users/${targetUid}`, {
+  await userStore.updateUser(firebaseConfig.getFirestore(), targetUid, {
     hasPassword: true,
     passwordLastUpdatedAt: new Date().toISOString()
   });

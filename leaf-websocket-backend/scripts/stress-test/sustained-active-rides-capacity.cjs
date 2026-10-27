@@ -329,9 +329,9 @@ function wsToHttp(raw) {
 }
 
 function canUseFirebaseProvisioning() {
-  // Local isolated stack: provision into the RTDB emulator of a demo- project.
+  // Local isolated stack: provision into the Firestore emulator of a demo- project.
   if (
-    process.env.FIREBASE_DATABASE_EMULATOR_HOST &&
+    process.env.FIRESTORE_EMULATOR_HOST &&
     String(process.env.GCLOUD_PROJECT || '').startsWith('demo-')
   ) {
     return true;
@@ -1067,9 +1067,10 @@ function buildStressPlate(index) {
 
 async function provisionDriverVehicle(driverSession, index) {
   const firebaseConfig = require('../../firebase-config');
-  const db = firebaseConfig.getRealtimeDB();
-  if (!db) {
-    throw new Error('firebase_realtime_unavailable');
+  const { commitPaths } = require('../lib/native-path-writes.cjs');
+  const firestore = firebaseConfig.getFirestore();
+  if (!firestore) {
+    throw new Error('firebase_firestore_unavailable');
   }
 
   const nowIso = new Date().toISOString();
@@ -1123,20 +1124,11 @@ async function provisionDriverVehicle(driverSession, index) {
     updatedAt: nowIso
   };
 
-  updates[`vehicle_active_assignment/${vehicleId}`] = {
-    vehicleId,
-    userId: uid,
-    driverId: uid,
-    userVehicleId,
-    assignedAt: nowIso,
-    updatedAt: nowIso
-  };
-
   // Local isolated stack only (demo- project on the emulators): mark the
   // synthetic driver as fully activated (documents, KYC, liveness) so the
   // canonical activation gate lets it go online. Never written to a real project.
   if (
-    process.env.FIREBASE_DATABASE_EMULATOR_HOST &&
+    process.env.FIRESTORE_EMULATOR_HOST &&
     String(process.env.GCLOUD_PROJECT || '').startsWith('demo-')
   ) {
     updates[`driver_activation/${uid}`] = {
@@ -1157,7 +1149,9 @@ async function provisionDriverVehicle(driverSession, index) {
     updates[`users/${uid}/driverActivation`] = { firstLivenessPassed: true, firstLivenessPassedAt: nowIso };
   }
 
-  await db.ref().update(updates);
+  // Native Firestore records (users, vehicle_catalog, driver_vehicle_links,
+  // driver_activation) in one transaction.
+  await commitPaths(firestore, updates);
   driverSession.vehicleId = vehicleId;
   driverSession.vehiclePlate = plate;
 }

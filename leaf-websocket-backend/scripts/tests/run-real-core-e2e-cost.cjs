@@ -273,14 +273,14 @@ function shouldWriteFirebaseEvidence() {
   return String(process.env.REAL_CORE_WRITE_FIREBASE || 'false').toLowerCase() === 'true';
 }
 
-function getRealtimeDbSafe() {
+function getFirestoreSafe() {
   if (!shouldWriteFirebaseEvidence()) return null;
 
   try {
     // Lazy-load para evitar bootstrap de serviços locais durante a validação remota.
     // eslint-disable-next-line global-require
     const firebaseConfig = require('../../firebase-config');
-    return firebaseConfig.getRealtimeDB ? firebaseConfig.getRealtimeDB() : null;
+    return firebaseConfig.getFirestore ? firebaseConfig.getFirestore() : null;
   } catch (_error) {
     return null;
   }
@@ -648,21 +648,16 @@ async function main() {
       rating: '5.0'
     });
 
-    const realtimeDb = getRealtimeDbSafe();
-    if (realtimeDb) {
-      await realtimeDb.ref(`users/${passengerId}`).set({
+    // Passenger profile in the native users/{uid} record (RTDB retired; the
+    // legacy RTDB `drivers` root is no longer read, the driver lives in Redis).
+    const firestore = getFirestoreSafe();
+    if (firestore) {
+      // eslint-disable-next-line global-require
+      await require('../../services/user-store').createUserIfMissing(firestore, passengerId, {
         id: passengerId,
         firstName: 'Passageiro',
         lastName: 'Core',
         userType: 'customer',
-        createdAt: new Date().toISOString()
-      });
-      await realtimeDb.ref(`drivers/${driverId}`).set({
-        id: driverId,
-        firstName: 'Motorista',
-        lastName: 'Core',
-        userType: 'driver',
-        status: 'AVAILABLE',
         createdAt: new Date().toISOString()
       });
     }
@@ -979,10 +974,8 @@ async function main() {
       redis.hset(`trip:summary:${bookingId}`, Object.fromEntries(Object.entries(finalSnapshot).map(([k, v]) => [k, String(v)])))
     );
 
-    const realtimeDb2 = getRealtimeDbSafe();
-    if (realtimeDb2) {
-      await realtimeDb2.ref(`rides/${bookingId}/simulation`).set(finalSnapshot);
-    }
+    // The final snapshot is kept in Redis (trip:summary) and in the report;
+    // the legacy RTDB `rides/<id>/simulation` copy is gone with the RTDB.
 
     report.outputs.finalSnapshot = finalSnapshot;
     report.flow.steps.push({ step: 'persist_final_ride_data', ok: true });

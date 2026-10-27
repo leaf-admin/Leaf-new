@@ -1,6 +1,6 @@
 /**
  * Script para criar usuários de teste COMPLETOS do zero
- * Cria: Firebase Auth + Realtime Database + Veículo (motorista)
+ * Cria: Firebase Auth + perfil users/{uid} no Firestore + Veículo (motorista)
  * 
  * Uso: node scripts/criar-usuarios-teste-completo.js
  */
@@ -14,8 +14,7 @@ const serviceAccountPath = path.join(__dirname, '..', 'leaf-reactnative-firebase
 let firebaseApp;
 try {
   firebaseApp = admin.initializeApp({
-    credential: admin.credential.cert(serviceAccountPath),
-    databaseURL: 'https://leaf-reactnative-default-rtdb.firebaseio.com'
+    credential: admin.credential.cert(serviceAccountPath)
   });
   console.log('✅ Firebase Admin inicializado');
 } catch (error) {
@@ -28,7 +27,11 @@ try {
   }
 }
 
-const db = admin.database();
+const userStore = require('../services/user-store');
+const { commitPaths } = require('./lib/native-path-writes.cjs');
+
+// Perfis e veículos vivem no Firestore nativo (o Realtime Database foi aposentado).
+const firestore = admin.firestore();
 const auth = admin.auth();
 
 // Dados dos usuários de teste
@@ -96,7 +99,7 @@ const TEST_USERS = {
 };
 
 /**
- * Criar usuário completo (Auth + Realtime Database)
+ * Criar usuário completo (Auth + Firestore)
  */
 async function createCompleteUser(userData, isDriver = false) {
   const userType = isDriver ? 'motorista' : 'passageiro';
@@ -147,9 +150,9 @@ async function createCompleteUser(userData, isDriver = false) {
   
   const uid = userRecord.uid;
   
-  // 2. Criar perfil no Realtime Database
+  // 2. Criar perfil no Firestore
   try {
-    console.log(`\n2️⃣ Criando perfil no Realtime Database...`);
+    console.log(`\n2️⃣ Criando perfil no Firestore...`);
     console.log(`   Caminho: users/${uid}`);
     
     const profileData = {
@@ -210,17 +213,16 @@ async function createCompleteUser(userData, isDriver = false) {
     }
     
     // Verificar se já existe
-    const existing = await db.ref(`users/${uid}`).once('value');
-    if (existing.val()) {
+    const created = await userStore.createUserIfMissing(firestore, uid, profileData);
+    if (!created.created) {
       console.log(`   ⚠️  Perfil já existe, atualizando...`);
-      await db.ref(`users/${uid}`).update(profileData);
-      console.log(`   ✅ Perfil atualizado no Realtime Database`);
+      await userStore.updateUser(firestore, uid, profileData);
+      console.log(`   ✅ Perfil atualizado no Firestore`);
     } else {
-      await db.ref(`users/${uid}`).set(profileData);
-      console.log(`   ✅ Perfil criado no Realtime Database`);
+      console.log(`   ✅ Perfil criado no Firestore`);
     }
   } catch (error) {
-    console.error(`   ❌ Erro ao criar perfil no Realtime Database:`, error);
+    console.error(`   ❌ Erro ao criar perfil no Firestore:`, error);
     return { success: false, error: error.message, uid };
   }
   
@@ -246,12 +248,12 @@ async function createCompleteUser(userData, isDriver = false) {
         updatedAt: new Date().toISOString()
       };
       
-      const vehicleRef = db.ref('vehicles').push();
-      await vehicleRef.set(vehicleData);
-      vehicleId = vehicleRef.key;
-      
-      // Atualizar perfil com ID do veículo
-      await db.ref(`users/${uid}`).update({ vehicleId: vehicleId });
+      vehicleId = firestore.collection('vehicle_catalog').doc().id;
+      // Veículo e vínculo no perfil numa única transação.
+      await commitPaths(firestore, {
+        [`vehicles/${vehicleId}`]: vehicleData,
+        [`users/${uid}/vehicleId`]: vehicleId
+      });
       
       console.log(`   ✅ Veículo criado: ${vehicleId}`);
       console.log(`   📋 Placa: ${userData.vehicle.plate}`);
@@ -277,7 +279,7 @@ async function main() {
   console.log('🚀 CRIANDO USUÁRIOS DE TESTE COMPLETOS\n');
   console.log('Este script criará:');
   console.log('  ✅ Firebase Auth (autenticação)');
-  console.log('  ✅ Realtime Database (perfis)');
+  console.log('  ✅ Firestore (perfis)');
   console.log('  ✅ Veículo (motorista)\n');
   
   const results = {};

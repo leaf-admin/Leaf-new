@@ -8,6 +8,8 @@ const FormData = require('form-data');
 const PDFDocument = require('pdfkit');
 const firebaseConfig = require('../../firebase-config');
 const driverApplicationService = require('../../services/driver-application-service');
+const userStore = require('../../services/user-store');
+const { commitPaths } = require('../lib/native-path-writes.cjs');
 const admin = require('firebase-admin');
 
 const API_BASE = process.env.E2E_API_BASE || 'http://localhost:3001/api';
@@ -205,8 +207,9 @@ async function ensureHttp200(url, label, timings) {
     }
 
     firebaseConfig.initializeFirebase();
-    const db = firebaseConfig.getRealtimeDB();
-    if (!db) throw new Error('Realtime Database indisponível');
+    // Native Firestore records (RTDB retired).
+    const firestore = firebaseConfig.getFirestore();
+    if (!firestore) throw new Error('Firestore indisponível');
 
     const driverId = `e2e_driver_${Date.now()}`;
     report.driverId = driverId;
@@ -276,7 +279,7 @@ async function ensureHttp200(url, label, timings) {
     };
 
     await timed('db:seed_driver', async () => {
-      await db.ref(`users/${driverId}`).set(userPayload);
+      await userStore.createUserIfMissing(firestore, driverId, userPayload);
 
       const updates = {};
       updates[`users/${driverId}/documents/cnh`] = {
@@ -352,11 +355,11 @@ async function ensureHttp200(url, label, timings) {
         }
       };
 
-      await db.ref().update(updates);
+      await commitPaths(firestore, updates);
     }, timings);
 
     await timed('dashboard:sync_driver_application_mirror', () =>
-      driverApplicationService.syncDriverApplication(driverId, { db }),
+      driverApplicationService.syncDriverApplication(driverId, {}),
     timings);
 
     const authData = await loginAdmin(timings);
@@ -584,8 +587,7 @@ async function ensureHttp200(url, label, timings) {
       };
     }
 
-    const finalUserSnapshot = await timed('db:read_final_user', () => db.ref(`users/${driverId}`).once('value'), timings);
-    const finalUser = finalUserSnapshot.val() || {};
+    const finalUser = await timed('db:read_final_user', () => userStore.readUser(firestore, driverId), timings) || {};
     report.checks.finalUserApproval = {
       approved: finalUser.approved === true,
       approvedAt: finalUser.approvedAt || null,

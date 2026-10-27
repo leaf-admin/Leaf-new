@@ -4,6 +4,8 @@ const path = require('path');
 const http = require('http');
 const https = require('https');
 const admin = require('firebase-admin');
+const userStore = require('../../services/user-store');
+const driverDocumentStore = require('../../services/driver-document-store');
 const dotenv = require('dotenv');
 
 const CnhFaceBiometricService = require('../../services/cnh-face-biometric-service');
@@ -63,14 +65,12 @@ function requireEnv(name) {
 function initializeFirebase() {
   if (admin.apps.length) return admin.app();
 
-  const databaseURL = process.env.FIREBASE_DATABASE_URL || 'https://leaf-reactnative-default-rtdb.firebaseio.com';
   const storageBucket = process.env.FIREBASE_STORAGE_BUCKET || 'leaf-reactnative.firebasestorage.app';
   const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON || process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
 
   if (serviceAccountJson) {
     return admin.initializeApp({
       credential: admin.credential.cert(JSON.parse(serviceAccountJson)),
-      databaseURL,
       storageBucket
     });
   }
@@ -82,7 +82,6 @@ function initializeFirebase() {
 
   return admin.initializeApp({
     credential: admin.credential.cert(require(serviceAccountPath)),
-    databaseURL,
     storageBucket
   });
 }
@@ -114,15 +113,14 @@ async function downloadStoragePath(storagePath) {
 }
 
 async function resolveDriverDocument(driverId) {
-  const db = admin.database();
-  const [userDocSnap, userSnap, activationDocSnap] = await Promise.all([
-    db.ref(`users/${driverId}/documents/cnh`).once('value'),
-    db.ref(`users/${driverId}`).once('value'),
-    db.ref(`driver_activation/${driverId}/documents/cnh`).once('value')
+  // users/{id} and driver_activation/{id} are native Firestore records.
+  const firestore = admin.firestore();
+  const [user, activation] = await Promise.all([
+    userStore.readUser(firestore, driverId).then(value => value || {}),
+    driverDocumentStore.readActivation(firestore, driverId).then(value => value || {})
   ]);
-  const userDoc = userDocSnap.val() || {};
-  const user = userSnap.val() || {};
-  const activationDoc = activationDocSnap.val() || {};
+  const userDoc = user?.documents?.cnh || {};
+  const activationDoc = activation?.documents?.cnh || {};
   return userDoc.filePath || activationDoc.filePath
     ? {
       source: userDoc.filePath ? 'users.documents.cnh.filePath' : 'driver_activation.documents.cnh.filePath',
@@ -196,10 +194,10 @@ async function main() {
   };
 
   if (driverId && !dryRun) {
-    await admin.database().ref().update({
-      [`users/${driverId}/biometrics/cnhFace`]: biometricPayload,
-      [`driver_activation/${driverId}/biometrics/cnhFace`]: withoutEmbedding(biometricPayload)
-    });
+    await driverDocumentStore.commit(admin.firestore(), [
+      driverDocumentStore.userField(driverId, ['biometrics', 'cnhFace'], biometricPayload),
+      driverDocumentStore.activationField(driverId, ['biometrics', 'cnhFace'], withoutEmbedding(biometricPayload))
+    ]);
   }
 
   console.log(JSON.stringify({
