@@ -11,7 +11,7 @@ const baseDir = path.join(__dirname, '..');
 
 // Encontrar todos os arquivos com console.log
 const filesWithConsole = execSync(
-  `find routes/ services/ graphql/ -name "*.js" -exec grep -l "console\\\.\\(log\\|error\\|warn\\)" {} \\;`,
+  `find routes/ services/ -name "*.js" -exec grep -l "console\\\.\\(log\\|error\\|warn\\)" {} \\;`,
   { cwd: baseDir, encoding: 'utf8' }
 ).trim().split('\n').filter(Boolean);
 

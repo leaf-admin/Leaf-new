@@ -40,7 +40,9 @@ async function main() {
         }
 
         try {
-            await new Promise((resolve) => io.close(() => resolve()));
+            // This Server is never attached to an HTTP server, so io.close()
+            // would fail on the missing engine; only drop its sockets.
+            io.disconnectSockets(true);
         } catch (_socketError) {
             // noop
         }

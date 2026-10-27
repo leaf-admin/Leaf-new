@@ -406,7 +406,7 @@ class ResponseHandler {
             // 11. Buscar customerId para notificação
             const customerId = bookingData.customerId;
 
-            // 12. Buscar dados completos do motorista (Redis + GraphQL)
+            // 12. Buscar dados do motorista (Redis)
             let driverData = null;
             try {
                 const driverKey = `driver:${driverId}`;
@@ -439,52 +439,6 @@ class ResponseHandler {
                     };
 
                     logger.info(`✅ [ResponseHandler] Dados do motorista ${driverId} obtidos do Redis`);
-                }
-
-                // Se não temos dados completos do veículo, buscar do GraphQL
-                if (!driverData?.vehicle?.plate || !driverData?.vehicle?.brand || !driverData?.vehicle?.model) {
-                    try {
-                        const DriverResolver = require('../graphql/resolvers/DriverResolver');
-                        const driverResolver = new DriverResolver();
-                        await driverResolver.initialize();
-
-                        const graphqlDriver = await driverResolver.driver(null, { id: driverId }, {});
-
-                        if (graphqlDriver) {
-                            // Mesclar dados do GraphQL com dados do Redis
-                            if (!driverData) {
-                                driverData = {
-                                    id: driverId,
-                                    name: graphqlDriver.name || 'Motorista',
-                                    location: driverLocation && driverLocation.length > 0 ? {
-                                        lat: parseFloat(driverLocation[0][1]),
-                                        lng: parseFloat(driverLocation[0][0])
-                                    } : null,
-                                    vehicle: {},
-                                    rating: graphqlDriver.rating || 5.0
-                                };
-                            }
-
-                            // Atualizar dados do veículo do GraphQL
-                            if (graphqlDriver.vehicle) {
-                                driverData.vehicle = {
-                                    plate: graphqlDriver.vehicle.plate || driverData.vehicle?.plate || null,
-                                    brand: graphqlDriver.vehicle.brand || driverData.vehicle?.brand || null,
-                                    model: graphqlDriver.vehicle.model || driverData.vehicle?.model || null,
-                                    color: graphqlDriver.vehicle.color || driverData.vehicle?.color || null
-                                };
-                            }
-
-                            // Atualizar nome se não tiver
-                            if (!driverData.name || driverData.name === 'Motorista') {
-                                driverData.name = graphqlDriver.name || driverData.name;
-                            }
-
-                            logger.info(`✅ [ResponseHandler] Dados do veículo do motorista ${driverId} obtidos do GraphQL`);
-                        }
-                    } catch (graphqlError) {
-                        logger.warn(`⚠️ [ResponseHandler] Erro ao buscar dados do GraphQL, usando dados do Redis:`, graphqlError.message);
-                    }
                 }
 
                 // Se ainda não temos dados, criar estrutura mínima
@@ -640,14 +594,12 @@ class ResponseHandler {
                                     ? `${customerData.firstName} ${customerData.lastName}`
                                     : customerData.firstName || customerData.name || 'o passageiro';
                             } else {
-                                // Tentar buscar do GraphQL
-                                const UserResolver = require('../graphql/resolvers/UserResolver');
-                                const userResolver = new UserResolver();
-                                await userResolver.initialize();
-
-                                const graphqlUser = await userResolver.user(null, { id: customerId }, {});
-                                if (graphqlUser && graphqlUser.name) {
-                                    passengerName = graphqlUser.name;
+                                // Perfil canônico do passageiro no Firestore
+                                const profile = await require('../firebase-config').getFirestore()?.collection('users').doc(String(customerId)).get();
+                                const user = profile?.exists ? profile.data() : null;
+                                const fullName = [user?.firstName, user?.lastName].filter(Boolean).join(' ');
+                                if (fullName || user?.name) {
+                                    passengerName = fullName || user.name;
                                 }
                             }
                         } catch (nameError) {

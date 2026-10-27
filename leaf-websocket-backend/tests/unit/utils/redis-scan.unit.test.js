@@ -52,10 +52,8 @@ function runtimeFiles() {
 
 describe('blocking KEYS usage', () => {
   it('is not used by active ioredis runtime code, including split subfolders', () => {
-    // Not loaded by the server: KYCFaceProcessor (legacy, node-redis client) and
-    // monitoring/smart-sync-alert-system.js (only legacy manual scripts require it;
-    // it calls KEYS('*') and must not be wired into the runtime as is).
-    const allowed = new Set(['services/KYCFaceProcessor.js', 'monitoring/smart-sync-alert-system.js']);
+    // Not loaded by the server: KYCFaceProcessor (legacy, node-redis client).
+    const allowed = new Set(['services/KYCFaceProcessor.js']);
     const offenders = runtimeFiles()
       .filter((file) => !allowed.has(file))
       .filter((file) => /\.keys\(\s*['`]/.test(fs.readFileSync(path.join(ROOT, file), 'utf8')));
