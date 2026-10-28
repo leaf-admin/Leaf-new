@@ -322,6 +322,68 @@ describe('payment-driver-availability-guard', () => {
     expect(driverLockManager.isDriverLocked).not.toHaveBeenCalled();
   });
 
+  describe('read-only check by the passenger who holds the reservation', () => {
+    const reservedDriver = () => {
+      mockRedis.georadius.mockResolvedValue([
+        ['driver-reserved', '0.3', ['-43.31', '-22.85']]
+      ]);
+      mockRedis.get.mockImplementation(async (key) => {
+        if (key === 'driver_payment_reservation:driver-reserved') return 'pdr_own';
+        if (key === 'payment_driver_reservation:pdr_own') {
+          return JSON.stringify({
+            reservationId: 'pdr_own',
+            driverId: 'driver-reserved',
+            passengerId: 'passenger-1',
+            rideId: 'temp-ride-1'
+          });
+        }
+        return null;
+      });
+      driverLockManager.isDriverLocked.mockResolvedValue({ isLocked: false });
+      mockRedis.hgetall.mockResolvedValue({
+        isOnline: 'true',
+        dispatchEligible: 'true',
+        status: 'AVAILABLE',
+        carType: 'Leaf Plus'
+      });
+      driverEligibilityService.isDriverEligibleForRide.mockResolvedValue({ eligible: true });
+    };
+
+    it('does not count their own pending Pix reservation as blocking', async () => {
+      reservedDriver();
+
+      const result = await hasPaymentEligibleDriver({
+        pickupLocation: { lat: -22.85, lng: -43.31 },
+        carType: 'Leaf Plus',
+        ownPassengerId: 'passenger-1'
+      });
+
+      expect(result).toMatchObject({
+        success: true,
+        hasDrivers: true,
+        rejections: expect.objectContaining({ paymentReserved: 0 })
+      });
+    });
+
+    it('still blocks another passenger and never relaxes a reserving call', async () => {
+      reservedDriver();
+      await expect(hasPaymentEligibleDriver({
+        pickupLocation: { lat: -22.85, lng: -43.31 },
+        carType: 'Leaf Plus',
+        ownPassengerId: 'passenger-2'
+      })).resolves.toMatchObject({ hasDrivers: false, rejections: expect.objectContaining({ paymentReserved: 1 }) });
+
+      reservedDriver();
+      await expect(hasPaymentEligibleDriver({
+        pickupLocation: { lat: -22.85, lng: -43.31 },
+        carType: 'Leaf Plus',
+        reserveDriver: true,
+        ownPassengerId: 'passenger-1',
+        reservationContext: { passengerId: 'passenger-1', rideId: 'temp-ride-2' }
+      })).resolves.toMatchObject({ hasDrivers: false, rejections: expect.objectContaining({ paymentReserved: 1 }) });
+    });
+  });
+
   it('blocks availability when a Redis-online driver is not reachable by dispatch socket', async () => {
     mockRedis.georadius.mockResolvedValue([
       ['driver-1', '0.3', ['-43.31', '-22.85']]

@@ -25,6 +25,7 @@ const { EVENT_TYPES } = require('./event-sourcing');
 const { logger } = require('../utils/logger');
 const RedisLeaderLease = require('../utils/redis-leader-lease');
 const { buildWorkerConsumerName } = require('../workers/worker-consumer-identity');
+const orphanPaymentRefund = require('./orphan-payment-refund-service');
 
 class QueueWorker {
     constructor(io, options = {}) {
@@ -167,6 +168,36 @@ class QueueWorker {
         await this.processAllQueues({
             leadershipGuard: () => this.leaderLease.assertHeld()
         });
+        await this.processOrphanPayments();
+    }
+
+    // Leader only, at most every ORPHAN_PAYMENT_CHECK_INTERVAL_MS: refunds Pix
+    // confirmed for temporary sessions that never became a booking.
+    async processOrphanPayments(now = Date.now()) {
+        const intervalMs = Math.max(
+            5000,
+            Number.parseInt(process.env.ORPHAN_PAYMENT_CHECK_INTERVAL_MS || '30000', 10) || 30000
+        );
+        if (this.lastOrphanPaymentCheckAt && now - this.lastOrphanPaymentCheckAt < intervalMs) {
+            return;
+        }
+        this.lastOrphanPaymentCheckAt = now;
+        try {
+            const firestore = require('../firebase-config').getFirestore?.();
+            if (!this.orphanPaymentService) {
+                const PaymentService = require('./payment-service');
+                this.orphanPaymentService = new PaymentService();
+            }
+            const paymentService = this.orphanPaymentService;
+            await orphanPaymentRefund.processDueOrphanChecks({
+                redis: this.redis,
+                firestore,
+                paymentService,
+                now
+            });
+        } catch (error) {
+            logger.warn(`⚠️ [QueueWorker] Checagem de Pix sem corrida falhou: ${error.message}`);
+        }
     }
 
     /**

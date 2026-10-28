@@ -412,6 +412,19 @@ class PaymentServiceStatusAndHoldingMethods {
 
       logStructured('info', 'Payment holding salvo no Firestore', { service: 'payment-service', rideId, status: holdingData.status });
 
+      // Safety net: a Pix confirmed for a temporary session that never becomes
+      // a booking is refunded later (orphan-payment-refund-service).
+      if (holdingData.status === this.PAYMENT_STATES.IN_HOLDING) {
+        try {
+          const { scheduleOrphanCheck } = require('../orphan-payment-refund-service');
+          await scheduleOrphanCheck(redisPool.getConnection(), rideId, { namespace: financialContext.namespace });
+        } catch (scheduleError) {
+          logStructured('warn', 'Checagem de Pix sem corrida não agendada', {
+            service: 'payment-service', rideId, error: scheduleError.message
+          });
+        }
+      }
+
       // Salvar evento no histórico
       await this.savePaymentEvent(rideId, holdingData.status === 'in_holding' ? 'payment_confirmed' : 'payment_created', {
         status: holdingData.status,

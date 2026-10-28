@@ -2512,6 +2512,11 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     selectedPlanData?.title,
   ]);
   useEffect(() => {
+    // While the Pix is open the fare is locked (paymentQuoteLock): a live GPS
+    // change must not re-quote, or the modal closes over a still-payable QR.
+    if (isPixModalVisible) {
+      return;
+    }
     if (
       (step !== QUOTE_STEP && step !== CONFIRM_STEP && step !== PICKUP_STEP) ||
       routeGuardBlocked ||
@@ -2705,6 +2710,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     initialPricingQuote?.quote?.tollFee,
     initialPricingQuote?.routePolyline,
     initialPricingQuote?.tollFee,
+    isPixModalVisible,
     resolvedPickupAddress,
     resolvedPickupCoordinate?.latitude,
     resolvedPickupCoordinate?.longitude,
@@ -3012,6 +3018,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
 
   useEffect(() => {
     if (
+      isPixModalVisible ||
       (step !== QUOTE_STEP && step !== CONFIRM_STEP && step !== PICKUP_STEP) ||
       visiblePlans.length === 0
     ) {
@@ -3133,6 +3140,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
     destinationCoordinate,
     destinationInfo?.address,
     destinationInfo?.name,
+    isPixModalVisible,
     pickupLocationPayload,
     resolvedPickupCoordinate,
     ridePreferences,
@@ -3546,7 +3554,9 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
   ]);
 
   useEffect(() => {
-    if (!isPixModalVisible || submittingRide) {
+    // Availability and the fare were validated when the Pix opened
+    // (paymentQuoteLock); once locked, live changes never close it.
+    if (!isPixModalVisible || submittingRide || paymentQuoteLock) {
       return;
     }
 
@@ -3572,6 +3582,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
   }, [
     hasCoverageBlockedPlan,
     isPixModalVisible,
+    paymentQuoteLock,
     paymentQuotePending,
     routeGuardBlocked,
     selectedPlanAvailability?.message,

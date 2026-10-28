@@ -865,6 +865,120 @@ describe("RobotaxiDestinationScreen", () => {
     });
   });
 
+  it("keeps an open Pix on screen when GPS moves while the passenger pays", async () => {
+    fetchDynamicPricingQuote.mockResolvedValueOnce({
+      estimatedFare: 83.4,
+      grossEstimatedFare: 83.4,
+      quoteLockId: "ql_open_pix",
+      quoteLockExpiresAt: new Date(Date.now() + 120000).toISOString(),
+      pricingPayload: {},
+    });
+
+    const destination = {
+      id: "destination_barra",
+      name: "Barra Shopping",
+      address: "Av. das Américas, Barra da Tijuca, Rio de Janeiro",
+      coordinate: {
+        latitude: -22.9985,
+        longitude: -43.3594,
+      },
+      eta: "8",
+    };
+
+    const checkRideAvailability = jest.fn().mockResolvedValue({ available: true });
+
+    let runtimeSnapshot = {
+      bookingStatus: "idle",
+      currentAddress: "Rua Araguaia, Taquara, Rio de Janeiro",
+      currentCoordinate: {
+        latitude: -22.920816,
+        longitude: -43.405979,
+      },
+      driverInfo: null,
+      profileUid: "customer_1",
+      riderProfile: {
+        name: "Passageira Leaf",
+        email: "passageira@leaf.app.br",
+      },
+      selectedVehicle: "Leaf Plus",
+      selectedFare: 83.4,
+      selectedDestination: destination,
+      tripDistanceKm: 20.7,
+      tripDurationMin: 38,
+      tripArrivalText: "12:48",
+      loadDestinationSuggestions: jest.fn().mockResolvedValue([destination]),
+      loadRecentDestinations: jest.fn().mockResolvedValue([destination]),
+      resolveDestinationInput: jest.fn().mockImplementation(async (item) => item),
+      selectDestination: jest.fn().mockImplementation(async (item) => item),
+      checkRideAvailability,
+      requestRide: jest.fn(),
+      requestTripExtension: jest.fn(),
+      clearFlowPreview: jest.fn(),
+    };
+
+    usePrototypeRideRuntime.mockImplementation(() => runtimeSnapshot);
+
+    const navigation = {
+      navigate: jest.fn(),
+      replace: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+
+    const screen = render(
+      <RobotaxiDestinationScreen
+        navigation={navigation}
+        route={{ params: {} }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Barra Shopping")).toBeTruthy();
+    });
+
+    fireEvent.press(screen.getByText("Barra Shopping"));
+
+    await waitFor(() => {
+      expect(screen.getByText(/R\$ 83,40/)).toBeTruthy();
+      expect(screen.getByTestId("passenger-destination-confirm-button")).toBeTruthy();
+    });
+
+    fireEvent.press(screen.getByTestId("passenger-destination-confirm-button"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mock-pix-amount").props.children).toBe("83.40");
+    });
+    const quotesBefore = fetchDynamicPricingQuote.mock.calls.length;
+    const availabilityChecksBefore = checkRideAvailability.mock.calls.length;
+
+    // The passenger walks ~600 m while paying in the bank app: outside the
+    // locked route bucket, which before the Pix opened would re-quote.
+    runtimeSnapshot = {
+      ...runtimeSnapshot,
+      currentCoordinate: {
+        latitude: -22.926216,
+        longitude: -43.405979,
+      },
+      tripDistanceKm: 21.4,
+      tripDurationMin: 40,
+      tripArrivalText: "12:50",
+    };
+
+    screen.rerender(
+      <RobotaxiDestinationScreen
+        navigation={navigation}
+        route={{ params: {} }}
+      />,
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.getByTestId("mock-pix-amount").props.children).toBe("83.40");
+    expect(screen.getByTestId("mock-pix-quote-lock-id").props.children).toBe("ql_open_pix");
+    expect(screen.getByTestId("mock-pix-pickup-lat").props.children).toBe("-22.920816");
+    expect(fetchDynamicPricingQuote.mock.calls.length).toBe(quotesBefore);
+    expect(checkRideAvailability.mock.calls.length).toBe(availabilityChecksBefore);
+  });
+
   it("keeps the quoted fare stable when GPS drifts inside the locked route bucket", async () => {
     fetchDynamicPricingQuote.mockResolvedValueOnce({
       estimatedFare: 83.4,
