@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-14T23:51:38.251Z",
+  "generatedAt": "2026-10-28T16:12:25.012Z",
   "coverageModel": "static-flow-definition-only",
   "releasePreconditions": [
     "Executar somente build release instalado (`br.com.leaf.ride`), sem Expo Go/dev-client como alvo.",
@@ -9,7 +9,7 @@
     "Evidências por rodada devem incluir JUnit XML, logs Maestro, screenshots e snapshot de runtime flags."
   ],
   "routeSurfaceCounts": {
-    "current": 49,
+    "current": 50,
     "compatibility_redirect": 26
   },
   "releaseCoverageMatrix": [
@@ -269,6 +269,11 @@
     },
     {
       "name": "LeafAccountPassword",
+      "category": "other",
+      "surfaceStatus": "current"
+    },
+    {
+      "name": "LeafMemberCard",
       "category": "other",
       "surfaceStatus": "current"
     },

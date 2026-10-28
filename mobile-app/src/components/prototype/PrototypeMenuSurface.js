@@ -14,6 +14,8 @@ const LEAF_BG = '#FFFFFF';
 const LEAF_TEXT = '#222222';
 const LEAF_MUTED = '#767676';
 const LEAF_SECONDARY = '#6A6A6A';
+const LEAF_DANGER = '#B42318';
+const LEAF_GROUP_BG = '#F4F4F2';
 const TEXT_SCALE_CAP = 1.35;
 // Botões de cabeçalho ainda recebem nomes do Ionicons.
 const CLOSE_BUTTON_GLYPHS = { 'arrow-back': 'arrow-left', close: 'x', 'settings-outline': 'settings' };
@@ -195,6 +197,62 @@ export function PrototypeMenuRow({
   );
 }
 
+// Bloco arredondado de linhas (2026-10-28): fundo cinza claro, ícone de traço,
+// valor ou selo à direita e divisória recuada até o texto, como nos ajustes do iOS.
+export function PrototypeMenuGroup({ title, children, style, testID }) {
+  const rows = React.Children.toArray(children).filter(Boolean);
+  if (!rows.length) return null;
+  return (
+    <View style={style} testID={testID}>
+      {title ? <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={styles.groupTitle} accessibilityRole="header">{title}</Text> : null}
+      <View style={styles.group}>
+        {rows.map((row, index) => React.cloneElement(row, { divider: index > 0 }))}
+      </View>
+    </View>
+  );
+}
+
+export function PrototypeMenuGroupRow({
+  icon,
+  title,
+  value,
+  badge,
+  badgeTone = 'success',
+  tone = 'default',
+  trailing,
+  onPress,
+  divider = false,
+  testID,
+  accessibilityLabel,
+  accessibilityHint,
+}) {
+  const danger = tone === 'danger';
+  const Row = onPress ? TouchableOpacity : View;
+  return (
+    <Row
+      style={styles.groupRow}
+      onPress={onPress}
+      activeOpacity={0.6}
+      testID={testID}
+      accessibilityRole={onPress ? 'button' : undefined}
+      accessibilityLabel={accessibilityLabel || [title, value, badge].filter(Boolean).join(', ')}
+      accessibilityHint={accessibilityHint}
+    >
+      {icon ? <LeafObjectIcon symbol={icon} size={20} color={danger ? LEAF_DANGER : LEAF_TEXT} /> : null}
+      <View style={[styles.groupRowBody, divider && styles.groupRowDivider]}>
+        <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} numberOfLines={1} style={[styles.groupRowTitle, danger && styles.groupRowTitleDanger]}>{title}</Text>
+        {value ? <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} numberOfLines={1} style={styles.groupRowValue}>{value}</Text> : null}
+        {badge ? (
+          <View style={[styles.groupBadge, badgeTone === 'warning' && styles.groupBadgeWarning]}>
+            <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} style={[styles.groupBadgeText, badgeTone === 'warning' && styles.groupBadgeTextWarning]}>{badge}</Text>
+          </View>
+        ) : null}
+        {trailing !== undefined ? trailing : onPress && !danger ? <Feather name="chevron-right" size={17} color="#B3B3B3" /> : null}
+      </View>
+    </Row>
+  );
+}
+
 export function PrototypeMenuInfoRow({ label, value, last = false, loading = false }) {
   const showLoading = loading || isLoadingValue(value);
 
@@ -253,6 +311,18 @@ export function PrototypeMenuCloseButton({
 }
 
 const styles = StyleSheet.create({
+  groupTitle: { ...leafTypography.medium, fontSize: 13, lineHeight: 18, color: LEAF_SECONDARY, marginLeft: 4, marginBottom: 8 },
+  group: { backgroundColor: LEAF_GROUP_BG, borderRadius: 16, paddingLeft: 16, overflow: 'hidden' },
+  groupRow: { minHeight: 52, flexDirection: 'row', alignItems: 'center', gap: 14 },
+  groupRowBody: { flex: 1, minHeight: 52, flexDirection: 'row', alignItems: 'center', gap: 8, paddingRight: 14 },
+  groupRowDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#DCDCD8' },
+  groupRowTitle: { ...leafTypography.medium, flex: 1, fontSize: 16, lineHeight: 21, color: LEAF_TEXT },
+  groupRowTitleDanger: { color: LEAF_DANGER },
+  groupRowValue: { ...leafTypography.regular, fontSize: 15, lineHeight: 20, color: LEAF_MUTED, maxWidth: '50%' },
+  groupBadge: { borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2, backgroundColor: '#E5F1DC' },
+  groupBadgeWarning: { backgroundColor: '#FBEFD9' },
+  groupBadgeText: { ...leafTypography.medium, fontSize: 12, lineHeight: 16, color: '#2F5A12' },
+  groupBadgeTextWarning: { color: '#7A4B05' },
   surface: {
     alignSelf: 'flex-start',
     borderRadius: 28,

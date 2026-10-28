@@ -69,7 +69,7 @@ describe('live Leaf settings surface', () => {
 
   it('exposes notifications and privacy for passengers without driver-only toggles', async () => {
     const ui = screen();
-    await waitFor(() => expect(ui.getByText('Ativadas no dispositivo')).toBeTruthy());
+    await waitFor(() => expect(ui.getByText('Ativadas')).toBeTruthy());
     expect(ui.queryByTestId('robotaxi-settings-section-ride')).toBeNull();
     expect(ui.queryByTestId('robotaxi-settings-row-voice')).toBeNull();
     expect(ui.queryByTestId('robotaxi-settings-row-traffic')).toBeNull();
@@ -87,7 +87,7 @@ describe('live Leaf settings surface', () => {
 
   it('opens OS settings for granted notifications instead of faking a server mute', async () => {
     const ui = screen();
-    await waitFor(() => expect(ui.getByText('Ativadas no dispositivo')).toBeTruthy());
+    await waitFor(() => expect(ui.getByText('Ativadas')).toBeTruthy());
     const sendIntent = jest.spyOn(Linking, 'sendIntent').mockResolvedValue();
     fireEvent.press(ui.getByLabelText('Notificações'));
     // Android opens the app's notification screen directly; other platforms open app settings.
@@ -102,7 +102,7 @@ describe('live Leaf settings surface', () => {
     FCMNotificationService.hasNotificationPermission.mockResolvedValue(false);
     FCMNotificationService.requestUserPermission.mockResolvedValue(false);
     const ui = screen();
-    await waitFor(() => expect(ui.getByText('Desativadas no dispositivo')).toBeTruthy());
+    await waitFor(() => expect(ui.getByText('Desativadas')).toBeTruthy());
     expect(FCMNotificationService.requestUserPermission).not.toHaveBeenCalled();
     fireEvent.press(ui.getByLabelText('Notificações'));
     await waitFor(() => expect(Alert.alert).toHaveBeenCalledWith('Notificações desativadas', expect.any(String), expect.any(Array)));
@@ -119,10 +119,10 @@ describe('live Leaf settings surface', () => {
   it('registers push after permission is granted from the settings surface', async () => {
     FCMNotificationService.hasNotificationPermission.mockResolvedValue(false);
     const ui = screen();
-    await waitFor(() => expect(ui.getByText('Desativadas no dispositivo')).toBeTruthy());
+    await waitFor(() => expect(ui.getByText('Desativadas')).toBeTruthy());
     fireEvent.press(ui.getByLabelText('Notificações'));
     await waitFor(() => expect(FCMNotificationService.getFCMToken).toHaveBeenCalledTimes(1));
-    expect(ui.getByText('Ativadas no dispositivo')).toBeTruthy();
+    expect(ui.getByText('Ativadas')).toBeTruthy();
   });
 
   it('does not save voice enabled when the native voice is unavailable', async () => {

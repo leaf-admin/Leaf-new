@@ -4,7 +4,9 @@ import { useIsFocused } from '@react-navigation/native';
 import { Alert, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSelector } from 'react-redux';
-import { LeafAccountCard, LeafObjectIcon } from '../../components/prototype/LeafVisualElements';
+import * as Application from 'expo-application';
+import { Feather } from '@expo/vector-icons';
+import { resolveLeafAccountMetrics } from '../../components/prototype/LeafVisualElements';
 import useAccountSummary from '../../hooks/useAccountSummary';
 import { useAccountSessionReset } from '../../hooks/useAccountSessionReset';
 import { LeafRootTabs } from '../../components/prototype/PrototypeScaffold';
@@ -13,10 +15,11 @@ import { resolvePrototypeProfileName } from './prototypeProfileIdentity';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
 import PrototypeDismissibleSheet from '../../components/prototype/PrototypeDismissibleSheet';
 import {
-  PrototypeMenuRow,
-  PrototypeMenuSection,
+  PrototypeMenuGroup,
+  PrototypeMenuGroupRow,
   PrototypeMenuSurface,
 } from '../../components/prototype/PrototypeMenuSurface';
+import { DRIVER_DOCS, resolveDocStatus } from './RobotaxiDriverDocumentsScreen';
 import robotaxiPrototypeTokens from '../../components/design-system/robotaxiPrototypeTokens';
 import { getPilotLaunchFeatureSnapshot } from '../../config/pilotLaunchProfile';
 import { isCurrentSurfaceUnavailable } from './currentSurfaceStatus';
@@ -34,7 +37,7 @@ export default function RobotaxiMenuScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
   const focused = useIsFocused();
   const { height: windowHeight } = useWindowDimensions();
-  const { activeRole, riderProfile, profileUid, lastReceipt, driverCanGoOnline, driverActivationRemote } = usePrototypeRideRuntime();
+  const { activeRole, riderProfile, profileUid, lastReceipt, driverCanGoOnline, driverActivationRemote, documentAnalysisState } = usePrototypeRideRuntime();
   const authProfile = useSelector(state => state?.auth?.profile);
   const accountUid = profileUid || authProfile?.uid;
   const accountSummary = useAccountSummary({ uid: accountUid, role: activeRole, revision: lastReceipt?.receiptId || lastReceipt?.id || null, focused });
@@ -63,16 +66,30 @@ export default function RobotaxiMenuScreen({ navigation, route }) {
     [activeRole, referralProgramsEnabled]
   );
 
-  // Um nível só (2026-10-28): cada linha abre a tela final, sem subtelas de grupo.
+  // Um nível só, em blocos por assunto (2026-10-28): cada linha abre a tela final.
   // Ativação aparece só enquanto o motorista ainda não pode ficar online.
   const activationPending = isDriverRole && !(driverCanGoOnline || driverActivationRemote?.canAttemptOnline === true);
-  const items = useMemo(() => {
+  const groups = useMemo(() => {
     const all = roleMenuSections.flatMap(section => section.items);
-    const keys = isDriverRole
-      ? ['driver-earnings', 'driver-history', ...(activationPending ? ['driver-activation'] : []), 'driver-documents', 'driver-vehicles', 'help', 'settings']
-      : ['trip-history', 'saved-places', 'passenger-invites', 'help', 'settings'];
-    return keys.map(key => all.find(item => item.key === key)).filter(Boolean);
+    const definitions = isDriverRole
+      ? [['work', ['driver-earnings', 'driver-history']], ['registration', [...(activationPending ? ['driver-activation'] : []), 'driver-documents', 'driver-vehicles']], ['support', ['help', 'settings']]]
+      : [['trips', ['trip-history', 'saved-places', 'passenger-invites']], ['support', ['help', 'settings']]];
+    return definitions.map(([key, keys]) => ({ key, items: keys.map(itemKey => all.find(item => item.key === itemKey)).filter(Boolean) }))
+      .filter(group => group.items.length);
   }, [roleMenuSections, isDriverRole, activationPending]);
+  // Estado à direita, só com dados que o runtime já tem (sem chamada nova).
+  const documentsBadge = useMemo(() => {
+    if (!isDriverRole) return null;
+    const statuses = DRIVER_DOCS.map(doc => resolveDocStatus(driverActivationRemote?.documents, documentAnalysisState?.byType, doc.id));
+    if (statuses.every(status => status === 'aprovado')) return { label: 'Em dia', tone: 'success' };
+    if (statuses.some(status => status === 'revisar')) return { label: 'Revisar', tone: 'warning' };
+    if (statuses.some(status => status === 'em análise')) return { label: 'Em análise', tone: 'warning' };
+    return driverActivationRemote ? { label: 'Pendente', tone: 'warning' } : null;
+  }, [documentAnalysisState?.byType, driverActivationRemote, isDriverRole]);
+  const vehiclePlate = String(driverActivationRemote?.vehicle?.plate || driverActivationRemote?.vehicle?.placa || '').trim().toUpperCase();
+  const metrics = resolveLeafAccountMetrics(cardProfile, profileName);
+  const metricsLoading = accountSummary.loading && !accountSummary.summary;
+  const appVersion = Application.nativeApplicationVersion;
   const promptLogout = () => Alert.alert('Sair da conta', 'Tem certeza que deseja sair da sua conta Leaf?', [
     { text: 'Cancelar', style: 'cancel' },
     { text: 'Sair', style: 'destructive', onPress: () => resetSessionToStart().catch(() => Alert.alert('Não foi possível sair', 'Tente novamente em alguns instantes.')) },
@@ -141,19 +158,41 @@ export default function RobotaxiMenuScreen({ navigation, route }) {
             bodyStyle={styles.body}
           >
             <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-              <TouchableOpacity style={{ marginBottom: 16 }} activeOpacity={0.9} onPress={() => handleOpenItem({ key: 'edit-profile', route: 'RobotaxiPrototypeProfile' })}
-                accessibilityRole="button" accessibilityLabel="Dados pessoais" accessibilityHint="Nome, e-mail e telefone" testID="leaf-account-card">
-                <LeafAccountCard name={profileName} role={activeRole} profile={cardProfile} motionEnabled={focused} loadingMetrics={accountSummary.loading && !accountSummary.summary} />
+              <TouchableOpacity style={styles.profileHeader} activeOpacity={0.7} onPress={() => navigation.navigate('LeafMemberCard')}
+                accessibilityRole="button" accessibilityLabel={profileName || 'Sua conta'} accessibilityHint="Abre o cartão de membro" testID="leaf-account-card">
+                <View style={styles.avatar}><Text style={styles.avatarText}>{metrics.initials}</Text></View>
+                <View style={styles.profileCopy}>
+                  <Text style={styles.profileName} numberOfLines={1}>{profileName || 'Sua conta'}</Text>
+                  <Text style={styles.profileHint}>Ver cartão de membro</Text>
+                </View>
+                <Feather name="chevron-right" size={18} color="#B3B3B3" />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.metrics} activeOpacity={0.7} onPress={() => navigation.navigate('LeafMemberCard')} accessibilityRole="button"
+                accessibilityLabel={`Avaliação ${metrics.rating || 'não disponível'}, ${metrics.trips ?? 'sem'} ${isDriverRole ? 'corridas' : 'viagens'}, ${metrics.membership} na Leaf`} testID="leaf-account-metrics">
+                {[[metrics.rating ? `${metrics.rating} ★` : '—', 'avaliação', true], [metrics.trips ?? '—', isDriverRole ? 'corridas' : 'viagens', true], [metrics.membership, 'na Leaf', false]].map(([value, label, remote]) => (
+                  <View key={label} style={styles.metricTile}>
+                    <Text style={[styles.metricValue, remote && metricsLoading && styles.metricValueLoading]} numberOfLines={1}>{remote && metricsLoading ? '…' : value}</Text>
+                    <Text style={styles.metricLabel}>{label}</Text>
+                  </View>
+                ))}
               </TouchableOpacity>
               {accountSummary.error ? <TouchableOpacity accessibilityRole="button" onPress={() => accountSummary.refresh({ forceRefresh: true })} style={{ paddingBottom: 14 }} testID="leaf-account-summary-retry"><Text style={{ ...leafTypography.regular, fontSize: 12, color: '#6A6A6A' }}>Não foi possível atualizar todos os dados. Tentar novamente.</Text></TouchableOpacity> : null}
-              {items.map((item, index) => (
-                <PrototypeMenuRow key={item.key} icon={item.icon} title={item.title}
-                  compact last={index === items.length - 1} onPress={() => handleOpenItem(item)}
-                  testID={`robotaxi-menu-item-${item.key}`} accessibilityLabel={item.title} accessibilityHint={item.subtitle} />
+              {groups.map(group => (
+                <PrototypeMenuGroup key={group.key} style={styles.group} testID={`leaf-account-group-${group.key}`}>
+                  {group.items.map(item => (
+                    <PrototypeMenuGroupRow key={item.key} icon={item.icon} title={item.title}
+                      value={item.key === 'driver-vehicles' ? vehiclePlate : undefined}
+                      badge={item.key === 'driver-documents' ? documentsBadge?.label : undefined}
+                      badgeTone={documentsBadge?.tone}
+                      onPress={() => handleOpenItem(item)}
+                      testID={`robotaxi-menu-item-${item.key}`} accessibilityHint={item.subtitle} />
+                  ))}
+                </PrototypeMenuGroup>
               ))}
               <TouchableOpacity onPress={promptLogout} style={styles.logout} accessibilityRole="button" accessibilityLabel="Sair da conta" testID="leaf-account-logout">
-                <LeafObjectIcon name="logout" size={22} /><Text style={styles.logoutText}>Sair da conta</Text>
+                <Text style={styles.logoutText}>Sair da conta</Text>
               </TouchableOpacity>
+              {appVersion ? <Text style={styles.version}>Leaf {appVersion}</Text> : null}
             </ScrollView>
           </PrototypeMenuSurface>
         </PrototypeDismissibleSheet>
@@ -184,8 +223,21 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingBottom: 16,
   },
-  logout: { minHeight: 44, marginTop: 16, flexDirection: 'row', alignItems: 'center', gap: 12 },
-  logoutText: { ...leafTypography.medium, fontSize: 14, lineHeight: 20, color: '#222222' },
+  profileHeader: { flexDirection: 'row', alignItems: 'center', gap: 14, minHeight: 64, marginBottom: 16 },
+  avatar: { width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center', backgroundColor: '#E5F1DC' },
+  avatarText: { ...leafTypography.semiBold, fontSize: 19, lineHeight: 24, color: '#1A330E' },
+  profileCopy: { flex: 1, minWidth: 0 },
+  profileName: { ...leafTypography.semiBold, fontSize: 20, lineHeight: 26, color: '#222222' },
+  profileHint: { ...leafTypography.regular, fontSize: 14, lineHeight: 19, color: '#6A6A6A', marginTop: 2 },
+  metrics: { flexDirection: 'row', gap: 8, marginBottom: 24 },
+  metricTile: { flex: 1, minWidth: 0, borderRadius: 14, backgroundColor: '#F4F4F2', paddingHorizontal: 12, paddingVertical: 12 },
+  metricValue: { ...leafTypography.semiBold, fontSize: 17, lineHeight: 22, color: '#222222', fontVariant: ['tabular-nums'] },
+  metricValueLoading: { color: '#A6A6A6' },
+  metricLabel: { ...leafTypography.regular, fontSize: 12, lineHeight: 16, color: '#6A6A6A', marginTop: 2 },
+  group: { marginBottom: 20 },
+  logout: { minHeight: 48, marginTop: 4, alignItems: 'center', justifyContent: 'center' },
+  logoutText: { ...leafTypography.medium, fontSize: 16, lineHeight: 21, color: '#B42318' },
+  version: { ...leafTypography.regular, fontSize: 12, lineHeight: 16, color: '#A6A6A6', textAlign: 'center', marginTop: 4 },
   menuSection: {
     marginBottom: 10,
   },

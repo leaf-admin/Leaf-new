@@ -42,9 +42,9 @@ const SETTINGS_COLOR = {
   title: '#222222',
   secondary: '#6A6A6A',
   line: '#E5E5E5',
-  danger: '#9F2424',
+  danger: '#B42318',
   icon: '#514B45',
-  chevron: '#767676',
+  chevron: '#B3B3B3',
 };
 
 // Três grupos fixos (2026-10-28); Sair e Ajuda ficam na Conta, não aqui.
@@ -58,6 +58,7 @@ function SettingRow({
   icon,
   title,
   subtitle,
+  value,
   onPress,
   rowTestID,
   switchTestID,
@@ -66,32 +67,32 @@ function SettingRow({
   disabled = false,
   showChevron = false,
   tone = 'default',
-  last = false,
+  divider = false,
 }) {
   const informational = !onValueChange && !onPress;
   const Container = onValueChange || informational ? View : TouchableOpacity;
   return (
     <Container
-      style={[styles.settingRow, last && styles.settingRowLast]}
+      style={styles.settingRow}
       onPress={onPress}
       disabled={disabled}
       activeOpacity={0.78}
       testID={rowTestID}
       accessible={informational ? true : undefined}
       accessibilityLabel={onValueChange ? undefined : title}
-      accessibilityHint={onValueChange ? undefined : subtitle}
+      accessibilityHint={onValueChange ? undefined : subtitle || value}
       accessibilityRole={onValueChange ? undefined : informational ? 'text' : 'button'}
       accessibilityState={{ disabled }}
     >
-      <View style={styles.rowIconSlot}>
-        <LeafObjectIcon symbol={icon} size={22} />
-      </View>
+      <LeafObjectIcon symbol={icon} size={20} color={tone === 'danger' ? SETTINGS_COLOR.danger : SETTINGS_COLOR.text} />
+      <View style={[styles.settingBody, divider && styles.settingBodyDivider]}>
       <View style={styles.settingTextWrap}>
         <Text style={[styles.settingTitle, tone === 'danger' && styles.settingTitleDanger]}>
           {title}
         </Text>
-        <Text style={styles.settingSubtitle}>{subtitle}</Text>
+        {subtitle ? <Text style={styles.settingSubtitle}>{subtitle}</Text> : null}
       </View>
+      {value ? <Text style={styles.settingValue} numberOfLines={1}>{value}</Text> : null}
       {onValueChange ? <Switch
         testID={switchTestID}
         value={Boolean(switchValue)}
@@ -104,13 +105,8 @@ function SettingRow({
         thumbColor="#FFFFFF"
         ios_backgroundColor="#D7D7D7"
       /> : null}
-      {showChevron ? (
-        <Feather
-          name="chevron-right"
-          size={18}
-          color={tone === 'danger' ? SETTINGS_COLOR.danger : SETTINGS_COLOR.chevron}
-        />
-      ) : null}
+      {showChevron && tone !== 'danger' ? <Feather name="chevron-right" size={17} color={SETTINGS_COLOR.chevron} /> : null}
+      </View>
     </Container>
   );
 }
@@ -299,7 +295,7 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
       item: ROBOTAXI_SETTINGS_ITEMS.navigationApp,
       icon: 'navigate-outline',
       title: 'App de navegação',
-      subtitle: navigationApp ? NAVIGATION_APP_LABELS[navigationApp] : 'Perguntar na próxima corrida',
+      value: navigationApp ? NAVIGATION_APP_LABELS[navigationApp] : 'Perguntar',
       onPress: chooseNavigationApp,
       disabled: navigationApp === undefined,
       showChevron: true,
@@ -350,7 +346,6 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
       item: ROBOTAXI_SETTINGS_ITEMS.traffic,
       icon: 'map-outline',
       title: 'Trânsito no mapa',
-      subtitle: 'Condições de trânsito',
       rowTestID: 'robotaxi-settings-row-traffic',
       switchTestID: 'robotaxi-settings-switch-traffic',
       switchValue: preferences.trafficLayerEnabled,
@@ -363,7 +358,7 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
       item: ROBOTAXI_SETTINGS_ITEMS.notifications,
       icon: 'notifications-outline',
       title: 'Notificações',
-      subtitle: notificationPermission === null ? 'Verificando permissão' : notificationPermission ? 'Ativadas no dispositivo' : 'Desativadas no dispositivo',
+      value: notificationPermission === null ? '' : notificationPermission ? 'Ativadas' : 'Desativadas',
       onPress: configureNotifications,
       disabled: permissionBusy,
       showChevron: true,
@@ -375,7 +370,6 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
       item: ROBOTAXI_SETTINGS_ITEMS.password,
       icon: 'lock-closed-outline',
       title: 'Senha de acesso',
-      subtitle: 'Entrar sem esperar o código',
       onPress: () => navigation.navigate('LeafAccountPassword'),
       rowTestID: 'robotaxi-settings-row-password',
       showChevron: true,
@@ -397,7 +391,6 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
       item: ROBOTAXI_SETTINGS_ITEMS.privacy,
       icon: 'shield-checkmark-outline',
       title: 'Privacidade',
-      subtitle: 'Dados, permissões e exclusão',
       onPress: () => navigation.navigate('PrivacyPolicy'),
       rowTestID: 'robotaxi-settings-row-privacy',
       showChevron: true,
@@ -407,7 +400,6 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
       item: ROBOTAXI_SETTINGS_ITEMS.deleteAccount,
       icon: 'trash-outline',
       title: 'Excluir conta',
-      subtitle: 'Iniciar exclusão permanente',
       onPress: promptAccountDeletion,
       rowTestID: 'robotaxi-settings-row-delete-account',
       showChevron: true,
@@ -469,9 +461,11 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
                 const rows = visibleSettingRows.filter(row => row.section === section.key);
                 return <View key={section.key} testID={`robotaxi-settings-section-${section.key}`}>
                   <Text style={[styles.sectionTitle, sectionIndex === 0 && { marginTop: 0 }]} accessibilityRole="header">{section.title}</Text>
-                  {rows.map(({ item, driverOnly, section: _section, ...row }, index) => (
-                    <SettingRow key={item.key} {...row} last={index === rows.length - 1} />
-                  ))}
+                  <View style={styles.group}>
+                    {rows.map(({ item, driverOnly, section: _section, ...row }, index) => (
+                      <SettingRow key={item.key} {...row} divider={index > 0} />
+                    ))}
+                  </View>
                 </View>;
               })}
             </ScrollView>
@@ -483,7 +477,8 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
 }
 
 const styles = StyleSheet.create({
-  sectionTitle: { ...leafTypography.semiBold, fontSize: 13, lineHeight: 18, color: SETTINGS_COLOR.secondary, marginTop: 20, marginBottom: 2 },
+  sectionTitle: { ...leafTypography.medium, fontSize: 13, lineHeight: 18, color: SETTINGS_COLOR.secondary, marginTop: 24, marginBottom: 8, marginLeft: 4 },
+  group: { backgroundColor: '#F4F4F2', borderRadius: 16, paddingLeft: 16, overflow: 'hidden' },
   feedback: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 12 },
   container: {
     flex: 1,
@@ -535,17 +530,10 @@ const styles = StyleSheet.create({
     paddingTop: 4,
     paddingBottom: 28,
   },
-  settingRow: {
-    minHeight: 68,
-    paddingVertical: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: SETTINGS_COLOR.line,
-  },
-  settingRowLast: {
-    borderBottomWidth: 0,
-  },
+  settingRow: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  settingBody: { flex: 1, minHeight: 52, flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10, paddingRight: 14 },
+  settingBodyDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#DCDCD8' },
+  settingValue: { ...leafTypography.regular, fontSize: 15, lineHeight: 20, color: '#767676', maxWidth: '45%' },
   settingTextWrap: {
     flex: 1,
     minWidth: 0,
@@ -566,11 +554,6 @@ const styles = StyleSheet.create({
     ...leafTypography.regular,
     fontSize: 13,
     lineHeight: 18,
-  },
-  rowIconSlot: {
-    width: 40,
-    alignItems: 'flex-start',
-    justifyContent: 'center',
   },
   hiddenSwitchTarget: {
     position: 'absolute',

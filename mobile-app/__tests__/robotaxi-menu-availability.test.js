@@ -10,7 +10,11 @@ jest.mock('../src/hooks/useAccountSessionReset', () => ({ useAccountSessionReset
 jest.mock('../src/components/prototype/LeafVisualElements', () => {
   const React = require('react');
   const { View } = require('react-native');
-  return { LeafAccountCard: () => <View />, LeafObjectIcon: () => <View /> };
+  return {
+    LeafAccountCard: () => <View />,
+    LeafObjectIcon: () => <View />,
+    resolveLeafAccountMetrics: () => ({ rating: '5,00', trips: 12, membership: '4 meses', initials: 'LT' }),
+  };
 });
 
 jest.mock('../src/config/pilotLaunchProfile', () => ({
@@ -72,8 +76,9 @@ describe('RobotaxiMenuScreen availability', () => {
     ['payment-info', 'achievements', 'privacy-account-deletion'].forEach(key =>
       expect(screen.queryByTestId(`robotaxi-menu-item-${key}`)).toBeNull());
 
+    // O cabeçalho abre o cartão de membro em tela cheia.
     fireEvent.press(screen.getByTestId('leaf-account-card'));
-    expect(navigation.navigate).toHaveBeenCalledWith('RobotaxiPrototypeProfile', { returnToAccount: true, editProfile: true });
+    expect(navigation.navigate).toHaveBeenCalledWith('LeafMemberCard');
   });
 
   it('lists driver items in one level and shows activation only while pending', () => {
@@ -85,9 +90,16 @@ describe('RobotaxiMenuScreen availability', () => {
     expect(pending.queryByTestId('robotaxi-menu-item-driver-waitlist-invites')).toBeNull();
     pending.unmount();
 
-    usePrototypeRideRuntime.mockReturnValue({ activeRole: 'driver', driverCanGoOnline: true });
+    usePrototypeRideRuntime.mockReturnValue({
+      activeRole: 'driver',
+      driverCanGoOnline: true,
+      driverActivationRemote: { documents: { cnh: { status: 'approved' }, crlv: { status: 'approved' } }, vehicle: { plate: 'abc1d23' } },
+    });
     const approved = render(<RobotaxiMenuScreen navigation={navigation} route={{ key: 'menu' }} />);
     expect(approved.queryByTestId('robotaxi-menu-item-driver-activation')).toBeNull();
+    // Estado à direita vem do runtime: documentos em dia e a placa do veículo.
+    expect(approved.getByText('Em dia')).toBeTruthy();
+    expect(approved.getByText('ABC1D23')).toBeTruthy();
     fireEvent.press(approved.getByTestId('robotaxi-menu-item-driver-earnings'));
     expect(navigation.navigate).toHaveBeenCalledWith('EarningsReport', expect.objectContaining({ source: 'driver-menu' }));
   });

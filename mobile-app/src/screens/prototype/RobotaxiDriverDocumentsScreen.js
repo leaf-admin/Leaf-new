@@ -27,7 +27,7 @@ const SURFACE_TOP_PADDING = 20;
 const SURFACE_BOTTOM_PADDING = 18;
 const BACKDROP_COLOR = 'transparent';
 
-const DRIVER_DOCS = [
+export const DRIVER_DOCS = [
   { id: 'cnh', title: 'CNH com EAR', subtitle: 'Documento obrigatório para dirigir' },
   { id: 'crlv', title: 'CRLV do veículo', subtitle: 'Valida placa, modelo e ano' },
 ];
@@ -44,7 +44,7 @@ function formatStatus(status) {
   return 'pendente';
 }
 
-function resolveDocStatus(documents, analysisByType, docId) {
+export function resolveDocStatus(documents, analysisByType, docId) {
   return formatStatus(documents?.[docId]?.status || analysisByType?.[docId]?.status);
 }
 

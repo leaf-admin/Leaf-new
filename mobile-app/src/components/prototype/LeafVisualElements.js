@@ -135,10 +135,8 @@ export function formatLeafMembership(joined) {
   return months === null ? '—' : months < 1 ? 'Novo' : months < 12 ? `${months} ${months === 1 ? 'mês' : 'meses'}` : `${Math.floor(months / 12)} ${months < 24 ? 'ano' : 'anos'}`;
 }
 
-// Values remain absent when the authenticated profile does not supply them.
-// A paginated trip history is never presented as a lifetime total.
-export function LeafAccountCard({ name, role, profile = {}, detail, onLayout, motionEnabled = false, loadingMetrics = false }) {
-  const [size, setSize] = useState({ width: 330, height: 228 });
+// Avaliação, viagens, tempo de casa e iniciais: usados pelo cartão e pelo cabeçalho da Conta.
+export function resolveLeafAccountMetrics(profile = {}, name) {
   const ratingValue = profile.rating ?? profile.averageRating;
   const rating = ratingValue !== null && ratingValue !== undefined && Number(ratingValue) > 0 && Number(ratingValue) <= 5
     ? Number(ratingValue).toFixed(2).replace('.', ',') : null;
@@ -146,6 +144,14 @@ export function LeafAccountCard({ name, role, profile = {}, detail, onLayout, mo
   const trips = rawTrips !== null && rawTrips !== undefined && Number.isFinite(Number(rawTrips)) && Number(rawTrips) >= 0 ? Math.floor(Number(rawTrips)) : null;
   const membership = formatLeafMembership(profile.createdAt);
   const initials = String(name || 'L').trim().split(/\s+/).filter(Boolean).slice(0, 2).map(part => part.charAt(0)).join('').toUpperCase();
+  return { rating, trips, membership, initials };
+}
+
+// Values remain absent when the authenticated profile does not supply them.
+// A paginated trip history is never presented as a lifetime total.
+export function LeafAccountCard({ name, role, profile = {}, detail, memberNumber, onLayout, motionEnabled = false, loadingMetrics = false }) {
+  const [size, setSize] = useState({ width: 330, height: 228 });
+  const { rating, trips, membership, initials } = resolveLeafAccountMetrics(profile, name);
   const { tilt, sensor } = useLeafCardTilt(motionEnabled);
   // O cartão inclina de leve com o celular e a sombra corre para o lado oposto,
   // como um cartão de verdade erguido sobre a tela.
@@ -164,7 +170,7 @@ export function LeafAccountCard({ name, role, profile = {}, detail, onLayout, mo
     <View onLayout={event => { setSize(event.nativeEvent.layout); onLayout?.(event); }} style={styles.card}>
       <LeafCardMaterial width={size.width} height={size.height} tilt={tilt} />
       <View style={styles.cardTop}>
-        <Text style={styles.detail}>Seu perfil Leaf</Text>
+        <Text style={styles.detail}>{memberNumber ? 'Membro Leaf' : 'Seu perfil Leaf'}</Text>
         <View style={styles.brand}><LeafBrandMark /></View>
       </View>
       <View style={styles.identity}>
@@ -175,6 +181,7 @@ export function LeafAccountCard({ name, role, profile = {}, detail, onLayout, mo
           {detail ? <Text style={styles.detail}>{detail}</Text> : null}
         </View>
       </View>
+      {memberNumber ? <Text style={styles.memberNumber} accessibilityLabel={`Número de membro ${memberNumber}`} testID="leaf-member-number">{memberNumber}</Text> : null}
       <View style={styles.cardBottom}>
         {[[rating ? `${rating} ★` : '—', 'avaliação'], [trips ?? '—', 'viagens'], [membership, 'na Leaf']].map(([value, label], index) =>
           <View key={label} style={[styles.metric, index > 0 && styles.metricDivider]} accessible accessibilityLabel={`${label}: ${loadingMetrics && label !== 'na Leaf' ? 'carregando' : value === '—' ? 'não disponível' : value}`}>
@@ -201,6 +208,7 @@ const styles = StyleSheet.create({
   copy: { flex: 1 }, name: { ...leafTypography.semiBold, fontSize: 18, lineHeight: 23, color: '#222222' },
   detail: { ...leafTypography.regular, fontSize: 12, lineHeight: 17, color: '#6A6A6A' },
   cardBottom: { marginTop: 18, paddingTop: 18, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#D6D9D6', flexDirection: 'row' },
+  memberNumber: { ...leafTypography.medium, fontSize: 19, lineHeight: 24, letterSpacing: 2, fontVariant: ['tabular-nums'], color: '#222222', marginTop: 18 },
   metric: { flex: 1, minWidth: 0, justifyContent: 'center' },
   metricDivider: { borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: '#D6D9D6', paddingLeft: 12 },
   metricValue: { ...leafTypography.semiBold, fontSize: 20, lineHeight: 25, fontVariant: ['tabular-nums'], color: '#222222' },
