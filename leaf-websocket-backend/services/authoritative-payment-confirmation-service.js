@@ -138,6 +138,15 @@ function amountMatchesExpected(record = {}, expectedAmountInCents = 0) {
   return recordAmount > 0 && recordAmount === expectedAmountInCents;
 }
 
+function isRefundClaimedOrDone(record = {}) {
+  const status = String(record.status || record.paymentStatus || '').trim().toUpperCase();
+  return record.refunded === true ||
+    record.refundInProgress === true ||
+    status === 'REFUNDED' ||
+    status === 'REFUNDED_FULL' ||
+    status === 'REFUNDED_PARTIAL';
+}
+
 function isAuthoritativePaymentRecord(record = {}, { references = [], expectedAmountInCents = 0 } = {}) {
   const source = normalizePaymentStatus(record.source || record.metadata?.source);
   return (
@@ -293,6 +302,22 @@ async function resolveAuthoritativePaymentConfirmation({
     ));
   }
   const localRecords = await Promise.all(localLookups);
+
+  // A refund claimed or done (e.g. the orphan-payment refund) ends this payment:
+  // the provider may still report the charge as paid, so check it first.
+  const refundedRecord = localRecords.find((record) =>
+    record &&
+    recordMatchesPaymentScope(record, confirmationScope) &&
+    recordMatchesAnyReference(record, safeReferences) &&
+    isRefundClaimedOrDone(record)
+  );
+  if (refundedRecord) {
+    return {
+      success: false,
+      code: 'PAYMENT_REFUNDED',
+      message: 'Este pagamento foi estornado. Gere um novo Pix para pedir a corrida.'
+    };
+  }
 
   const authoritativeLocalRecord = localRecords.find((record) =>
     recordMatchesPaymentScope(record, confirmationScope) && isAuthoritativePaymentRecord(record, {

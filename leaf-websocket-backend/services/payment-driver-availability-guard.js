@@ -212,6 +212,9 @@ async function hasPaymentEligibleDriver({
   reserveDriver = false,
   reservationContext = {},
   reservationTtlSeconds = null,
+  // Read-only checks: a payment reservation held by this same (authenticated)
+  // passenger is their own pending Pix, not another rider's claim on the driver.
+  ownPassengerId = null,
   io = null,
   requireDispatchReachability = Boolean(io) &&
     String(process.env.PAYMENT_AVAILABILITY_REQUIRE_DISPATCH_REACHABILITY || 'true').toLowerCase() !== 'false',
@@ -286,7 +289,10 @@ async function hasPaymentEligibleDriver({
       if (!driverId) continue;
 
       const paymentReservation = await getDriverPaymentReservation(redisClient, driverId);
-      if (paymentReservation && !reservationMatchesContext(paymentReservation, reservationContext)) {
+      const ownReservation = !reserveDriver &&
+        Boolean(ownPassengerId) &&
+        String(paymentReservation?.passengerId || '').trim() === String(ownPassengerId).trim();
+      if (paymentReservation && !ownReservation && !reservationMatchesContext(paymentReservation, reservationContext)) {
         rejections.paymentReserved += 1;
         continue;
       }

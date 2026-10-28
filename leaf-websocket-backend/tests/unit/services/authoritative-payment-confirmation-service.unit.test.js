@@ -77,6 +77,42 @@ describe('authoritative-payment-confirmation-service', () => {
     });
   });
 
+  it.each([
+    ['done', { status: 'REFUNDED', refunded: true }],
+    ['claimed', { status: 'CONFIRMED', refundInProgress: true }]
+  ])('refuses a payment whose refund is %s, even if the provider still reports it paid', async (_label, refundState) => {
+    const firestore = createFirestoreWithDocs({
+      'payment_holdings/temp_ride_session_1': {
+        status: 'in_holding',
+        source: 'woovi_webhook',
+        chargeId: 'charge_1',
+        paymentId: 'charge_1',
+        amount: 3840,
+      },
+      'ride_payments/temp_ride_session_1': {
+        chargeId: 'charge_1',
+        amount: 3840,
+        ...refundState,
+      },
+    });
+    const paymentService = {
+      getPaymentStatus: jest.fn().mockResolvedValue({
+        success: true, status: 'paid', amount: 3840, source: 'woovi_provider'
+      }),
+    };
+
+    const result = await resolveAuthoritativePaymentConfirmation({
+      firestore,
+      paymentService,
+      bookingId: 'temp_ride_session_1',
+      references: ['charge_1'],
+      expectedAmountInCents: 3840,
+    });
+
+    expect(result).toMatchObject({ success: false, code: 'PAYMENT_REFUNDED' });
+    expect(paymentService.getPaymentStatus).not.toHaveBeenCalled();
+  });
+
   it('rejects local cache payment status as provider proof', async () => {
     const paymentService = {
       getPaymentStatus: jest.fn().mockResolvedValue({

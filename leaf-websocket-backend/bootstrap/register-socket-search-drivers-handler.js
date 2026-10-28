@@ -61,6 +61,7 @@ function registerSocketSearchDriversHandler({
             carType: options.carType || null,
             radiusKm: options.radiusKm,
             limit: options.limit,
+            ownPassengerId: options.ownPassengerId || null,
             io: socket?.nsp || socket?.server || null,
             logStructured,
             logContext: {
@@ -89,7 +90,9 @@ function registerSocketSearchDriversHandler({
                 destinationLocation: data?.destinationLocation || data?.destination || null,
                 preferences: data?.preferences || {},
                 radiusKm: Number.isFinite(requestedRadiusKm) ? requestedRadiusKm : 5,
-                limit: Number.parseInt(data?.limit || getPaymentAvailabilityLimit(), 10)
+                limit: Number.parseInt(data?.limit || getPaymentAvailabilityLimit(), 10),
+                // Only the authenticated socket identity, never a client-supplied id.
+                ownPassengerId: socket.userId || null
             });
 
             if (!availability?.success) {
