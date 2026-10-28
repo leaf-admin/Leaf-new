@@ -299,7 +299,13 @@ function getTicketClassificationLabel(ticket) {
 }
 
 function getChatTitle(chat) {
-  return chat?.userInfo?.name || chat?.userName || chat?.userId || "Usuario";
+  const name = chat?.userInfo?.name || chat?.userName || chat?.userId || "Usuario";
+  return chat?.channel === "whatsapp" ? `WhatsApp · ${name}` : name;
+}
+
+function deliveryLabel(status) {
+  return ({ sending: "Enviando", unknown: "Sem confirmação — não reenviar", accepted: "Aceita pela Meta",
+    sent: "Enviada", delivered: "Entregue", read: "Lida", failed: "Falha no envio" })[status] || "";
 }
 
 function getUserDisplayName(user, fallback = "-") {
@@ -450,6 +456,7 @@ function deriveSummary(tickets, queueSummary) {
 
 function SupportPageContent({ supportScope }) {
   const chatRealtimeRef = useRef(false);
+  const whatsappSendKeys = useRef(new Map());
   const { user } = useAuth();
   const { requestConfirmation, confirmationDialog } = useConfirmAction();
   const isOperationalSupportScope = supportScope === "operational";
@@ -502,7 +509,8 @@ function SupportPageContent({ supportScope }) {
   });
 
   const selectedUserId = selectedTicket?.userId || selectedTicket?.user?.id || null;
-  const activeContextUserId = selectedN0Chat?.userId || selectedUserId || null;
+  const activeContextUserId = selectedN0Chat?.channel === "whatsapp"
+    ? null : selectedN0Chat?.userId || selectedUserId || null;
   const orchestratorEnabled = isOperationalSupportScope && leafAPI.isSupportOrchestratorEnabled();
 
   const markFreshnessSuccess = useCallback((key, scopeId = null) => {
@@ -711,7 +719,11 @@ function SupportPageContent({ supportScope }) {
       loadChatInbox();
       setN0ChatMessages((current) => {
         if (selectedN0Chat?.userId !== message.userId) return current;
-        if (current.some((item) => item.id === message.id)) return current;
+        if (current.some((item) => item.id === message.id)) {
+          return message.channel === "whatsapp"
+            ? current.map((item) => item.id === message.id ? { ...item, ...message } : item)
+            : current;
+        }
         return [...current, message].slice(-80);
       });
     };
@@ -1055,14 +1067,14 @@ function SupportPageContent({ supportScope }) {
       id: `chat:${chat.userId}`,
       type: "n0",
       title: getChatTitle(chat),
-      subtitle: chat.userId || "Chat N0",
+      subtitle: chat.channel === "whatsapp" ? `+${chat.phone} · identidade Leaf não verificada` : chat.userId || "Chat N0",
       preview: chat.lastMessage?.message || "Sem mensagem recente.",
       timestamp: chat.lastMessageAt || chat.updatedAt,
       unread: Number(chat.unreadFromUser || 0),
       priority: chat.ticketId ? "N2" : "N3",
       status: chat.status || "active",
       tone: chat.unreadFromUser > 0 ? "status-warn" : "status-ok",
-      badge: chat.ticketId ? "com chamado" : "chat",
+      badge: chat.channel === "whatsapp" ? "WhatsApp" : chat.ticketId ? "com chamado" : "chat",
       raw: chat,
     }));
     return [...chatItems, ...ticketItems]
@@ -1173,6 +1185,7 @@ function SupportPageContent({ supportScope }) {
   const canApplyCopilotEscalation = canRunSupportAction(supportPolicy, "copilot_escalate", selectedTicketTier);
   const canConvertSelectedN0 =
     selectedN0Chat?.userId &&
+    selectedN0Chat?.channel !== "whatsapp" &&
     !selectedN0Chat?.ticketId &&
     n0ConversionGaps.length > 0 &&
     canRunSupportAction(supportPolicy, "convert_n0", selectedN0Priority);
@@ -1185,8 +1198,12 @@ function SupportPageContent({ supportScope }) {
     ? `${selectedN0Chat?.status || "active"} · ${selectedN0Chat?.unreadFromUser || 0} não lida(s)`
     : `${selectedTicket?.priority || "N3"} · ${selectedTicket?.status || "open"} · ${selectedTicket?.userId || "sem usuário"}`;
   const replyValue = mode === "n0" ? n0ChatReply : newMessage;
+  const whatsappReplyBlocked = selectedN0Chat?.channel === "whatsapp" && (
+    selectedN0Chat.status === "closed" || selectedN0Chat.pendingOperationId ||
+    !selectedN0Chat.replyWindowExpiresAt || freshnessClock >= Date.parse(selectedN0Chat.replyWindowExpiresAt)
+  );
   const canReplyActiveThread = mode === "n0"
-    ? canRunSupportAction(supportPolicy, "message", "N3")
+    ? canRunSupportAction(supportPolicy, "message", "N3") && !whatsappReplyBlocked
     : canMessageSelected;
   const selectInboxItem = (item) => {
     setError("");
@@ -1449,25 +1466,39 @@ function SupportPageContent({ supportScope }) {
   };
 
   const sendN0ChatMessage = async () => {
-    if (!selectedN0Chat?.userId || !n0ChatReply.trim()) return;
+    if (!selectedN0Chat?.userId || !n0ChatReply.trim() || actionBusy || whatsappReplyBlocked) return;
     if (!canRunSupportAction(supportPolicy, "message", "N3")) {
       setError(supportActionBlockReason(supportPolicy, "message", "N3"));
       return;
     }
     const text = n0ChatReply.trim();
+    const key = `${selectedN0Chat.userId}\n${text}`;
+    const isWhatsApp = selectedN0Chat.channel === "whatsapp";
+    if (isWhatsApp && !whatsappSendKeys.current.has(key)) {
+      whatsappSendKeys.current.set(key, crypto.randomUUID());
+    }
     setN0ChatReply("");
     try {
       setActionBusy("n0-message");
       setError("");
       setActionMessage("");
-      await leafAPI.sendChatMessage(selectedN0Chat.userId, text, supportApiContext);
-      const history = await leafAPI.getChatHistory(selectedN0Chat.userId, 80, supportApiContext);
-      setN0ChatMessages(history?.messages || []);
-      await loadChatInbox();
-      setActionMessage("Mensagem enviada no chat N0.");
+      await leafAPI.sendChatMessage(selectedN0Chat.userId, text, {
+        ...supportApiContext, whatsappRequestId: isWhatsApp ? whatsappSendKeys.current.get(key) : undefined,
+      });
+      whatsappSendKeys.current.delete(key);
+      setActionMessage(isWhatsApp ? "Mensagem aceita pela Meta. Acompanhe o status de entrega." : "Mensagem enviada no chat N0.");
+      try {
+        const history = await leafAPI.getChatHistory(selectedN0Chat.userId, 80, supportApiContext);
+        setN0ChatMessages(history?.messages || []);
+        await loadChatInbox();
+      } catch {
+        setError("Envio confirmado, mas a atualização da conversa falhou. Atualize antes de reenviar.");
+      }
     } catch (err) {
+      if (err?.payload?.code === "WHATSAPP_REJECTED") whatsappSendKeys.current.delete(key);
       setError(err?.message || "Falha ao responder chat N0");
       setN0ChatReply(text);
+      if (isWhatsApp) await loadChatInbox().catch(() => null);
     } finally {
       setActionBusy("");
     }
@@ -1838,12 +1869,22 @@ function SupportPageContent({ supportScope }) {
                         >
                           <strong>{message.senderType === "agent" ? "Suporte" : "Usuário"}</strong>
                           <span>{message.message || "-"}</span>
-                          <small>{formatDateTime(message.createdAt || message.timestamp)}</small>
+                          <small>{formatDateTime(message.createdAt || message.timestamp)} {deliveryLabel(message.deliveryStatus)}</small>
                         </div>
                       ))
                     )}
                   </div>
                   <div className="support-composer">
+                    {selectedN0Chat.channel === "whatsapp" ? (
+                      <p className="text-muted">
+                        Contato externo: confirme a identidade antes de tratar dados da conta Leaf.
+                        {selectedN0Chat.pendingOperationId
+                          ? " Há um envio sem confirmação. Aguarde antes de reenviar."
+                          : whatsappReplyBlocked
+                            ? " Aguarde uma nova mensagem do contato para responder."
+                            : " Respostas de texto disponíveis por 24 horas após a última mensagem do contato."}
+                      </p>
+                    ) : null}
                     <div className="quick-reply-row">
                       {N0_QUICK_REPLIES.map((template) => (
                         <button key={template} type="button" onClick={() => updateActiveReply(template)}>
@@ -1934,7 +1975,7 @@ function SupportPageContent({ supportScope }) {
                       >
                         <strong>{message.senderType === "agent" ? "Suporte" : "Usuário"}</strong>
                         <span>{message.message || "-"}</span>
-                        <small>{formatDateTime(message.createdAt || message.timestamp)}</small>
+                        <small>{formatDateTime(message.createdAt || message.timestamp)} {deliveryLabel(message.deliveryStatus)}</small>
                       </div>
                     ))
                   )}
@@ -2826,7 +2867,7 @@ function SupportPageContent({ supportScope }) {
                   <button
                     type="button"
                     onClick={sendN0ChatMessage}
-                    disabled={!!actionBusy || !n0ChatReply.trim() || !canRunSupportAction(supportPolicy, "message", "N3")}
+                    disabled={!!actionBusy || whatsappReplyBlocked || !n0ChatReply.trim() || !canRunSupportAction(supportPolicy, "message", "N3")}
                   >
                     {actionBusy === "n0-message" ? "Enviando..." : "Enviar"}
                   </button>

@@ -9,6 +9,7 @@ const { driverApplicationsFixture } = require("./fixtures/driver-applications.cj
 
 const dashboardRoot = path.resolve(__dirname, "..", "..");
 const forbiddenPaidHosts = [
+  "graph.facebook.com",
   "googleapis.com",
   "maps.googleapis.com",
   "maps.gstatic.com",
@@ -592,6 +593,19 @@ function fixtureForApiPath(apiPath, method) {
       success: true,
       chats: [
         {
+          userId: "whatsapp:12345:5521999990000", channel: "whatsapp", phone: "5521999990000",
+          userName: "Contato WhatsApp Smoke", status: "active", unreadFromUser: 1,
+          lastMessageAt: new Date().toISOString(), lastMessage: { message: "Mensagem de teste WhatsApp" },
+          replyWindowExpiresAt: new Date(Date.now() + 3600000).toISOString(),
+        },
+        {
+          userId: "whatsapp:12345:5521999990001", channel: "whatsapp", phone: "5521999990001",
+          userName: "WhatsApp janela encerrada", status: "active", unreadFromUser: 0,
+          lastMessageAt: new Date(Date.now() - 90000000).toISOString(),
+          lastMessage: { message: "Janela expirada" },
+          replyWindowExpiresAt: new Date(Date.now() - 3600000).toISOString(),
+        },
+        {
           userId: "user-smoke",
           userName: "Passageiro Smoke",
           preview: "Preciso de ajuda com minha corrida",
@@ -777,6 +791,9 @@ async function installRoutes(context, observed) {
       if (apiPath.startsWith("/reports/generate/")) {
         observed.reportDownloadAuthorization = request.headers().authorization || "";
       }
+      if (apiPath.startsWith("/support/chat/whatsapp:") && apiPath.endsWith("/message")) {
+        observed.whatsappRequestId = request.headers()["idempotency-key"] || "";
+      }
       await route.fulfill(fixtureForApiPath(apiPath, request.method()));
       return;
     }
@@ -896,6 +913,29 @@ async function assertReportsDownloadContract(page, observed) {
   log("reports export uses authenticated dashboard API client ok");
 }
 
+async function assertWhatsAppSupportContract(page, observed) {
+  // Local fixture validation only; never evidence of a real Meta delivery.
+  await page.locator('.support-thread-row', { hasText: 'Contato WhatsApp Smoke' }).click();
+  const conversation = page.locator('.support-conversation-panel');
+  await conversation.getByText('Contato externo:', { exact: false }).waitFor();
+  if (!await conversation.getByRole('button', { name: 'Virar chamado', exact: true }).isDisabled()) {
+    throw new Error('Unverified WhatsApp contact must not be converted automatically');
+  }
+  await conversation.locator('textarea').fill('Resposta simulada do suporte');
+  await conversation.getByRole('button', { name: 'Enviar', exact: true }).click();
+  await page.getByText('Mensagem aceita pela Meta. Acompanhe o status de entrega.', { exact: true }).first().waitFor();
+  if (!/^[a-zA-Z0-9_-]{16,128}$/.test(observed.whatsappRequestId || '')) {
+    throw new Error('WhatsApp reply must carry an idempotency key');
+  }
+  await page.locator('.support-thread-row', { hasText: 'WhatsApp janela encerrada' }).click();
+  await conversation.getByText('Aguarde uma nova mensagem do contato', { exact: false }).waitFor();
+  await conversation.locator('textarea').fill('Esta resposta deve ficar bloqueada');
+  if (!await conversation.getByRole('button', { name: 'Enviar', exact: true }).isDisabled()) {
+    throw new Error('Expired WhatsApp reply window must disable the composer');
+  }
+  log('WhatsApp fixture: external identity, idempotency and expired window validated');
+}
+
 async function main() {
   const port = await getFreePort();
   const baseURL = `http://localhost:${port}`;
@@ -1004,6 +1044,7 @@ async function main() {
         hasText: "payment_account_document_or_stuck_flow_keyword, payment_category_minimum",
       })
       .waitFor({ timeout: 15000 });
+    await assertWhatsAppSupportContract(page, observed);
     const campaignsLink = page.getByRole("link", { name: "Campanhas" }).first();
     if (await campaignsLink.count()) {
       await campaignsLink.click();

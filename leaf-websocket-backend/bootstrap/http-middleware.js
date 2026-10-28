@@ -3,7 +3,8 @@ function shouldCaptureSignedWebhookRawBody(req) {
     return requestUrl.includes('/api/woovi/webhook')
         || requestUrl.includes('/api/woovi-webhook')
         || requestUrl.includes('/api/webhooks/woovi')
-        || requestUrl.includes('/api/ops/alerts/sentry');
+        || requestUrl.includes('/api/ops/alerts/sentry')
+        || requestUrl.split('?')[0].replace(/\/$/, '') === '/api/integrations/whatsapp/webhook';
 }
 
 function captureSignedWebhookRawBody(req, _res, buffer) {
@@ -83,6 +84,8 @@ function configureHttpMiddleware({
     }
 
     // ✅ CORREÇÃO: Aumentar limite e timeout para uploads de CNH
+    // Public signed webhook has a small parser before the general upload parser.
+    app.use('/api/integrations/whatsapp/webhook', express.json({ limit: '1mb', verify: captureSignedWebhookRawBody }));
     app.use(express.json({ limit: '50mb', verify: captureSignedWebhookRawBody })); // Aumentado de 10mb para 50mb
     app.use(express.urlencoded(URLENCODED_LIMITS));
 

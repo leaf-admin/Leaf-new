@@ -1267,6 +1267,7 @@ class LeafApiService {
     this.assertOperationalSupportChatScope(context);
     return this.request(`/support/chat/${userId}/message`, {
       method: "POST",
+      headers: context.whatsappRequestId ? { "Idempotency-Key": context.whatsappRequestId } : {},
       body: JSON.stringify({ message, senderType: "agent" }),
     });
   }
