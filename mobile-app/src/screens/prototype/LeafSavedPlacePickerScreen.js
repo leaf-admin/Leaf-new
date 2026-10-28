@@ -77,7 +77,7 @@ export default function LeafSavedPlacePickerScreen({ navigation, route }) {
     <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
       {!search && visible.items.length ? <Text style={styles.detail}>Recentes</Text> : null}
       {visible.items.map((item, index) => <TouchableOpacity key={item.id || index} style={styles.row} onPress={() => select(item)} disabled={resolving || !validOwner} accessibilityRole="button" accessibilityLabel={item.address || item.name} testID={`leaf-place-search-result-${index}`}>
-        <LeafObjectIcon name="places" size={40} /><View style={styles.copy}><Text style={styles.name}>{item.name || item.address}</Text>{item.address && item.address !== item.name ? <Text style={styles.detail}>{item.address}</Text> : null}</View><Ionicons name="chevron-forward" size={14} color="#6A6A6A" />
+        <LeafObjectIcon name="places" size={22} /><View style={styles.copy}><Text style={styles.name}>{item.name || item.address}</Text>{item.address && item.address !== item.name ? <Text style={styles.detail}>{item.address}</Text> : null}</View><Ionicons name="chevron-forward" size={14} color="#6A6A6A" />
       </TouchableOpacity>)}
       {!visible.loading && !visible.error && !visible.items.length ? <Text style={styles.detail}>{search.length >= 3 ? 'Nenhum endereço encontrado. Tente outro nome.' : 'Digite pelo menos 3 caracteres para buscar.'}</Text> : null}
     </ScrollView>

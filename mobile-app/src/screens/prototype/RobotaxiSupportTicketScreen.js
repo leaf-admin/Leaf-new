@@ -105,7 +105,7 @@ function TicketTypeRow({ item, active, onPress, expanded = null }) {
       accessibilityState={expanded === null ? { checked: active } : { expanded }}
     >
       <View style={styles.typeIcon}>
-        <LeafObjectIcon symbol={item.icon} size={40} />
+        <LeafObjectIcon symbol={item.icon} size={22} />
       </View>
       <View style={styles.typeCopy}>
         <Text style={styles.typeTitle}>{item.title}</Text>

@@ -67,7 +67,7 @@ export default function LeafSavedPlacesScreen({ navigation, route }) {
   const choose = place => { setSelected(place); setLabel(place.name || ''); };
   const edit = place => { choose(place); setEditingId(localOnly.some(item => item.id === place.id) ? null : place.id); setAdding(true); };
   const row = (place, index, saved) => <View key={place.id || index} style={styles.row}>
-    <LeafObjectIcon name="places" size={40} />
+    <LeafObjectIcon name="places" size={22} />
     <TouchableOpacity style={styles.copy} accessibilityRole="button" accessibilityLabel={place.name || place.address} testID={`leaf-place-open-${index}`} disabled={busy} onPress={() => saved ? navigation.navigate('RobotaxiPrototypeDestination', { initialSelectedDestination: place }) : choose(place)}>
       <Text style={styles.name}>{place.name || place.address}</Text><Text style={styles.detail}>{place.address}</Text>
     </TouchableOpacity>

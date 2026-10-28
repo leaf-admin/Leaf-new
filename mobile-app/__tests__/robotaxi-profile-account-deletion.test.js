@@ -113,57 +113,28 @@ describe('RobotaxiProfileScreen account deletion entry point', () => {
     jest.restoreAllMocks();
   });
 
-  it('keeps an explicit account deletion shortcut visible on profile and opens confirmation directly', async () => {
-    const navigation = {
-      navigate: jest.fn(),
-      replace: jest.fn(),
-    };
-    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
-
+  it('opens straight into the personal data editor without the duplicated account hub', async () => {
+    const navigation = { navigate: jest.fn(), replace: jest.fn() };
     const screen = render(
       <RobotaxiProfileScreen navigation={navigation} route={{ key: 'profile' }} />
     );
 
-    await waitFor(() => expect(screen.getByTestId('profile-account-deletion-shortcut')).toBeTruthy());
-    expect(screen.getByTestId('profile-logout-shortcut')).toBeTruthy();
-    expect(screen.getByText('Sair da conta')).toBeTruthy();
-    expect(screen.getByText('Excluir conta')).toBeTruthy();
-
-    fireEvent.press(screen.getByTestId('profile-account-deletion-shortcut'));
-
-    expect(navigation.replace).not.toHaveBeenCalled();
-    expect(alertSpy).toHaveBeenCalledWith(
-      'Excluir conta',
-      expect.stringContaining('irreversível'),
-      expect.arrayContaining([
-        expect.objectContaining({ text: 'Cancelar', style: 'cancel' }),
-        expect.objectContaining({ text: 'Excluir conta', style: 'destructive' }),
-      ]),
-    );
+    await waitFor(() => expect(screen.getByTestId('robotaxi-profile-editor')).toBeTruthy());
+    // Sair e Excluir conta ficam na Conta e em Configurações, não repetidos aqui.
+    expect(screen.queryByTestId('profile-logout-shortcut')).toBeNull();
+    expect(screen.queryByTestId('profile-account-deletion-shortcut')).toBeNull();
+    expect(screen.queryByText('Excluir conta')).toBeNull();
   });
 
-  it('keeps logout visible on profile and asks for confirmation before leaving the account', async () => {
-    const navigation = {
-      navigate: jest.fn(),
-      replace: jest.fn(),
-    };
-    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
-
+  it('returns to Conta when the editor is cancelled', async () => {
+    const navigation = { navigate: jest.fn(), replace: jest.fn(), canGoBack: () => false };
     const screen = render(
       <RobotaxiProfileScreen navigation={navigation} route={{ key: 'profile' }} />
     );
 
-    await waitFor(() => expect(screen.getByTestId('profile-logout-shortcut')).toBeTruthy());
-    fireEvent.press(screen.getByTestId('profile-logout-shortcut'));
-
-    expect(alertSpy).toHaveBeenCalledWith(
-      'Sair da conta',
-      expect.stringContaining('Tem certeza'),
-      expect.arrayContaining([
-        expect.objectContaining({ text: 'Cancelar', style: 'cancel' }),
-        expect.objectContaining({ text: 'Sair', style: 'destructive' }),
-      ]),
-    );
+    await waitFor(() => expect(screen.getByTestId('robotaxi-profile-editor')).toBeTruthy());
+    fireEvent.press(screen.getByText('Cancelar'));
+    expect(navigation.navigate).toHaveBeenCalledWith('RobotaxiPrototypeMenu');
   });
 
   it('edits personal data through the authenticated profile persistence contract', async () => {
@@ -172,9 +143,7 @@ describe('RobotaxiProfileScreen account deletion entry point', () => {
       <RobotaxiProfileScreen navigation={navigation} route={{ key: 'profile' }} />
     );
 
-    await waitFor(() => expect(screen.getByText('Dados pessoais')).toBeTruthy());
-    fireEvent.press(screen.getByText('Dados pessoais'));
-    expect(screen.getByTestId('robotaxi-profile-phone-readonly')).toBeTruthy();
+    await waitFor(() => expect(screen.getByTestId('robotaxi-profile-phone-readonly')).toBeTruthy());
     expect(screen.queryByTestId('robotaxi-profile-input-phone')).toBeNull();
     expect(screen.getByText('Para alterar o telefone, será necessária uma nova validação de segurança. Em breve.')).toBeTruthy();
     fireEvent.changeText(screen.getByTestId('robotaxi-profile-input-name'), 'Leaf Atualizado');
@@ -201,10 +170,7 @@ describe('RobotaxiProfileScreen account deletion entry point', () => {
       <RobotaxiProfileScreen navigation={navigation} route={{ key: 'profile-first-write' }} />
     );
 
-    await waitFor(() => expect(screen.getByText('Dados pessoais')).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId('robotaxi-profile-editor')).toBeTruthy());
     expect(screen.queryByTestId('robotaxi-profile-error')).toBeNull();
-
-    fireEvent.press(screen.getByText('Dados pessoais'));
-    expect(screen.getByTestId('robotaxi-profile-editor')).toBeTruthy();
   });
 });

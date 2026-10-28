@@ -52,6 +52,7 @@ import RobotaxiMenuScreen from '../screens/prototype/RobotaxiMenuScreen';
 import LeafSavedPlacesScreen from '../screens/prototype/LeafSavedPlacesScreen';
 import LeafSavedPlacePickerScreen from '../screens/prototype/LeafSavedPlacePickerScreen';
 import LeafAccountInfoScreen from '../screens/prototype/LeafAccountInfoScreen';
+import LeafMemberCardScreen from '../screens/prototype/LeafMemberCardScreen';
 import LeafAccountPasswordScreen from '../screens/prototype/LeafAccountPasswordScreen';
 import RobotaxiTripHistoryScreen from '../screens/prototype/RobotaxiTripHistoryScreen';
 import RobotaxiDriverAvoidedAreasScreen from '../screens/prototype/RobotaxiDriverAvoidedAreasScreen';
@@ -689,6 +690,7 @@ function renderSharedPrototypeScreens() {
       <Stack.Screen name="LeafSavedPlaces" component={LeafSavedPlacesScreen} options={prototypeOverlayScreenOptions} />
       <Stack.Screen name="LeafSavedPlacePicker" component={LeafSavedPlacePickerScreen} options={prototypeOverlayScreenOptions} />
       <Stack.Screen name="LeafAccountInfo" component={LeafAccountInfoScreen} options={prototypeOverlayScreenOptions} />
+      <Stack.Screen name="LeafMemberCard" component={LeafMemberCardScreen} options={prototypeOverlayScreenOptions} />
       <Stack.Screen name="LeafAccountPassword" component={LeafAccountPasswordScreen} options={prototypeOverlayScreenOptions} />
       <Stack.Screen
         name="RobotaxiPrototypeMenu"

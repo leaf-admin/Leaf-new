@@ -67,10 +67,10 @@ describe('live Leaf settings surface', () => {
   afterEach(() => jest.restoreAllMocks());
   const screen = () => render(<RobotaxiSettingsScreen navigation={navigation} route={{ key: 'settings' }} />);
 
-  it('exposes notifications and locale for passengers without driver-only toggles', async () => {
+  it('exposes notifications and privacy for passengers without driver-only toggles', async () => {
     const ui = screen();
-    await waitFor(() => expect(ui.getByText('Ativadas no dispositivo')).toBeTruthy());
-    expect(ui.getByText('Português do Brasil')).toBeTruthy();
+    await waitFor(() => expect(ui.getByText('Ativadas')).toBeTruthy());
+    expect(ui.queryByTestId('robotaxi-settings-section-ride')).toBeNull();
     expect(ui.queryByTestId('robotaxi-settings-row-voice')).toBeNull();
     expect(ui.queryByTestId('robotaxi-settings-row-traffic')).toBeNull();
     fireEvent.press(ui.getByLabelText('Privacidade'));
@@ -87,7 +87,7 @@ describe('live Leaf settings surface', () => {
 
   it('opens OS settings for granted notifications instead of faking a server mute', async () => {
     const ui = screen();
-    await waitFor(() => expect(ui.getByText('Ativadas no dispositivo')).toBeTruthy());
+    await waitFor(() => expect(ui.getByText('Ativadas')).toBeTruthy());
     const sendIntent = jest.spyOn(Linking, 'sendIntent').mockResolvedValue();
     fireEvent.press(ui.getByLabelText('Notificações'));
     // Android opens the app's notification screen directly; other platforms open app settings.
@@ -102,7 +102,7 @@ describe('live Leaf settings surface', () => {
     FCMNotificationService.hasNotificationPermission.mockResolvedValue(false);
     FCMNotificationService.requestUserPermission.mockResolvedValue(false);
     const ui = screen();
-    await waitFor(() => expect(ui.getByText('Desativadas no dispositivo')).toBeTruthy());
+    await waitFor(() => expect(ui.getByText('Desativadas')).toBeTruthy());
     expect(FCMNotificationService.requestUserPermission).not.toHaveBeenCalled();
     fireEvent.press(ui.getByLabelText('Notificações'));
     await waitFor(() => expect(Alert.alert).toHaveBeenCalledWith('Notificações desativadas', expect.any(String), expect.any(Array)));
@@ -119,10 +119,10 @@ describe('live Leaf settings surface', () => {
   it('registers push after permission is granted from the settings surface', async () => {
     FCMNotificationService.hasNotificationPermission.mockResolvedValue(false);
     const ui = screen();
-    await waitFor(() => expect(ui.getByText('Desativadas no dispositivo')).toBeTruthy());
+    await waitFor(() => expect(ui.getByText('Desativadas')).toBeTruthy());
     fireEvent.press(ui.getByLabelText('Notificações'));
     await waitFor(() => expect(FCMNotificationService.getFCMToken).toHaveBeenCalledTimes(1));
-    expect(ui.getByText('Ativadas no dispositivo')).toBeTruthy();
+    expect(ui.getByText('Ativadas')).toBeTruthy();
   });
 
   it('does not save voice enabled when the native voice is unavailable', async () => {
@@ -157,9 +157,12 @@ describe('live Leaf settings surface', () => {
   it('assigns current status to every implemented setting', async () => {
     Object.values(ROBOTAXI_SETTINGS_ITEMS).forEach(item => expect(item.status).toBe('current'));
     const ui = screen();
-    // Only pt-BR exists: the language row is informational, not a dead-end button.
-    expect(ui.getByLabelText('Idioma')).toHaveProp('accessibilityRole', 'text');
-    expect(ui.getByText('Português do Brasil')).toBeTruthy();
+    // Idioma (informativo), Sair e Falar com suporte saíram: Sair e Ajuda ficam na Conta.
+    expect(ui.queryByLabelText('Idioma')).toBeNull();
+    expect(ui.queryByTestId('robotaxi-settings-row-logout')).toBeNull();
+    expect(ui.queryByTestId('robotaxi-settings-open-support')).toBeNull();
+    expect(ui.getByTestId('robotaxi-settings-section-general')).toBeTruthy();
+    expect(ui.getByTestId('robotaxi-settings-section-account')).toBeTruthy();
     await act(async () => {});
   });
 });

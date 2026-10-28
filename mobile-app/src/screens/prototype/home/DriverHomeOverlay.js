@@ -16,7 +16,7 @@ import {
   View,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Ionicons } from "@expo/vector-icons";
+import { Feather, Ionicons } from "@expo/vector-icons";
 import Reanimated, { FadeInDown, FadeOutUp } from "react-native-reanimated";
 import robotaxiPrototypeTokens from "../../../components/design-system/robotaxiPrototypeTokens";
 import { leafButtonMetrics } from "../../../components/prototype/LeafRideUI";
@@ -1137,9 +1137,10 @@ function DriverHomeOverlay({
               accessibilityLabel="Preferências do motorista"
               style={styles.driverPreferencesAction}
             >
-              <Ionicons
-                name="settings-outline"
-                size={21}
+              {/* Ajustes (não engrenagem): abre Preferências de trabalho, não Configurações. */}
+              <Feather
+                name="sliders"
+                size={20}
                 color={DRIVER_HOME_COLOR.leaf}
               />
             </TouchableOpacity>
