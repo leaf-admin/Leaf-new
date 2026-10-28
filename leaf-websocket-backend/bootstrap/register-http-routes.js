@@ -97,6 +97,11 @@ function registerHttpRoutes({ app, logStructured, io = null }) {
     }
 
     // Rotas de Support (registrar antes de dashboard para evitar conflito de path /api/support/*).
+    const whatsappSupportRoutes = require('../routes/whatsapp-support');
+    require('../services/whatsapp-support-service').setIO(io);
+    app.use('/api/integrations/whatsapp/webhook', whatsappSupportRoutes.webhook);
+    app.use('/api/support', whatsappSupportRoutes.conversations);
+
     const supportFullRoutes = require('../routes/support');
     app.use('/api/support', supportFullRoutes);
 

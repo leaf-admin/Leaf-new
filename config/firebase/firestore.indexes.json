@@ -1,6 +1,23 @@
 {
   "indexes": [
     {
+      "collectionGroup": "support_whatsapp_chats",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "phoneNumberId", "order": "ASCENDING" },
+        { "fieldPath": "lastMessageAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "support_whatsapp_chats",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "phoneNumberId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "lastMessageAt", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "users",
       "queryScope": "COLLECTION",
       "fields": [
