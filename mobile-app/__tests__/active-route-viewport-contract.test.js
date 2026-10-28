@@ -137,6 +137,20 @@ describe('active route viewport contract', () => {
     });
   });
 
+  it('frames the whole route under the "Corrida cancelada" overlay', () => {
+    const source = readMobileSource('src/screens/prototype/RobotaxiHomeScreen.js');
+    const cancellationSource = readMobileSource('src/screens/prototype/RobotaxiCancellationScreen.js');
+
+    // The home map is not focused under the summary; without this it kept the
+    // pre-trip camera and showed only the stretch around the pickup.
+    expect(source).toMatch(
+      /cancellationOverlayFramesRoute = Boolean\(\s*currentRouteName === 'RobotaxiPrototypeCancellation' &&\s*hasPresentedRoute/,
+    );
+    expect(source).toMatch(/shouldForceHomePickupRegionUpdate \|\|\s*cancellationOverlayFramesRoute/);
+    // The fit keeps the route above the summary card.
+    expect(cancellationSource).toContain('occludedBottom: sheetBottom + cardHeight');
+  });
+
   it('keeps passenger booking routes visible above top and bottom overlays', () => {
     const source = readMobileSource('src/screens/prototype/RobotaxiBookingScreen.js');
 
