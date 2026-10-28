@@ -188,6 +188,31 @@ describe('PrototypeMapLayer route viewport fitting', () => {
     }
   });
 
+  // The Android marker bitmap is cut to the native view size; wrapper and SVG must agree.
+  it.each([
+    ['android', 'map-user-vehicle-marker', { userCoordinate: routeCoordinates[0], currentLocationMarkerMode: 'car' }],
+    ['android', 'map-driver-vehicle-marker', { userCoordinate: routeCoordinates[0], driverCoordinate: routeCoordinates[1], driverMarkerMode: 'car' }],
+    ['ios', 'map-driver-vehicle-marker', { driverCoordinate: routeCoordinates[1], driverMarkerMode: 'car' }],
+  ])('draws the %s car in %s at one explicit 56 dp size', (os, testID, props) => {
+    const { Platform, StyleSheet } = require('react-native');
+    const { within } = require('@testing-library/react-native');
+    const originalPlatform = Platform.OS;
+    Platform.OS = os;
+    try {
+      const screen = render(<PrototypeMapLayer region={baseRegion} driverVehicleColor="prata" {...props} />);
+      const marker = screen.getByTestId(testID);
+      const vector = within(marker).getByTestId('leaf-vehicle-vector');
+      expect([vector.props.width, vector.props.height]).toEqual([56, 56]);
+      let wrap = vector.parent;
+      while (wrap && !(typeof wrap.type === 'string' && wrap.props.style)) wrap = wrap.parent;
+      const wrapStyle = StyleSheet.flatten(wrap.props.style);
+      expect([wrapStyle.width, wrapStyle.height]).toEqual([56, 56]);
+      screen.unmount();
+    } finally {
+      Platform.OS = originalPlatform;
+    }
+  });
+
   it('keeps the assigned driver car for the passenger on Android', () => {
     const { Platform } = require('react-native');
     const originalPlatform = Platform.OS;
