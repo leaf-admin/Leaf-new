@@ -284,8 +284,9 @@ describe("DriverLiveRideOverlay", () => {
     );
 
     expect(screen.getByTestId("driver-live-passenger-identity")).toBeTruthy();
+    expect(screen.queryByTestId("driver-live-trip-secondary-actions")).toBeNull();
     fireEvent.press(screen.getByTestId("driver-live-trip-sheet-handle"));
-    expect(screen.queryByTestId("driver-live-trip-compact-summary")).toBeNull();
+    expect(screen.getByTestId("driver-live-trip-secondary-actions")).toBeTruthy();
     fireEvent.press(screen.getByTestId("driver-live-trip-sheet-handle"));
     expect(screen.queryByTestId("driver-live-passenger-identity")).toBeNull();
     expect(screen.queryByTestId("driver-live-trip-details-button")).toBeNull();
@@ -387,7 +388,12 @@ describe("DriverLiveRideOverlay", () => {
     expect(screen.getByLabelText("Abrir navegação")).toBeTruthy();
     expect(screen.getByLabelText("Abrir chat da corrida")).toBeTruthy();
     expect(screen.getByLabelText("Reportar problema")).toBeTruthy();
-    expect(screen.getByText("Ocultar opções")).toBeTruthy();
+    expect(screen.getByLabelText("Ocultar opções")).toBeTruthy();
+    // The options row replaces the "..." button; the step stays one tap away.
+    expect(screen.queryByTestId("driver-live-trip-details-button")).toBeNull();
+    expect(
+      screen.getByTestId("driver-live-primary-action-complete-button"),
+    ).toBeTruthy();
 
     fireEvent.press(screen.getByTestId("driver-live-trip-chat-button"));
     expect(onOpenChat).toHaveBeenCalledTimes(1);
@@ -508,9 +514,12 @@ describe("DriverLiveRideOverlay", () => {
 
     expect(screen.getByTestId("driver-live-trip-collapse-button")).toBeTruthy();
     expect(screen.getAllByText("Líquido").length).toBeGreaterThan(0);
-    expect(screen.getByText("Embarque")).toBeTruthy();
-    expect(screen.getByText("Destino")).toBeTruthy();
+    expect(screen.getByLabelText("Embarque: 1540 Mission St")).toBeTruthy();
+    expect(screen.getByLabelText("Destino: 1 Ferry Building")).toBeTruthy();
     expect(screen.UNSAFE_queryAllByType(ScrollView)).toHaveLength(1);
+
+    fireEvent.press(screen.getByTestId("driver-live-trip-collapse-button"));
+    expect(screen.getByTestId("driver-live-trip-details-button")).toBeTruthy();
   });
 
   it("asks for confirmation before canceling an accepted ride", () => {
@@ -587,6 +596,12 @@ describe("DriverLiveRideOverlay", () => {
     fireEvent.press(screen.getByTestId("driver-live-trip-details-button"));
     expect(screen.getByLabelText("Abrir navegação")).toBeTruthy();
     expect(screen.getByLabelText("Iniciar corrida")).toBeTruthy();
+    // At the pickup the options stay one compact row: no second route block
+    // (the pickup is already the subtitle) and no stacked full-width buttons.
+    expect(screen.getByTestId("driver-live-trip-secondary-actions")).toBeTruthy();
+    expect(screen.queryByLabelText("Destino: 1 Ferry Building")).toBeNull();
+    expect(screen.getAllByText("1540 Mission St")).toHaveLength(1);
+    expect(screen.getByLabelText("Ocultar opções")).toBeTruthy();
   });
 
   it.each([

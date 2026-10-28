@@ -33,7 +33,6 @@ import {
 } from "../../../components/prototype/LeafRideUI";
 import {
   RobotaxiLifecycleButton,
-  RobotaxiLifecycleDisclosure,
   RobotaxiLifecycleIdentity,
   RobotaxiLifecycleMetric,
   RobotaxiLifecycleSection,
@@ -1185,7 +1184,18 @@ function DriverLiveRideOverlay({
       {/* Options sit beside the step button, not on a row of their own: that
           row cost the map about 60pt in every ride state. */}
       <View style={[styles.lifecycleTripActionStack, styles.lifecycleTripActionRow]} testID="driver-live-trip-actions">
-        {!isTripPeek ? (
+        {isTripExpanded ? (
+          <TouchableOpacity
+            style={styles.lifecycleTripMoreButton}
+            onPress={() => setIsTripExpanded(false)}
+            accessibilityRole="button"
+            accessibilityLabel="Ocultar opções"
+            activeOpacity={0.7}
+            testID="driver-live-trip-collapse-button"
+          >
+            <Ionicons name="chevron-down-outline" size={22} color="#222222" />
+          </TouchableOpacity>
+        ) : !isTripPeek ? (
           <TouchableOpacity
             style={styles.lifecycleTripMoreButton}
             onPress={() => setIsTripExpanded(true)}
@@ -1395,127 +1405,72 @@ function DriverLiveRideOverlay({
     </>
   );
 
+  // "Mais opções" adds one row of secondary actions to the compact card instead
+  // of a second, taller card: at the pickup the old layout covered the map and
+  // the pickup point. The step row (collapse + primary) stays below the scroll.
   const renderLifecycleExpandedTripCard = () => (
     <>
-      <RobotaxiLifecycleSummary
-        eyebrow={isOperationalInterrupted
-          ? "INTERRUPÇÃO REGISTRADA"
-          : navigationModeLabel.toUpperCase()}
-        object={isOperationalInterrupted ? 'help' : normalizedActiveStatus === 'arrived' ? 'privacy' : normalizedActiveStatus === 'started' ? 'activity' : 'places'}
-        title={isOperationalInterrupted
-          ? "Aguardando decisão do passageiro"
-          : normalizedActiveStatus === "started"
-            ? dropoffLabel
-            : normalizedActiveStatus === "arrived"
-              ? "Aguardando o passageiro"
-              : pickupLabel}
-        subtitle={isOperationalInterrupted ? null : tripStatusMessage || null}
-        titleTestID={isOperationalInterrupted
-          ? "driver-live-operational-hold-title"
-          : undefined}
-      />
+      {renderCompactTripCard()}
 
-      <RobotaxiLifecycleIdentity
-        initial={passengerInitial}
-        photoUri={passengerPhotoUri}
-        name={passengerLabel}
-        meta={lifecyclePassengerMeta}
-        style={styles.lifecycleTripIdentity}
-        testID="driver-live-passenger-identity"
-      />
-
-      <View style={styles.lifecycleTripMetricRow}>
-        {(isOperationalInterrupted ? compactTripMetrics : activeTripMetrics).map((metric) => (
-          <RobotaxiLifecycleMetric
-            key={metric.key}
-            label={metric.label}
-            value={metric.value}
-            tone={metric.key === "net" ? "accent" : "default"}
-          />
-        ))}
-      </View>
-      {boardingWaitHint ? (
-        <Text style={styles.boardingWaitHint} testID="driver-live-boarding-wait-hint">
-          {boardingWaitHint}
-        </Text>
+      {normalizedActiveStatus !== "arrived" || isOperationalInterrupted ? (
+        <RobotaxiLifecycleSection
+          title={isOperationalInterrupted ? "TRECHO ENCERRADO" : null}
+          style={styles.lifecycleTripRouteSection}
+        >
+          <LeafJourneyRoute dense origin={pickupLabel} destination={dropoffLabel} />
+        </RobotaxiLifecycleSection>
       ) : null}
 
-      <RobotaxiLifecycleSection
-        title={isOperationalInterrupted ? "TRECHO ENCERRADO" : "ROTA E AÇÕES"}
-      >
-        <LeafJourneyRoute origin={pickupLabel} destination={dropoffLabel} />
-
-        <View style={styles.lifecycleTripSecondaryGrid}>
-          {typeof onOpenChat === "function" ? (
-            <RobotaxiLifecycleButton
-              label="Chat"
-              icon="chatbubble-ellipses-outline"
-              onPress={onOpenChat}
-              style={styles.lifecycleTripSecondaryButton}
-              testID="driver-live-trip-chat-button"
-              accessibilityLabel="Abrir chat da corrida"
-            />
-          ) : null}
-
-          {showCompactNavigationButton ? (
-            <RobotaxiLifecycleButton
-              label="Navegar"
-              icon="navigate-outline"
-              onPress={onOpenNavigation}
-              style={styles.lifecycleTripSecondaryButton}
-              testID="driver-live-trip-navigation-button"
-              accessibilityLabel="Abrir navegação"
-            />
-          ) : null}
-
-          {canCancelActiveRide ? (
-            <RobotaxiLifecycleButton
-              label={busyAction === "cancel" ? "Cancelando..." : "Cancelar"}
-              icon="close-circle-outline"
-              tone="danger"
-              onPress={handleOpenCancelPrompt}
-              disabled={busyAction === "cancel"}
-              style={styles.lifecycleTripSecondaryButton}
-              testID="driver-live-trip-cancel-button-expanded"
-              accessibilityLabel="Cancelar corrida"
-            />
-          ) : null}
-
-          {showCompactProblemButton ? (
-            <RobotaxiLifecycleButton
-              label={busyAction === "interrupt" ? "Reportando..." : "Reportar"}
-              icon="warning-outline"
-              tone="danger"
-              onPress={handleInterruptOperational}
-              disabled={busyAction === "interrupt"}
-              style={styles.lifecycleTripSecondaryButton}
-              testID="driver-live-trip-report-problem-button"
-              accessibilityLabel="Reportar problema"
-            />
-          ) : null}
-        </View>
-      </RobotaxiLifecycleSection>
-
-      <View style={styles.lifecycleTripActionStack}>
-        <RobotaxiLifecycleDisclosure
-          expanded
-          onPress={() => setIsTripExpanded(false)}
-          expandedLabel="Ocultar opções"
-          testID="driver-live-trip-collapse-button"
-        />
-        {primaryActionLabel ? (
+      <View style={styles.lifecycleTripSecondaryRow} testID="driver-live-trip-secondary-actions">
+        {typeof onOpenChat === "function" ? (
           <RobotaxiLifecycleButton
-            label={busyAction === "trip" ? tripBusyLabel : primaryActionLabel}
-            icon={normalizedActiveStatus === "started"
-              ? "flag-outline"
-              : normalizedActiveStatus === "arrived"
-                ? "play-outline"
-                : "checkmark-circle-outline"}
-            tone="primary"
-            disabled={busyAction === "trip" || !primaryActionEnabled}
-            onPress={handleTripPrimaryAction}
-            testID={primaryActionTestID}
-            accessibilityLabel={busyAction === "trip" ? "Atualizando etapa da corrida" : primaryActionLabel}
+            label="Chat"
+            icon="chatbubble-ellipses-outline"
+            onPress={onOpenChat}
+            style={styles.lifecycleTripSecondaryButton}
+            textStyle={styles.lifecycleTripSecondaryButtonText}
+            testID="driver-live-trip-chat-button"
+            accessibilityLabel="Abrir chat da corrida"
+          />
+        ) : null}
+
+        {showCompactNavigationButton ? (
+          <RobotaxiLifecycleButton
+            label="Navegar"
+            icon="navigate-outline"
+            onPress={onOpenNavigation}
+            style={styles.lifecycleTripSecondaryButton}
+            textStyle={styles.lifecycleTripSecondaryButtonText}
+            testID="driver-live-trip-navigation-button"
+            accessibilityLabel="Abrir navegação"
+          />
+        ) : null}
+
+        {canCancelActiveRide ? (
+          <RobotaxiLifecycleButton
+            label={busyAction === "cancel" ? "Cancelando..." : "Cancelar"}
+            icon="close-circle-outline"
+            tone="danger"
+            onPress={handleOpenCancelPrompt}
+            disabled={busyAction === "cancel"}
+            style={styles.lifecycleTripSecondaryButton}
+            textStyle={styles.lifecycleTripSecondaryButtonText}
+            testID="driver-live-trip-cancel-button-expanded"
+            accessibilityLabel="Cancelar corrida"
+          />
+        ) : null}
+
+        {showCompactProblemButton ? (
+          <RobotaxiLifecycleButton
+            label={busyAction === "interrupt" ? "Reportando..." : "Reportar"}
+            icon="warning-outline"
+            tone="danger"
+            onPress={handleInterruptOperational}
+            disabled={busyAction === "interrupt"}
+            style={styles.lifecycleTripSecondaryButton}
+            textStyle={styles.lifecycleTripSecondaryButtonText}
+            testID="driver-live-trip-report-problem-button"
+            accessibilityLabel="Reportar problema"
           />
         ) : null}
       </View>
@@ -1593,7 +1548,7 @@ function DriverLiveRideOverlay({
             bounces={false}
             nestedScrollEnabled
             showsVerticalScrollIndicator={isTripExpanded}
-            style={{ maxHeight: Math.max(1, offerCardMaxHeight - cardBottomPadding - 40 - (isTripExpanded ? 0 : DRIVER_TRIP_ACTIONS_HEIGHT)), flexGrow: 0 }}
+            style={{ maxHeight: Math.max(1, offerCardMaxHeight - cardBottomPadding - 40 - DRIVER_TRIP_ACTIONS_HEIGHT), flexGrow: 0 }}
             contentContainerStyle={styles.scrollContent}
           >
             {isTripExpanded ? renderLifecycleExpandedTripCard() : renderCompactTripCard()}
@@ -2067,7 +2022,7 @@ function DriverLiveRideOverlay({
           )}
           </ScrollView>
         )}
-        {shouldUseCompactTripCard && !isTripExpanded ? renderCompactTripActions() : null}
+        {shouldUseCompactTripCard ? renderCompactTripActions() : null}
         {hasOffer ? (
               <View style={styles.offerActions} testID="driver-live-offer-actions">
               <TouchableOpacity
@@ -2304,15 +2259,25 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 17,
   },
-  lifecycleTripSecondaryGrid: {
-    marginTop: 14,
+  lifecycleTripRouteSection: {
+    marginTop: 12,
+    paddingTop: 12,
+  },
+  lifecycleTripSecondaryRow: {
+    marginTop: 12,
     flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
+    gap: 8,
   },
   lifecycleTripSecondaryButton: {
-    flexGrow: 1,
-    flexBasis: "46%",
+    flex: 1,
+    minHeight: 44,
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    gap: 6,
+  },
+  lifecycleTripSecondaryButtonText: {
+    fontSize: 14,
+    lineHeight: 18,
   },
   lifecycleTripActionStack: {
     marginTop: 16,

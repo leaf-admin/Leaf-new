@@ -6434,6 +6434,15 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     routeViewportOcclusion.top,
     windowHeight,
   ]);
+  // "Corrida cancelada" is a transparent overlay on top of this map, which is
+  // not focused then and kept the camera from before the trip (around the
+  // pickup): only a piece of the route showed. Frame the whole route above the
+  // card while that summary is up, as the quote does.
+  const cancellationOverlayFramesRoute = Boolean(
+    currentRouteName === 'RobotaxiPrototypeCancellation' &&
+      hasPresentedRoute &&
+      !driverNavigationCameraOwnsMap,
+  );
   const homeRouteViewportPadding = useMemo(() => {
     if (!hasActiveRoute && !hasPresentedRoute) {
       return null;
@@ -10105,7 +10114,8 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           routeViewportRegion={homeRouteViewportRegion}
           forceRegionUpdate={Boolean(
             ((hasActiveRoute || hasPresentedRoute) && !driverNavigationCameraOwnsMap) && !driverAwaitingNavigationCamera && isScreenFocused ||
-              shouldForceHomePickupRegionUpdate
+              shouldForceHomePickupRegionUpdate ||
+              cancellationOverlayFramesRoute
           )}
           onMapLayout={handleMapLayout}
           onMapLoaded={handleHomeMapLoaded}
