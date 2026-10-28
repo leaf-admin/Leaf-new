@@ -1,7 +1,7 @@
 import leafTypography from './LeafTypography';
 import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { Feather } from '@expo/vector-icons';
 import Animated, { Easing, FadeInUp, useReducedMotion } from 'react-native-reanimated';
 import { LeafObjectIcon } from './LeafVisualElements';
 import robotaxiPrototypeTokens from '../design-system/robotaxiPrototypeTokens';
@@ -15,6 +15,8 @@ const LEAF_TEXT = '#222222';
 const LEAF_MUTED = '#767676';
 const LEAF_SECONDARY = '#6A6A6A';
 const TEXT_SCALE_CAP = 1.35;
+// Botões de cabeçalho ainda recebem nomes do Ionicons.
+const CLOSE_BUTTON_GLYPHS = { 'arrow-back': 'arrow-left', close: 'x', 'settings-outline': 'settings' };
 
 function isLoadingValue(value) {
   return value === null || value === undefined || String(value).trim() === '';
@@ -152,7 +154,7 @@ export function PrototypeMenuRow({
     >
       <View style={[styles.rowIconSlot, compact && styles.rowIconSlotCompact]}>
         {iconName ? (
-          <LeafObjectIcon symbol={iconName} size={40} />
+          <LeafObjectIcon symbol={iconName} size={22} />
         ) : null}
       </View>
 
@@ -188,7 +190,7 @@ export function PrototypeMenuRow({
           </Text>
         </View>
       ) : null}
-      {trailing === null ? null : trailing ? trailing : <Ionicons name="chevron-forward" size={15} color={color.text.muted} />}
+      {trailing === null ? null : trailing ? trailing : <Feather name="chevron-right" size={18} color={color.text.muted} />}
     </RowComponent>
   );
 }
@@ -245,7 +247,7 @@ export function PrototypeMenuCloseButton({
       accessibilityLabel={accessibilityLabel}
       testID={testID}
     >
-      <Ionicons name={icon} size={18} color={color.text.primary} />
+      <Feather name={CLOSE_BUTTON_GLYPHS[icon] || icon} size={20} color={color.text.primary} />
     </TouchableOpacity>
   );
 }
@@ -394,12 +396,12 @@ const styles = StyleSheet.create({
     paddingBottom: 4,
   },
   rowIconSlot: {
-    width: 48,
+    width: 40,
     alignItems: 'flex-start',
     justifyContent: 'center',
   },
   rowIconSlotCompact: {
-    width: 48,
+    width: 40,
   },
   rowCopyWrap: {
     flex: 1,

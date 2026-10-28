@@ -73,7 +73,7 @@ const PrivacyPolicyScreen = ({ navigation, route }) => {
   const renderDetailRow = ({ icon, title, description, last = false }) => (
     <View style={[styles.detailRow, last && styles.detailRowLast]}>
       <View style={styles.detailIconSlot}>
-        <LeafObjectIcon symbol={icon} size={40} />
+        <LeafObjectIcon symbol={icon} size={22} />
       </View>
       <View style={styles.detailCopy}>
         <Text style={styles.detailTitle}>{title}</Text>

@@ -1,19 +1,13 @@
 import leafTypography from '../../components/prototype/LeafTypography';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useIsFocused } from '@react-navigation/native';
-import useAccountSummary from '../../hooks/useAccountSummary';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSelector } from 'react-redux';
-import { LeafAccountCard, LeafObjectIcon } from '../../components/prototype/LeafVisualElements';
-import { Ionicons } from '@expo/vector-icons';
+import { Feather } from '@expo/vector-icons';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
 import PrototypeDismissibleSheet from '../../components/prototype/PrototypeDismissibleSheet';
 import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
 import { usePrototypeRideRuntime } from './prototypeRideRuntime';
-import { useAccountDeletionFlow } from '../../hooks/useAccountDeletionFlow';
-import { useAccountSessionReset } from '../../hooks/useAccountSessionReset';
-import Logger from '../../utils/Logger';
 import { LeafButton, LeafEmptyState } from '../../components/prototype/LeafRideUI';
 import MobileProfileService from '../../services/MobileProfileService';
 import {
@@ -40,69 +34,6 @@ const PROFILE_COLOR = {
   chevron: '#767676',
 };
 
-const PASSENGER_ACTIONS = Object.freeze([
-  { id: 'history', label: 'Histórico de viagens', icon: 'time-outline', route: 'RobotaxiMenuTripHistory' },
-  { id: 'support', label: 'Segurança e suporte', icon: 'shield-checkmark-outline', route: 'RobotaxiPrototypeSupport' },
-]);
-
-const DRIVER_ACTIONS = Object.freeze([
-  { id: 'history', label: 'Corridas concluídas', icon: 'time-outline', route: 'RobotaxiMenuTripHistory' },
-  { id: 'earnings', label: 'Ganhos', icon: 'wallet-outline', route: 'EarningsReport' },
-  { id: 'activation', label: 'Ativação do motorista', icon: 'shield-checkmark-outline', route: 'RobotaxiPrototypeDriverActivation' },
-  { id: 'documents', label: 'Documentos', icon: 'document-text-outline', route: 'RobotaxiPrototypeDriverDocuments' },
-  { id: 'vehicles', label: 'Veículos', icon: 'car-outline', route: 'RobotaxiPrototypeVehicles' },
-]);
-
-const ACCOUNT_DELETION_ACTION = Object.freeze({
-  id: 'delete-account',
-  label: 'Excluir conta',
-  icon: 'trash-outline',
-});
-
-const ACCOUNT_LOGOUT_ACTION = Object.freeze({
-  id: 'logout',
-  label: 'Sair da conta',
-  icon: 'log-out-outline',
-});
-
-function ProfileRow({
-  icon,
-  title,
-  subtitle,
-  onPress,
-  testID,
-  accessibilityLabel,
-  tone = 'default',
-  last = false,
-}) {
-  return (
-    <TouchableOpacity
-      activeOpacity={0.78}
-      onPress={onPress}
-      style={[styles.profileRow, last && styles.profileRowLast]}
-      testID={testID}
-      accessibilityRole="button"
-      accessibilityLabel={accessibilityLabel || title}
-      accessibilityHint={subtitle}
-    >
-      <View style={styles.rowIconSlot}>
-        <LeafObjectIcon symbol={icon || 'person-outline'} size={40} />
-      </View>
-      <View style={styles.rowCopy}>
-        <Text style={[styles.rowTitle, tone === 'danger' && styles.rowTitleDanger]}>
-          {title}
-        </Text>
-        {subtitle ? <Text style={styles.rowSubtitle}>{subtitle}</Text> : null}
-      </View>
-      <Ionicons
-        name="chevron-forward"
-        size={15}
-        color={tone === 'danger' ? PROFILE_COLOR.danger : PROFILE_COLOR.chevron}
-      />
-    </TouchableOpacity>
-  );
-}
-
 // "+5521102938475" -> "+55 21 10293-8475"; other shapes are returned as-is.
 export function formatBrazilPhoneLabel(value) {
   const raw = String(value || '').trim();
@@ -117,11 +48,8 @@ export function formatBrazilPhoneLabel(value) {
 
 export default function RobotaxiProfileScreen({ navigation, route }) {
   const authProfile = useSelector(state => state?.auth?.profile);
-  const { riderProfile, activeRole, driverCanGoOnline, updateRiderProfile, profileUid, lastReceipt } = usePrototypeRideRuntime();
+  const { riderProfile, updateRiderProfile } = usePrototypeRideRuntime();
   const insets = useSafeAreaInsets();
-  const focused = useIsFocused();
-  // Same summary source as the Conta card, so rating/trips are not "—" here.
-  const accountSummary = useAccountSummary({ uid: profileUid || riderProfile?.uid, role: activeRole, revision: lastReceipt?.receiptId || lastReceipt?.id || null, focused });
   const { height: windowHeight } = useWindowDimensions();
   const [panelHeight, setPanelHeight] = useState(windowHeight);
   const [remoteProfile, setRemoteProfile] = useState(null);
@@ -131,14 +59,11 @@ export default function RobotaxiProfileScreen({ navigation, route }) {
   const [savingProfile, setSavingProfile] = useState(false);
   const [profileDraft, setProfileDraft] = useState({ name: '', email: '' });
   const initialEditorOpened = useRef(false);
-  const isDriverRole = activeRole === 'driver';
   const profileName =
     resolvePrototypeProfileName(remoteProfile) ||
     resolvePrototypeProfileName(authProfile) ||
     resolvePrototypeProfileName(riderProfile) ||
     'Sua conta';
-  const profileInitial = String(profileName).trim().charAt(0).toUpperCase() || 'L';
-  const actions = isDriverRole ? DRIVER_ACTIONS : PASSENGER_ACTIONS;
   const phoneLabel = formatBrazilPhoneLabel(
     resolvePrototypeProfilePhone(remoteProfile) ||
     resolvePrototypeProfilePhone(authProfile) ||
@@ -149,20 +74,6 @@ export default function RobotaxiProfileScreen({ navigation, route }) {
     resolvePrototypeProfileEmail(authProfile) ||
     resolvePrototypeProfileEmail(riderProfile) ||
     'Email não informado';
-  const preferenceLabel = String(riderProfile?.preference || '').trim() || (isDriverRole ? 'Conta operacional pronta para atender' : 'Sem preferência cadastrada');
-  const accountStatus = isDriverRole ? (driverCanGoOnline ? 'Motorista habilitado' : 'Ativação pendente') : 'Conta de passageiro';
-  const deletionProfile = authProfile || riderProfile;
-  const { promptAccountDeletion } = useAccountDeletionFlow({
-    navigation,
-    profile: deletionProfile,
-    source: 'mobile-app-profile-screen',
-    additionalInfo: 'Solicitação enviada pela tela de perfil do app',
-  });
-  const { resetSessionToStart } = useAccountSessionReset({
-    navigation,
-    profile: deletionProfile,
-  });
-
   const loadProfile = useCallback(async () => {
     try {
       setLoadingProfile(true);
@@ -197,26 +108,23 @@ export default function RobotaxiProfileScreen({ navigation, route }) {
     setEditingProfile(true);
   }, [emailLabel, profileName]);
 
-  // Opened to edit: keep the editor's title/layout while the profile loads, so
-  // the screen does not show a "Perfil" card with empty metrics and then swap.
-  const showEditorLayout = editingProfile || Boolean(route?.params?.editProfile && loadingProfile && !initialEditorOpened.current);
-
+  // A tela é só o editor de Dados pessoais (2026-10-28): a lista que repetia a
+  // Conta saiu; Sair e Excluir conta ficam na Conta e em Configurações.
   useEffect(() => {
-    if (route?.params?.editProfile && !loadingProfile && !profileError && !initialEditorOpened.current) {
+    if (!loadingProfile && !profileError && !initialEditorOpened.current) {
       initialEditorOpened.current = true;
       startProfileEdit();
     }
-  }, [loadingProfile, profileError, route?.params?.editProfile, startProfileEdit]);
+  }, [loadingProfile, profileError, startProfileEdit]);
 
-  // Opened from Conta to edit: leaving the editor returns there instead of
-  // revealing the legacy profile hub underneath.
+  // Leaving the editor returns to wherever it was opened from, or to Conta.
   const exitEditor = useCallback(() => {
-    if (route?.params?.editProfile && navigation.canGoBack?.()) {
+    if (navigation.canGoBack?.()) {
       navigation.goBack();
       return;
     }
-    setEditingProfile(false);
-  }, [navigation, route?.params?.editProfile]);
+    navigation.navigate('RobotaxiPrototypeMenu');
+  }, [navigation]);
 
   const saveProfile = useCallback(async () => {
     try {
@@ -252,10 +160,7 @@ export default function RobotaxiProfileScreen({ navigation, route }) {
     occludedBottom: panelHeight,
   });
 
-  const handleDismiss = useCallback(() => {
-    if (route?.params?.returnToAccount && navigation.canGoBack()) { navigation.goBack(); return; }
-    navigation.navigate('RobotaxiPrototype');
-  }, [navigation, route?.params?.returnToAccount]);
+  const handleDismiss = exitEditor;
 
   const handlePanelLayout = useCallback(event => {
     const nextHeight = event?.nativeEvent?.layout?.height;
@@ -263,112 +168,6 @@ export default function RobotaxiProfileScreen({ navigation, route }) {
       setPanelHeight(nextHeight);
     }
   }, []);
-
-  const promptLogout = useCallback(() => {
-    Alert.alert(
-      'Sair da conta',
-      'Tem certeza que deseja sair da sua conta Leaf?',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Sair',
-          style: 'destructive',
-          onPress: () => {
-            resetSessionToStart().catch((error) => {
-              Logger.error('Erro ao sair da conta pelo perfil:', error);
-              Alert.alert('Não foi possível sair', 'Tente novamente em alguns instantes.');
-            });
-          },
-        },
-      ],
-    );
-  }, [resetSessionToStart]);
-
-  const handleActionPress = useCallback(
-    item => {
-      if (item?.id === ACCOUNT_LOGOUT_ACTION.id) {
-        promptLogout();
-        return;
-      }
-
-      if (item?.id === ACCOUNT_DELETION_ACTION.id) {
-        promptAccountDeletion();
-        return;
-      }
-
-      if (!item?.route) {
-        return;
-      }
-
-      if (item.route === 'EarningsReport') {
-        navigation.navigate(item.route, {
-          source: 'driver-profile',
-          defaultRangeDays: 1,
-          maxRangeDays: 30,
-        });
-        return;
-      }
-
-      navigation.replace(item.route, item.params);
-    },
-    [navigation, promptAccountDeletion, promptLogout]
-  );
-
-  const profileRows = useMemo(() => {
-    const rows = [
-      {
-        id: 'personal-data',
-        icon: 'person-circle-outline',
-        title: 'Dados pessoais',
-        subtitle: 'Nome, email e telefone',
-        onPress: startProfileEdit,
-      },
-      ...actions.map((item) => ({
-        id: item.id,
-        icon: item.icon,
-        title: item.label,
-        subtitle:
-          item.id === 'history'
-            ? 'Recibos e detalhes'
-            : item.id === 'support'
-                ? 'Ajuda e chamados'
-                : item.id === 'earnings'
-                  ? 'Saldo e relatório'
-                  : item.id === 'vehicles'
-                    ? 'Carro autorizado'
-                    : 'Documentos e liberação',
-        onPress: () => handleActionPress(item),
-      })),
-      {
-        id: 'settings',
-        icon: 'settings-outline',
-        title: 'Configurações',
-        subtitle: 'Conta e privacidade',
-        onPress: () => navigation.replace('RobotaxiPrototypeSettings'),
-      },
-      {
-        id: ACCOUNT_LOGOUT_ACTION.id,
-        icon: ACCOUNT_LOGOUT_ACTION.icon,
-        title: ACCOUNT_LOGOUT_ACTION.label,
-        subtitle: 'Voltar para entrada por telefone',
-        onPress: () => handleActionPress(ACCOUNT_LOGOUT_ACTION),
-        testID: 'profile-logout-shortcut',
-        accessibilityLabel: 'Sair da conta',
-      },
-      {
-        id: ACCOUNT_DELETION_ACTION.id,
-        icon: ACCOUNT_DELETION_ACTION.icon,
-        title: ACCOUNT_DELETION_ACTION.label,
-        subtitle: 'Remover sua conta e dados associados',
-        onPress: () => handleActionPress(ACCOUNT_DELETION_ACTION),
-        testID: 'profile-account-deletion-shortcut',
-        accessibilityLabel: 'Excluir conta',
-        tone: 'danger',
-      },
-    ];
-
-    return rows;
-  }, [actions, handleActionPress, navigation, startProfileEdit]);
 
   return (
     <PrototypeScreenTransition>
@@ -398,21 +197,12 @@ export default function RobotaxiProfileScreen({ navigation, route }) {
                 accessibilityRole="button"
                 accessibilityLabel="Voltar à conta"
               >
-                <Ionicons name="arrow-back" size={20} color={PROFILE_COLOR.text} />
+                <Feather name="arrow-left" size={20} color={PROFILE_COLOR.text} />
               </TouchableOpacity>
               <View style={styles.headerCopy}>
-                <Text style={styles.screenTitle}>
-                  {showEditorLayout ? 'Dados pessoais' : isDriverRole ? 'Perfil do motorista' : 'Perfil'}
-                </Text>
+                <Text style={styles.screenTitle}>Dados pessoais</Text>
               </View>
             </View>
-
-            {!showEditorLayout ? <LeafAccountCard name={profileName} role={activeRole}
-              profile={{ ...(riderProfile || {}), ...(authProfile || {}), ...(remoteProfile || {}), ...(accountSummary.summary?.profile || {}) }}
-              loadingMetrics={accountSummary.loading && !accountSummary.summary}
-              detail={isDriverRole ? accountStatus : String(riderProfile?.preference || '').trim() || undefined} motionEnabled={focused} /> : null}
-
-            {!showEditorLayout ? <View style={styles.divider} /> : null}
 
             <ScrollView
               showsVerticalScrollIndicator={false}
@@ -473,21 +263,7 @@ export default function RobotaxiProfileScreen({ navigation, route }) {
                     <Text style={styles.secondaryActionText}>Cancelar</Text>
                   </TouchableOpacity>
                 </View>
-              ) : (
-                profileRows.map((item, index) => (
-                  <ProfileRow
-                    key={item.id}
-                    icon={item.icon}
-                    title={item.title}
-                    subtitle={item.subtitle}
-                    onPress={item.onPress}
-                    testID={item.testID}
-                    accessibilityLabel={item.accessibilityLabel}
-                    tone={item.tone}
-                    last={index === profileRows.length - 1}
-                  />
-                ))
-              )}
+              ) : null}
             </ScrollView>
           </View>
         </PrototypeDismissibleSheet>
@@ -535,55 +311,6 @@ const styles = StyleSheet.create({
     fontSize: 22,
     lineHeight: 28,
     letterSpacing: -0.4,
-  },
-  screenSubtitle: {
-    marginTop: 8,
-    color: PROFILE_COLOR.secondary,
-    ...leafTypography.regular,
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  avatarWrap: {
-    width: 68,
-    height: 68,
-    borderRadius: 34,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: PROFILE_COLOR.avatar,
-  },
-  avatarLetter: {
-    color: PROFILE_COLOR.leaf,
-    ...leafTypography.semiBold,
-    fontSize: 20,
-    lineHeight: 26,
-  },
-  identityRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 24,
-  },
-  identityCopy: {
-    flex: 1,
-    minWidth: 0,
-    marginLeft: 18,
-  },
-  identityName: {
-    color: PROFILE_COLOR.text,
-    ...leafTypography.semiBold,
-    fontSize: 20,
-    lineHeight: 26,
-  },
-  identityMeta: {
-    marginTop: 2,
-    color: PROFILE_COLOR.muted,
-    ...leafTypography.regular,
-    fontSize: 13,
-    lineHeight: 17,
-  },
-  divider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: PROFILE_COLOR.line,
-    marginTop: 24,
   },
   rowsContent: {
     paddingTop: 12,
@@ -650,41 +377,5 @@ const styles = StyleSheet.create({
     ...leafTypography.medium,
     fontSize: 13,
     lineHeight: 18,
-  },
-  profileRow: {
-    minHeight: 60,
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: PROFILE_COLOR.line,
-  },
-  profileRowLast: {
-    borderBottomWidth: 0,
-  },
-  rowIconSlot: {
-    width: 48,
-    alignItems: 'flex-start',
-    justifyContent: 'center',
-  },
-  rowCopy: {
-    flex: 1,
-    minWidth: 0,
-    paddingRight: 12,
-  },
-  rowTitle: {
-    color: PROFILE_COLOR.text,
-    ...leafTypography.medium,
-    fontSize: 16,
-    lineHeight: 21,
-  },
-  rowTitleDanger: {
-    color: PROFILE_COLOR.danger,
-  },
-  rowSubtitle: {
-    marginTop: 3,
-    color: PROFILE_COLOR.muted,
-    ...leafTypography.regular,
-    fontSize: 12,
-    lineHeight: 17,
   },
 });

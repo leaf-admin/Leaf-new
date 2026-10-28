@@ -51,6 +51,7 @@ jest.mock("@expo/vector-icons", () => {
   const React = require("react");
   const { View } = require("react-native");
   return {
+    Feather: () => <View />,
     Ionicons: () => <View />,
   };
 });

@@ -141,7 +141,7 @@ function SupportOptionRow({ item, active, onPress, rowTestID, last = false }) {
       accessibilityState={{ checked: active }}
     >
       <View style={styles.optionIconSlot}>
-        <LeafObjectIcon name={item.id === 'payment' ? 'payment' : item.id === 'safety' ? 'privacy' : 'help'} size={40} />
+        <LeafObjectIcon symbol={item.icon} size={22} />
       </View>
       <View style={styles.optionCopyWrap}>
         <Text style={[styles.optionTitle, active && styles.optionTitleActive]}>{item.title}</Text>

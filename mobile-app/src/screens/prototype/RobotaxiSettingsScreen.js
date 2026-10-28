@@ -4,14 +4,13 @@ import { ActivityIndicator, Alert, AppState, Linking, Platform, ScrollView, Stat
 import * as Application from 'expo-application';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSelector } from 'react-redux';
-import { Ionicons } from '@expo/vector-icons';
+import { Feather } from '@expo/vector-icons';
 import { LeafObjectIcon } from '../../components/prototype/LeafVisualElements';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
 import PrototypeDismissibleSheet from '../../components/prototype/PrototypeDismissibleSheet';
 import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
 import { usePrototypeRideRuntime } from './prototypeRideRuntime';
 import { useAccountDeletionFlow } from '../../hooks/useAccountDeletionFlow';
-import { useAccountSessionReset } from '../../hooks/useAccountSessionReset';
 import Logger from '../../utils/Logger';
 import { isCurrentSurfaceUnavailable } from './currentSurfaceStatus';
 import { ROBOTAXI_SETTINGS_ITEMS } from './robotaxiSettingsConfig';
@@ -48,6 +47,13 @@ const SETTINGS_COLOR = {
   chevron: '#767676',
 };
 
+// Três grupos fixos (2026-10-28); Sair e Ajuda ficam na Conta, não aqui.
+const SETTINGS_SECTIONS = [
+  { key: 'ride', title: 'Corrida' },
+  { key: 'general', title: 'Geral' },
+  { key: 'account', title: 'Conta' },
+];
+
 function SettingRow({
   icon,
   title,
@@ -78,7 +84,7 @@ function SettingRow({
       accessibilityState={{ disabled }}
     >
       <View style={styles.rowIconSlot}>
-        <LeafObjectIcon symbol={icon} size={40} />
+        <LeafObjectIcon symbol={icon} size={22} />
       </View>
       <View style={styles.settingTextWrap}>
         <Text style={[styles.settingTitle, tone === 'danger' && styles.settingTitleDanger]}>
@@ -99,9 +105,9 @@ function SettingRow({
         ios_backgroundColor="#D7D7D7"
       /> : null}
       {showChevron ? (
-        <Ionicons
-          name="chevron-forward"
-          size={15}
+        <Feather
+          name="chevron-right"
+          size={18}
           color={tone === 'danger' ? SETTINGS_COLOR.danger : SETTINGS_COLOR.chevron}
         />
       ) : null}
@@ -251,10 +257,6 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
     source: 'mobile-app-settings-screen',
     additionalInfo: 'Solicitação enviada pela tela de configurações do app',
   });
-  const { resetSessionToStart } = useAccountSessionReset({
-    navigation,
-    profile: deletionProfile,
-  });
 
   useEffect(() => {
     const showStatusBar = () => StatusBar.setHidden(false, 'fade');
@@ -291,72 +293,9 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
     }
   }, []);
 
-  const promptLogout = useCallback(() => {
-    Alert.alert(
-      'Sair da conta',
-      'Tem certeza que deseja sair da sua conta Leaf?',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Sair',
-          style: 'destructive',
-          onPress: () => {
-            resetSessionToStart().catch((error) => {
-              Logger.error('Erro ao sair da conta pelos ajustes:', error);
-              Alert.alert('Não foi possível sair', 'Tente novamente em alguns instantes.');
-            });
-          },
-        },
-      ],
-    );
-  }, [resetSessionToStart]);
-
   const visibleSettingRows = [
     {
-      item: ROBOTAXI_SETTINGS_ITEMS.notifications,
-      icon: 'notifications-outline',
-      title: 'Notificações',
-      subtitle: notificationPermission === null ? 'Verificando permissão' : notificationPermission ? 'Ativadas no dispositivo' : 'Desativadas no dispositivo',
-      onPress: configureNotifications,
-      disabled: permissionBusy,
-      showChevron: true,
-      rowTestID: 'robotaxi-settings-row-notifications',
-      switchTestID: 'robotaxi-settings-switch-notifications',
-    },
-    {
-      item: ROBOTAXI_SETTINGS_ITEMS.language,
-      icon: 'language-outline',
-      title: 'Idioma',
-      subtitle: 'Português do Brasil',
-      // Single language: informational row (no chevron/alert dead end) until
-      // a real language picker exists.
-      rowTestID: 'robotaxi-settings-row-language',
-    },
-    {
-      item: ROBOTAXI_SETTINGS_ITEMS.traffic,
-      icon: 'map-outline',
-      title: 'Trânsito no mapa',
-      subtitle: 'Condições de trânsito',
-      rowTestID: 'robotaxi-settings-row-traffic',
-      switchTestID: 'robotaxi-settings-switch-traffic',
-      switchValue: preferences.trafficLayerEnabled,
-      onValueChange: value => savePreference('trafficLayerEnabled', value),
-      disabled: !ready || loading || saving,
-      driverOnly: true,
-    },
-    {
-      item: ROBOTAXI_SETTINGS_ITEMS.voice,
-      icon: 'volume-medium-outline',
-      title: 'Instruções por voz',
-      subtitle: voiceAvailable === false ? 'Configure a voz do dispositivo' : 'Orientações durante a navegação',
-      rowTestID: 'robotaxi-settings-row-voice',
-      switchTestID: 'robotaxi-settings-switch-voice',
-      switchValue: preferences.voiceGuidanceEnabled,
-      onValueChange: value => savePreference('voiceGuidanceEnabled', value),
-      disabled: !ready || loading || saving,
-      driverOnly: true,
-    },
-    {
+      section: 'ride',
       item: ROBOTAXI_SETTINGS_ITEMS.navigationApp,
       icon: 'navigate-outline',
       title: 'App de navegação',
@@ -368,6 +307,7 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
       driverOnly: true,
     },
     {
+      section: 'ride',
       item: ROBOTAXI_SETTINGS_ITEMS.autoNavigation,
       icon: 'car-outline',
       title: 'Abrir navegação na corrida',
@@ -380,6 +320,7 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
       driverOnly: true,
     },
     ...(isRideOverlayAvailable() ? [{
+      section: 'ride',
       item: ROBOTAXI_SETTINGS_ITEMS.rideOverlay,
       icon: 'layers-outline',
       title: 'Corrida por cima da navegação',
@@ -392,6 +333,45 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
       driverOnly: true,
     }] : []),
     {
+      section: 'ride',
+      item: ROBOTAXI_SETTINGS_ITEMS.voice,
+      icon: 'volume-medium-outline',
+      title: 'Instruções por voz',
+      subtitle: voiceAvailable === false ? 'Configure a voz do dispositivo' : 'Orientações durante a navegação',
+      rowTestID: 'robotaxi-settings-row-voice',
+      switchTestID: 'robotaxi-settings-switch-voice',
+      switchValue: preferences.voiceGuidanceEnabled,
+      onValueChange: value => savePreference('voiceGuidanceEnabled', value),
+      disabled: !ready || loading || saving,
+      driverOnly: true,
+    },
+    {
+      section: 'ride',
+      item: ROBOTAXI_SETTINGS_ITEMS.traffic,
+      icon: 'map-outline',
+      title: 'Trânsito no mapa',
+      subtitle: 'Condições de trânsito',
+      rowTestID: 'robotaxi-settings-row-traffic',
+      switchTestID: 'robotaxi-settings-switch-traffic',
+      switchValue: preferences.trafficLayerEnabled,
+      onValueChange: value => savePreference('trafficLayerEnabled', value),
+      disabled: !ready || loading || saving,
+      driverOnly: true,
+    },
+    {
+      section: 'general',
+      item: ROBOTAXI_SETTINGS_ITEMS.notifications,
+      icon: 'notifications-outline',
+      title: 'Notificações',
+      subtitle: notificationPermission === null ? 'Verificando permissão' : notificationPermission ? 'Ativadas no dispositivo' : 'Desativadas no dispositivo',
+      onPress: configureNotifications,
+      disabled: permissionBusy,
+      showChevron: true,
+      rowTestID: 'robotaxi-settings-row-notifications',
+      switchTestID: 'robotaxi-settings-switch-notifications',
+    },
+    {
+      section: 'general',
       item: ROBOTAXI_SETTINGS_ITEMS.password,
       icon: 'lock-closed-outline',
       title: 'Senha de acesso',
@@ -401,6 +381,7 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
       showChevron: true,
     },
     {
+      section: 'general',
       item: ROBOTAXI_SETTINGS_ITEMS.usageData,
       icon: 'analytics-outline',
       title: 'Dados de uso',
@@ -412,6 +393,7 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
       disabled: usageDataEnabled === null,
     },
     {
+      section: 'account',
       item: ROBOTAXI_SETTINGS_ITEMS.privacy,
       icon: 'shield-checkmark-outline',
       title: 'Privacidade',
@@ -421,15 +403,7 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
       showChevron: true,
     },
     {
-      item: ROBOTAXI_SETTINGS_ITEMS.logout,
-      icon: 'log-out-outline',
-      title: 'Sair da conta',
-      subtitle: 'Para entrar de novo, use seu telefone',
-      onPress: promptLogout,
-      rowTestID: 'robotaxi-settings-row-logout',
-      showChevron: true,
-    },
-    {
+      section: 'account',
       item: ROBOTAXI_SETTINGS_ITEMS.deleteAccount,
       icon: 'trash-outline',
       title: 'Excluir conta',
@@ -438,17 +412,6 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
       rowTestID: 'robotaxi-settings-row-delete-account',
       showChevron: true,
       tone: 'danger',
-    },
-    {
-      item: ROBOTAXI_SETTINGS_ITEMS.support,
-      icon: 'help-circle-outline',
-      title: 'Falar com suporte',
-      subtitle: 'Fale com a equipe Leaf',
-      // Push (not replace): replacing removed Settings mid-transition and flashed the home map.
-      onPress: () => navigation.navigate('RobotaxiPrototypeSupport'),
-      rowTestID: 'robotaxi-settings-open-support',
-      showChevron: true,
-      last: true,
     },
   ].filter(({ item, driverOnly }) => !isCurrentSurfaceUnavailable(item.status) && (!driverOnly || isDriver));
 
@@ -484,7 +447,7 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
                 testID="robotaxi-settings-close-button"
                 accessibilityLabel="Voltar"
               >
-                <Ionicons name="arrow-back" size={20} color={SETTINGS_COLOR.text} />
+                <Feather name="arrow-left" size={20} color={SETTINGS_COLOR.text} />
               </TouchableOpacity>
               <View style={styles.headerCopy}>
                 <Text style={styles.screenTitle}>Configurações</Text>
@@ -502,9 +465,15 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
               contentContainerStyle={styles.rowsContent}
             >
               {error ? <TouchableOpacity testID="robotaxi-settings-retry" style={styles.feedback} onPress={() => refresh({ forceRefresh: true })}><Text style={styles.settingSubtitle}>Configurações não atualizadas · Tentar novamente</Text></TouchableOpacity> : null}
-              {visibleSettingRows.map(({ item, driverOnly, ...row }) => (
-                <SettingRow key={item.key} {...row} />
-              ))}
+              {SETTINGS_SECTIONS.filter(section => visibleSettingRows.some(row => row.section === section.key)).map((section, sectionIndex) => {
+                const rows = visibleSettingRows.filter(row => row.section === section.key);
+                return <View key={section.key} testID={`robotaxi-settings-section-${section.key}`}>
+                  <Text style={[styles.sectionTitle, sectionIndex === 0 && { marginTop: 0 }]} accessibilityRole="header">{section.title}</Text>
+                  {rows.map(({ item, driverOnly, section: _section, ...row }, index) => (
+                    <SettingRow key={item.key} {...row} last={index === rows.length - 1} />
+                  ))}
+                </View>;
+              })}
             </ScrollView>
           </View>
         </PrototypeDismissibleSheet>
@@ -514,6 +483,7 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
 }
 
 const styles = StyleSheet.create({
+  sectionTitle: { ...leafTypography.semiBold, fontSize: 13, lineHeight: 18, color: SETTINGS_COLOR.secondary, marginTop: 20, marginBottom: 2 },
   feedback: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 12 },
   container: {
     flex: 1,
@@ -598,7 +568,7 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   rowIconSlot: {
-    width: 52,
+    width: 40,
     alignItems: 'flex-start',
     justifyContent: 'center',
   },

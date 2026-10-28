@@ -31,7 +31,7 @@ const COMMON_ITEMS = [
     detailRoute: 'RobotaxiMenuSettings',
     openDirect: true,
     section: 'support',
-    subtitle: 'Conta, privacidade e suporte'
+    subtitle: 'Notificações, senha e privacidade'
   },
   {
     key: 'help',
@@ -91,7 +91,7 @@ const PASSENGER_ITEMS = [
   {
     key: 'trip-history',
     status: CURRENT_SURFACE_STATUS.CURRENT,
-    title: 'Histórico de viagens',
+    title: 'Viagens e recibos',
     icon: 'time-outline',
     route: 'RobotaxiPrototypeReceipt',
     detailRoute: 'RobotaxiMenuTripHistory',
@@ -129,7 +129,7 @@ const DRIVER_ITEMS = [
   {
     key: 'driver-history',
     status: CURRENT_SURFACE_STATUS.CURRENT,
-    title: 'Corridas concluídas',
+    title: 'Corridas',
     icon: 'time-outline',
     route: 'RobotaxiPrototypeReceipt',
     detailRoute: 'RobotaxiMenuTripHistory',
@@ -163,7 +163,7 @@ const DRIVER_ITEMS = [
   {
     key: 'driver-vehicles',
     status: CURRENT_SURFACE_STATUS.CURRENT,
-    title: 'Veículos',
+    title: 'Veículo',
     icon: 'car-outline',
     route: 'RobotaxiPrototypeVehicles',
     openDirect: true,

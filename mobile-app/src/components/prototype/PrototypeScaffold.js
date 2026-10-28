@@ -135,6 +135,7 @@ export function PrototypeBottomIsland({ insets = {}, active = 'home', onPressPro
                 color={selected ? TAB_ACTIVE_COLOR : TAB_IDLE_COLOR}
                 strokeWidth={selected ? 2 : 1.75}
                 active={selected}
+                fill="none"
                 signal={selected ? 1 : 0}
               />
               <Text style={[styles.tabLabel, selected && styles.tabLabelActive]}>{item.title}</Text>
