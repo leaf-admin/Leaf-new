@@ -3875,9 +3875,8 @@ const styles = StyleSheet.create({
   tripAvatarMarkerLetterPassenger: {
     color: '#314225'
   },
+  // Width/height come from the `size` prop, the same value given to the SVG.
   vehicleMarkerWrap: {
-    width: 42,
-    height: 42,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'visible',
