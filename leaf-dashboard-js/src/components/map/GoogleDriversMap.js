@@ -279,13 +279,26 @@ function GoogleDriversMapWithKey({
     onViewportChange({ bbox, zoom: normalizedZoom });
   }, [onViewportChange]);
 
+  // O GoogleMap desta biblioteca não tem "defaultCenter": sem centro o mapa ficava cinza.
+  // Centraliza uma vez ao carregar e não segue as atualizações (o mapa não pula a cada refresh).
+  const [initialCenter] = useState(center);
   const handleMapLoad = useCallback(
     (map) => {
       mapRef.current = map;
+      map.setCenter(initialCenter);
+      map.setZoom(12);
       emitViewport();
     },
-    [emitViewport],
+    [emitViewport, initialCenter],
   );
+  // Os motoristas chegam depois do mapa: na primeira leva com posição, centraliza neles.
+  const centeredOnDataRef = useRef(false);
+  useEffect(() => {
+    if (centeredOnDataRef.current || !mapRef.current) return;
+    if (!validDrivers.length && !validCells.length) return;
+    centeredOnDataRef.current = true;
+    mapRef.current.setCenter(center);
+  }, [center, validCells.length, validDrivers.length]);
 
   const handleGeofencePolygonLoad = useCallback(
     (polygon) => {
@@ -490,8 +503,6 @@ function GoogleDriversMapWithKey({
 
       <GoogleMap
         mapContainerStyle={mapContainerStyle}
-        defaultCenter={center}
-        zoom={12}
         onLoad={handleMapLoad}
         onClick={handleMapClick}
         onIdle={emitViewport}
