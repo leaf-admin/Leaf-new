@@ -10394,8 +10394,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
         String(driverTransientCard?.id || '').trim() ? (
           <DriverTransientStateCard
             card={driverTransientCard}
-            insetsBottom={insets.bottom}
-            bottomOffset={DRIVER_BOTTOM_CTA_OFFSET + driverBottomCtaHeight + rootNavigationInset + 12}
+            insetsTop={insets.top + 8}
             suppressActivationStatusAlerts={driverHasAcceptedOrActiveWork}
           />
         ) : null}

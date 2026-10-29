@@ -1,8 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Easing, Text } from 'react-native';
+import { Animated, StyleSheet, Text, View } from 'react-native';
 import { useReducedMotion } from 'react-native-reanimated';
+import leafTypography from '../prototype/LeafTypography';
+import { LEAF_MOTION_DURATION, LEAF_MOTION_EASING } from './leafMotion';
 
-const COUNT_DURATION_MS = 720;
+// Motion level 3 (milestone): the driver's money going up after a ride.
+const COUNT_DURATION_MS = LEAF_MOTION_DURATION.milestone;
+const DELTA_VISIBLE_MS = 1600;
 const SETTLE_WINDOW_MS = 6000;
 
 // "R$ 1.234,56" -> 1234.56. Returns null when the label is not a plain amount.
@@ -21,9 +25,11 @@ export function formatBrlAmount(value) {
 }
 
 // Money that changes while the user is looking (earnings after a ride) counts
-// up to the new value with a small pulse instead of swapping text. The first
-// value shown, non-amount labels and reduced-motion users get plain text.
-export default function LeafAnimatedAmount({ label, style, ...textProps }) {
+// up to the new value instead of swapping text, calmly (no bounce). With
+// showDelta, a rise also floats a "+ R$ x" chip up and tints the value lime
+// once. The first value shown, non-amount labels and reduced-motion users get
+// plain text.
+export default function LeafAnimatedAmount({ label, style, showDelta = false, deltaPlacement = 'above', ...textProps }) {
   const reduceMotion = useReducedMotion();
   const target = parseBrlAmount(label);
   const [shown, setShown] = useState(label);
@@ -33,6 +39,8 @@ export default function LeafAnimatedAmount({ label, style, ...textProps }) {
   const mountedAtRef = useRef(Date.now());
   const frameRef = useRef(null);
   const pulse = useRef(new Animated.Value(1)).current;
+  const deltaProgress = useRef(new Animated.Value(0)).current;
+  const [delta, setDelta] = useState(null);
 
   useEffect(() => {
     const from = previousRef.current;
@@ -60,18 +68,51 @@ export default function LeafAnimatedAmount({ label, style, ...textProps }) {
 
     pulse.setValue(1);
     Animated.sequence([
-      Animated.timing(pulse, { toValue: 1.06, duration: 180, easing: Easing.out(Easing.quad), useNativeDriver: true }),
-      Animated.spring(pulse, { toValue: 1, friction: 6, tension: 120, useNativeDriver: true }),
+      Animated.timing(pulse, { toValue: 1.03, duration: LEAF_MOTION_DURATION.standard, easing: LEAF_MOTION_EASING, useNativeDriver: true }),
+      Animated.timing(pulse, { toValue: 1, duration: LEAF_MOTION_DURATION.enter, easing: LEAF_MOTION_EASING, useNativeDriver: true }),
     ]).start();
+
+    if (showDelta && target > from) {
+      setDelta(formatBrlAmount(target - from));
+      deltaProgress.setValue(0);
+      Animated.timing(deltaProgress, { toValue: 1, duration: DELTA_VISIBLE_MS, easing: LEAF_MOTION_EASING, useNativeDriver: true })
+        .start(({ finished }) => { if (finished) setDelta(null); });
+    }
 
     return () => {
       if (frameRef.current) cancelAnimationFrame(frameRef.current);
     };
-  }, [label, pulse, reduceMotion, target]);
+  }, [deltaProgress, label, pulse, reduceMotion, showDelta, target]);
 
   return (
-    <Animated.View style={{ transform: [{ scale: pulse }] }}>
-      <Text {...textProps} style={style}>{shown}</Text>
-    </Animated.View>
+    <View>
+      <Animated.View style={{ transform: [{ scale: pulse }] }}>
+        <Text {...textProps} style={style}>{shown}</Text>
+      </Animated.View>
+      {delta ? (
+        <Animated.View
+          pointerEvents="none"
+          accessibilityLiveRegion="polite"
+          testID="leaf-animated-amount-delta"
+          style={[
+            amountStyles.delta,
+            deltaPlacement === 'below' ? amountStyles.deltaBelow : amountStyles.deltaAbove,
+            {
+              opacity: deltaProgress.interpolate({ inputRange: [0, 0.15, 0.7, 1], outputRange: [0, 1, 1, 0] }),
+              transform: [{ translateY: deltaProgress.interpolate({ inputRange: [0, 1], outputRange: deltaPlacement === 'below' ? [-6, 18] : [6, -22] }) }],
+            },
+          ]}
+        >
+          <Text style={amountStyles.deltaText}>{`+ ${delta}`}</Text>
+        </Animated.View>
+      ) : null}
+    </View>
   );
 }
+
+const amountStyles = StyleSheet.create({
+  delta: { position: 'absolute', alignSelf: 'center', borderRadius: 999, backgroundColor: '#D4E84A', paddingHorizontal: 10, paddingVertical: 3 },
+  deltaAbove: { bottom: '100%' },
+  deltaBelow: { top: '100%' },
+  deltaText: { ...leafTypography.bold, fontSize: 13, lineHeight: 18, color: '#003002' },
+});

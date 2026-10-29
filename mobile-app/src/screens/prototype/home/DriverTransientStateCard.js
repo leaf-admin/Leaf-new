@@ -1,30 +1,17 @@
-import leafTypography from '../../../components/prototype/LeafTypography';
 import React from "react";
-import { StyleSheet, Text, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
-import { PrototypeCard } from "../../../components/prototype/PrototypeUI";
-import robotaxiPrototypeTokens from "../../../components/design-system/robotaxiPrototypeTokens";
+import LeafActionBanner from "../../../components/design-system/LeafActionBanner";
 
-const { color } = robotaxiPrototypeTokens;
-
-function resolveIcon(type) {
+// Banner com ação (estudo 5.3): tipo do aviso -> tom e ícone.
+function resolveBannerTone(type) {
   const normalized = String(type || "").trim().toLowerCase();
-  if (normalized === "rider_cancelled_before_accept") {
-    return { name: "close-circle-outline", color: "#8A1F2B", tone: styles.cancelIconWrap };
-  }
-  if (normalized === "accepted_by_other_driver_competitive") {
-    return { name: "swap-horizontal-outline", color: "#365A6D", tone: styles.competitiveIconWrap };
-  }
-  if (normalized === "night_surcharge_started") {
-    return { name: "moon", color: "#3B3270", tone: styles.nightIconWrap };
-  }
-  if (normalized === "night_surcharge_ended") {
-    return { name: "sunny-outline", color: "#7A5B10", tone: styles.expiredIconWrap };
-  }
-  if (normalized === "offer_expired") {
-    return { name: "time-outline", color: "#7A5B10", tone: styles.expiredIconWrap };
-  }
-  return { name: "information-circle-outline", color: color.text.primary, tone: styles.defaultIconWrap };
+  if (normalized === "rider_cancelled_before_accept") return { tone: "warning", icon: "close-circle-outline" };
+  if (normalized === "driver_online_daily_limit_reached") return { tone: "warning", icon: "time-outline" };
+  if (normalized === "session_terminated") return { tone: "warning", icon: "log-out-outline" };
+  if (normalized === "accepted_by_other_driver_competitive") return { tone: "info", icon: "swap-horizontal-outline" };
+  if (normalized === "night_surcharge_started") return { tone: "info", icon: "moon" };
+  if (normalized === "night_surcharge_ended") return { tone: "info", icon: "sunny-outline" };
+  if (normalized === "offer_expired") return { tone: "info", icon: "time-outline" };
+  return { tone: "info", icon: "information-circle-outline" };
 }
 
 function normalizeAlertText(value) {
@@ -56,8 +43,7 @@ function isActivationStatusCard(card = {}) {
 
 export default function DriverTransientStateCard({
   card = null,
-  insetsBottom = 0,
-  bottomOffset = 0,
+  insetsTop = 0,
   suppressActivationStatusAlerts = false,
 }) {
   const cardId = String(card?.id || "").trim();
@@ -69,92 +55,17 @@ export default function DriverTransientStateCard({
     return null;
   }
 
-  const icon = resolveIcon(card?.type);
+  const { tone, icon } = resolveBannerTone(card?.type);
 
   return (
-    <View
-      pointerEvents="none"
-      style={[styles.wrap, { bottom: insetsBottom + bottomOffset }]}
+    <LeafActionBanner
+      key={cardId}
+      tone={tone}
+      icon={icon}
+      top={insetsTop}
+      title={card?.title || "Atualização"}
+      message={card?.message || "O estado da solicitação foi atualizado."}
       testID="driver-transient-state-card"
-      accessible
-      accessibilityRole="alert"
-      accessibilityLiveRegion="polite"
-      accessibilityLabel={`${card?.title || "Atualização"}. ${card?.message || "O estado da solicitação foi atualizado."}`}
-    >
-      <PrototypeCard style={styles.card}>
-        <View style={styles.row}>
-          <View style={[styles.iconWrap, icon.tone]}>
-            <Ionicons name={icon.name} size={18} color={icon.color} />
-          </View>
-
-          <View style={styles.copy}>
-            <Text style={styles.title}>{card?.title || "Atualização"}</Text>
-            <Text style={styles.message}>
-              {card?.message || "O estado da solicitação foi atualizado."}
-            </Text>
-          </View>
-        </View>
-      </PrototypeCard>
-    </View>
+    />
   );
 }
-
-const styles = StyleSheet.create({
-  wrap: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    alignItems: "center",
-    zIndex: 19,
-  },
-  card: {
-    width: "88%",
-    borderRadius: 24,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    backgroundColor: "rgba(249,250,247,0.98)",
-  },
-  row: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 12,
-  },
-  nightIconWrap: {
-    backgroundColor: "#ECEAF8",
-  },
-  iconWrap: {
-    width: 38,
-    height: 38,
-    borderRadius: 14,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  cancelIconWrap: {
-    backgroundColor: "rgba(138,31,43,0.12)",
-  },
-  competitiveIconWrap: {
-    backgroundColor: "rgba(208,225,236,0.56)",
-  },
-  expiredIconWrap: {
-    backgroundColor: "rgba(201,150,28,0.14)",
-  },
-  defaultIconWrap: {
-    backgroundColor: "rgba(68,85,93,0.08)",
-  },
-  copy: {
-    flex: 1,
-  },
-  title: {
-    ...leafTypography.semiBold,
-    fontSize: 22,
-    lineHeight: 28,
-    color: color.text.primary,
-  },
-  message: {
-    marginTop: 4,
-    ...leafTypography.medium,
-    fontSize: 13,
-    lineHeight: 17,
-    color: color.text.secondary,
-  },
-});

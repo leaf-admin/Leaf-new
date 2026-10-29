@@ -155,10 +155,12 @@ export const robotaxiPrototypeTokens = {
       map: 650
     },
     spring: {
+      // Calm motion (2026-10-29): sheets settle without passing the end point.
       sheet: {
         damping: 20,
         stiffness: 290,
         mass: 0.9,
+        overshootClamping: true,
         restDisplacementThreshold: 0.3,
         restSpeedThreshold: 0.3
       },

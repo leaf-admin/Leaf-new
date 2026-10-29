@@ -1,4 +1,5 @@
 import leafTypography from './LeafTypography';
+import { LEAF_MOTION_DURATION, LEAF_MOTION_EASING, LEAF_PRESS } from '../design-system/leafMotion';
 import React from "react";
 import { ActivityIndicator, Animated, Easing, Image, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useReducedMotion } from "react-native-reanimated";
@@ -85,7 +86,7 @@ function resolveAvatarSource(photoUri) {
   return uri ? { uri } : null;
 }
 
-function useLeafPressScale(disabled = false, pressedScale = 0.982) {
+function useLeafPressScale(disabled = false, pressedScale = LEAF_PRESS.scale) {
   const reduceMotion = useReducedMotion();
   const scale = React.useRef(new Animated.Value(1)).current;
 
@@ -93,12 +94,11 @@ function useLeafPressScale(disabled = false, pressedScale = 0.982) {
     (toValue) => {
       scale.stopAnimation();
       if (reduceMotion) { scale.setValue(1); return; }
-      Animated.spring(scale, {
+      // Motion level 1: a short calm timing, no spring.
+      Animated.timing(scale, {
         toValue,
-        stiffness: 420,
-        damping: 34,
-        mass: 0.72,
-        overshootClamping: true,
+        duration: LEAF_MOTION_DURATION.tap,
+        easing: LEAF_MOTION_EASING,
         useNativeDriver: true,
       }).start();
     },
@@ -343,7 +343,7 @@ export function LeafAnimatedPressable({
   children,
   style,
   disabled = false,
-  activeScale = 0.982,
+  activeScale = LEAF_PRESS.scale,
   onPressIn,
   onPressOut,
   activeOpacity = 1,
