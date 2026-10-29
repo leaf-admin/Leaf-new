@@ -20,7 +20,9 @@ export function validateAccountPassword(password, confirmation) {
   return '';
 }
 
-export default function LeafAccountPasswordScreen({ navigation }) {
+export default function LeafAccountPasswordScreen({ navigation, route }) {
+  // Opened from the withdrawal: there the password is required, not optional.
+  const forWithdrawal = route?.params?.purpose === 'withdrawal';
   const haptic = useHapticFeedback();
   const { riderProfile } = usePrototypeRideRuntime();
   const [password, setPassword] = useState('');
@@ -61,14 +63,18 @@ export default function LeafAccountPasswordScreen({ navigation }) {
         stepKey="saved"
         onBack={back}
         testID="leaf-account-password-saved"
-        footer={<PrimaryButton label="Pronto" onPress={back} testID="leaf-account-password-done" />}
+        footer={<PrimaryButton label={forWithdrawal ? 'Voltar ao saque' : 'Pronto'} onPress={back} testID="leaf-account-password-done" />}
       >
         <View style={styles.done}>
           <Reanimated.View entering={ZoomIn.springify().damping(13)} style={styles.doneIcon}>
             <Ionicons name="checkmark" size={30} color="#FFFFFF" />
           </Reanimated.View>
           <Text style={styles.doneTitle}>Senha salva</Text>
-          <Text style={styles.doneText}>Na próxima vez, toque em “Já tenho senha” depois de digitar o seu número.</Text>
+          <Text style={styles.doneText}>
+            {forWithdrawal
+              ? 'Use essa senha para confirmar o saque. Ela também serve para entrar sem esperar o código.'
+              : 'Na próxima vez, toque em “Já tenho senha” depois de digitar o seu número.'}
+          </Text>
         </View>
       </OnboardingShell>
     );
@@ -90,8 +96,10 @@ export default function LeafAccountPasswordScreen({ navigation }) {
     <OnboardingShell
       stepKey="form"
       onBack={back}
-      title="Senha de acesso"
-      subtitle="Opcional. Com ela você entra sem esperar o código pelo WhatsApp."
+      title={forWithdrawal ? 'Crie sua senha do app' : 'Senha de acesso'}
+      subtitle={forWithdrawal
+        ? 'Ela confirma os seus saques. Também serve para entrar sem esperar o código pelo WhatsApp.'
+        : 'Opcional. Com ela você entra sem esperar o código pelo WhatsApp.'}
       testID="leaf-account-password"
       footer={<PrimaryButton label="Salvar senha" onPress={save} loading={saving} disabled={!password || !confirmation} testID="leaf-account-password-save" />}
     >

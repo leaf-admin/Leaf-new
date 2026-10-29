@@ -41,4 +41,21 @@ describe('LeafAccountPasswordScreen', () => {
     expect(UserAuthService.setupPassword).not.toHaveBeenCalled();
     expect(getByText('As senhas não conferem.')).toBeTruthy();
   });
+
+  it('explains the password is required when opened from the withdrawal', async () => {
+    UserAuthService.setupPassword.mockResolvedValue({ success: true });
+    const navigation = { canGoBack: () => true, goBack: jest.fn(), navigate: jest.fn() };
+    const { getByTestId, getByText, findByText } = render(
+      <LeafAccountPasswordScreen navigation={navigation} route={{ params: { purpose: 'withdrawal' } }} />
+    );
+
+    expect(getByText('Crie sua senha do app')).toBeTruthy();
+    fireEvent.changeText(getByTestId('leaf-account-password-input'), 'senha1234');
+    fireEvent.changeText(getByTestId('leaf-account-password-confirm-input'), 'senha1234');
+    fireEvent.press(getByTestId('leaf-account-password-save'));
+
+    expect(await findByText('Voltar ao saque')).toBeTruthy();
+    fireEvent.press(getByTestId('leaf-account-password-done'));
+    expect(navigation.goBack).toHaveBeenCalled();
+  });
 });
