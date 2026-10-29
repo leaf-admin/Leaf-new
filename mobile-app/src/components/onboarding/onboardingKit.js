@@ -68,18 +68,20 @@ export function OnboardingProgress({ step, total }) {
 export function PrimaryButton({ label, onPress, disabled = false, loading = false, tone = 'dark', testID }) {
   const haptic = useHapticFeedback();
   const light = tone === 'light';
+  // Lime: the welcome screen's call to action over the city photo.
+  const lime = tone === 'lime';
   return (
     <LeafAnimatedPressable
       onPress={disabled || loading ? undefined : () => { haptic('tap'); onPress?.(); }}
       disabled={disabled || loading}
       activeScale={0.98}
-      style={[styles.primary, light && styles.primaryLight, (disabled || loading) && styles.primaryDisabled]}
+      style={[styles.primary, light && styles.primaryLight, lime && styles.primaryLime, (disabled || loading) && styles.primaryDisabled]}
       accessibilityRole="button"
       accessibilityState={{ disabled: disabled || loading, busy: loading }}
       testID={testID}
     >
-      {loading ? <LoadingDots color={light ? ONB.leafDeep : '#FFFFFF'} /> : (
-        <Text style={[styles.primaryText, light && styles.primaryTextLight]}>{label}</Text>
+      {loading ? <LoadingDots color={light || lime ? ONB.leafDeep : '#FFFFFF'} /> : (
+        <Text style={[styles.primaryText, (light || lime) && styles.primaryTextLight]}>{label}</Text>
       )}
     </LeafAnimatedPressable>
   );
@@ -220,6 +222,7 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   primaryLight: { backgroundColor: '#FFFFFF' },
+  primaryLime: { backgroundColor: '#D4E84A' },
   primaryDisabled: { opacity: 0.32 },
   primaryText: { ...leafTypography.semiBold, fontSize: 17, color: '#FFFFFF' },
   primaryTextLight: { color: ONB.leafDeep },

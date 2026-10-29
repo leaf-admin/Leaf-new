@@ -76,6 +76,12 @@ describe('RobotaxiMenuScreen availability', () => {
     ['payment-info', 'achievements', 'privacy-account-deletion'].forEach(key =>
       expect(screen.queryByTestId(`robotaxi-menu-item-${key}`)).toBeNull());
 
+    // Preferências de viagem ficam na seção Viagens, com título de seção (lista agrupada).
+    fireEvent.press(screen.getByTestId('robotaxi-menu-item-ride-preferences'));
+    expect(navigation.navigate).toHaveBeenCalledWith('LeafRidePreferences', expect.anything());
+    expect(screen.getByText('Viagens')).toBeTruthy();
+    expect(screen.getByText('Suporte')).toBeTruthy();
+
     // O cabeçalho abre o cartão de membro em tela cheia.
     fireEvent.press(screen.getByTestId('leaf-account-card'));
     expect(navigation.navigate).toHaveBeenCalledWith('LeafMemberCard');

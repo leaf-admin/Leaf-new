@@ -15,7 +15,6 @@ const LEAF_TEXT = '#222222';
 const LEAF_MUTED = '#767676';
 const LEAF_SECONDARY = '#6A6A6A';
 const LEAF_DANGER = '#B42318';
-const LEAF_GROUP_BG = '#F4F4F2';
 const TEXT_SCALE_CAP = 1.35;
 // Botões de cabeçalho ainda recebem nomes do Ionicons.
 const CLOSE_BUTTON_GLYPHS = { 'arrow-back': 'arrow-left', close: 'x', 'settings-outline': 'settings' };
@@ -197,8 +196,8 @@ export function PrototypeMenuRow({
   );
 }
 
-// Bloco arredondado de linhas (2026-10-28): fundo cinza claro, ícone de traço,
-// valor ou selo à direita e divisória recuada até o texto, como nos ajustes do iOS.
+// Lista agrupada (canvas de UI/UX, 3B, 2026-10-29): fundo branco contínuo, título de
+// seção em maiúsculas, linhas sem ícone com valor ou selo à direita e divisória fina.
 export function PrototypeMenuGroup({ title, children, style, testID }) {
   const rows = React.Children.toArray(children).filter(Boolean);
   if (!rows.length) return null;
@@ -238,7 +237,6 @@ export function PrototypeMenuGroupRow({
       accessibilityLabel={accessibilityLabel || [title, value, badge].filter(Boolean).join(', ')}
       accessibilityHint={accessibilityHint}
     >
-      {icon ? <LeafObjectIcon symbol={icon} size={20} color={danger ? LEAF_DANGER : LEAF_TEXT} /> : null}
       <View style={[styles.groupRowBody, divider && styles.groupRowDivider]}>
         <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} numberOfLines={1} style={[styles.groupRowTitle, danger && styles.groupRowTitleDanger]}>{title}</Text>
         {value ? <Text maxFontSizeMultiplier={TEXT_SCALE_CAP} numberOfLines={1} style={styles.groupRowValue}>{value}</Text> : null}
@@ -311,12 +309,12 @@ export function PrototypeMenuCloseButton({
 }
 
 const styles = StyleSheet.create({
-  groupTitle: { ...leafTypography.medium, fontSize: 13, lineHeight: 18, color: LEAF_SECONDARY, marginLeft: 4, marginBottom: 8 },
-  group: { backgroundColor: LEAF_GROUP_BG, borderRadius: 16, paddingLeft: 16, overflow: 'hidden' },
-  groupRow: { minHeight: 52, flexDirection: 'row', alignItems: 'center', gap: 14 },
-  groupRowBody: { flex: 1, minHeight: 52, flexDirection: 'row', alignItems: 'center', gap: 8, paddingRight: 14 },
-  groupRowDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#DCDCD8' },
-  groupRowTitle: { ...leafTypography.medium, flex: 1, fontSize: 16, lineHeight: 21, color: LEAF_TEXT },
+  groupTitle: { ...leafTypography.semiBold, fontSize: 12, lineHeight: 16, letterSpacing: 0.72, textTransform: 'uppercase', color: LEAF_MUTED, marginBottom: 2 },
+  group: { backgroundColor: 'transparent' },
+  groupRow: { minHeight: 54, flexDirection: 'row', alignItems: 'center' },
+  groupRowBody: { flex: 1, minHeight: 54, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  groupRowDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#E5E5E5' },
+  groupRowTitle: { ...leafTypography.regular, flex: 1, fontSize: 17, lineHeight: 22, color: LEAF_TEXT },
   groupRowTitleDanger: { color: LEAF_DANGER },
   groupRowValue: { ...leafTypography.regular, fontSize: 15, lineHeight: 20, color: LEAF_MUTED, maxWidth: '50%' },
   groupBadge: { borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2, backgroundColor: '#E5F1DC' },
