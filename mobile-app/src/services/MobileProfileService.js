@@ -27,6 +27,12 @@ class MobileProfileService {
     return payload;
   }
 
+  // Conquistas calculadas pelo backend (o app não concede nada, só mostra).
+  async getAchievements() {
+    const payload = await this.requestProfile('/account/achievements', { method: 'GET' });
+    return payload?.achievements || null;
+  }
+
   async getCurrentProfile(options = {}) {
     const { suppressErrors = false, timeoutMs = 5000 } = options;
 

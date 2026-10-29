@@ -341,6 +341,58 @@ describe('referral-programs admin mutation guards', () => {
     expect(mockCreateInviteWithUniqueCode).not.toHaveBeenCalled();
   });
 
+  it('creates a passenger invite without any discount while rewards are off', async () => {
+    mockGetConfig.mockResolvedValue({ passenger: { enabled: true } });
+    mockCreateInviteWithUniqueCode.mockImplementation(async (payload) => payload);
+
+    const response = await request(createApp())
+      .post('/api/referral-programs/invites/passenger')
+      .set('Authorization', 'Bearer firebase-token')
+      .send({ inviteePhone: '+55 21 98888-7777' });
+
+    expect(response.status).toBe(200);
+    expect(mockCreateInviteWithUniqueCode).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'passenger_referral', discountPercent: 0, maxDiscountRides: 0 })
+    );
+  });
+
+  it('caps passenger invites per person', async () => {
+    mockGetConfig.mockResolvedValue({ passenger: { enabled: true, maxInvitesPerPassenger: 2 } });
+    mockListInvites.mockResolvedValue([
+      { id: 'a', type: 'passenger_referral', status: 'pending', inviterId: 'user_2', inviteePhone: '+5521911111111' },
+      { id: 'b', type: 'passenger_referral', status: 'accepted', inviterId: 'user_2', inviteePhone: '+5521922222222' },
+    ]);
+
+    const response = await request(createApp())
+      .post('/api/referral-programs/invites/passenger')
+      .set('Authorization', 'Bearer firebase-token')
+      .send({ inviteePhone: '+55 21 93333-3333' });
+
+    expect(response.status).toBe(400);
+    expect(response.body).toMatchObject({ limit: 2 });
+    expect(mockCreateInviteWithUniqueCode).not.toHaveBeenCalled();
+  });
+
+  it('accepts a passenger invite without granting a benefit while rewards are off', async () => {
+    mockGetConfig.mockResolvedValue({ passenger: { enabled: true } });
+    mockFindInviteByCode.mockResolvedValue({
+      id: 'invite_passenger', code: 'PAX-OK', type: 'passenger_referral', status: 'pending',
+      inviterId: 'user_1', inviteePhone: '+5521999999999', discountPercent: 0, maxDiscountRides: 0,
+    });
+    mockAcceptInvite.mockResolvedValue({
+      id: 'invite_passenger', code: 'PAX-OK', type: 'passenger_referral', status: 'accepted',
+      inviterId: 'user_1', acceptedBy: 'user_2',
+    });
+
+    const response = await request(createApp())
+      .post('/api/referral-programs/invites/accept')
+      .set('Authorization', 'Bearer firebase-token')
+      .send({ code: 'PAX-OK' });
+
+    expect(response.status).toBe(200);
+    expect(mockSavePassengerBenefit).not.toHaveBeenCalled();
+  });
+
   it('blocks invite creation when a matching campaign exists but is not active', async () => {
     mockListCampaigns.mockResolvedValue([
       {

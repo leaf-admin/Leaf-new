@@ -19,7 +19,6 @@ import {
   PrototypeMenuCloseButton,
   PrototypeMenuInfoRow,
   PrototypeMenuSection,
-  PrototypeMenuStatRow,
   PrototypeMenuSurface,
 } from '../../components/prototype/PrototypeMenuSurface';
 import { LeafButton, LeafEmptyState, leafRideColors } from '../../components/prototype/LeafRideUI';
@@ -130,12 +129,7 @@ export default function RobotaxiInvitesScreen({ navigation, route }) {
     occludedBottom: panelHeight,
   });
 
-  const activeInvites = useMemo(
-    () => sentInvites.filter((invite) => ['pending', 'accepted'].includes(String(invite.status || '').toLowerCase())),
-    [sentInvites],
-  );
   const acceptedCount = useMemo(() => countByStatus(sentInvites, 'accepted'), [sentInvites]);
-  const receivedAcceptedCount = useMemo(() => countByStatus(receivedInvites, 'accepted'), [receivedInvites]);
   const latestInvite = createdInvite || sentInvites[0] || null;
   const latestCode = latestInvite?.code || '';
   const latestLink = useMemo(() => buildInviteLink(latestCode), [latestCode]);
@@ -223,7 +217,7 @@ export default function RobotaxiInvitesScreen({ navigation, route }) {
       if (result.invite?.id || result.invite?.code) {
         setReceivedInvites((current) => [result.invite, ...current]);
         setAcceptCode('');
-        if (result.passengerBenefit) {
+        if (result.passengerBenefit && Number(result.passengerBenefit.discountPercent) > 0) {
           Alert.alert(
             'Convite aceito',
             `Benefício aplicado: ${result.passengerBenefit.discountPercent || 0}% em até ${result.passengerBenefit.remainingRides || result.passengerBenefit.maxDiscountRides || 0} corridas.`,
@@ -263,8 +257,10 @@ export default function RobotaxiInvitesScreen({ navigation, route }) {
           <PrototypeMenuSurface
             onLayout={handlePanelLayout}
             eyebrow="Convites"
-            title="Convide passageiros"
-            subtitle="Convide pessoas para a Leaf e veja quem já aceitou."
+            title="Convide para a Leaf"
+            subtitle={sentInvites.length
+              ? `${sentInvites.length} enviado${sentInvites.length === 1 ? '' : 's'} · ${acceptedCount} aceito${acceptedCount === 1 ? '' : 's'}`
+              : 'Mande seu convite e veja aqui quem já entrou.'}
             fullScreen
             style={{
               paddingTop: insets.top + SURFACE_TOP_PADDING,
@@ -279,16 +275,9 @@ export default function RobotaxiInvitesScreen({ navigation, route }) {
             )}
           >
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
-              <PrototypeMenuStatRow
-                items={[
-                  { key: 'sent', label: 'enviados', value: String(sentInvites.length) },
-                  { key: 'active', label: 'ativos', value: String(activeInvites.length) },
-                  { key: 'accepted', label: 'aceitos', value: String(acceptedCount) },
-                ]}
-              />
 
               <View style={styles.inputBlock}>
-                <Text style={styles.inputLabel}>Telefone ou email</Text>
+                <Text style={styles.inputLabel}>Convidar alguém · telefone ou email</Text>
                 <TextInput
                   value={inviteTarget}
                   onChangeText={setInviteTarget}
@@ -312,19 +301,10 @@ export default function RobotaxiInvitesScreen({ navigation, route }) {
               </View>
 
               {latestInvite ? (
-                <PrototypeMenuSection title="Último convite">
+                <PrototypeMenuSection title="Seu convite">
                   <PrototypeMenuInfoRow label="Código" value={latestCode || 'Aguardando'} />
                   <PrototypeMenuInfoRow label="Link" value={latestLink} />
-                  <PrototypeMenuInfoRow label="Status" value={formatInviteStatus(latestInvite.status)} />
-                  <PrototypeMenuInfoRow
-                    label="Benefício"
-                    value={
-                      latestInvite.discountPercent
-                        ? `${latestInvite.discountPercent}% / ${latestInvite.maxDiscountRides || 0} corridas`
-                        : 'Convite ativo'
-                    }
-                    last
-                  />
+                  <PrototypeMenuInfoRow label="Situação" value={formatInviteStatus(latestInvite.status)} last />
                   <View style={styles.actionGrid}>
                     <LeafButton
                       label={copied ? 'Copiado' : 'Copiar'}
@@ -349,11 +329,11 @@ export default function RobotaxiInvitesScreen({ navigation, route }) {
               ) : (
                 <LeafEmptyState
                   icon="people-outline"
-                  title={loading ? 'Carregando convites' : 'Nenhum convite criado'}
+                  title={loading ? 'Carregando convites' : 'Nenhum convite ainda'}
                   message={
                     loading
-                      ? 'Sincronizando convites e aceites recentes.'
-                      : 'Quando alguém aceitar seu convite, aparece aqui.'
+                      ? 'Buscando seus convites.'
+                      : 'Crie um convite acima. Quando a pessoa entrar, ela aparece aqui.'
                   }
                   loading={loading}
                   testID="robotaxi-invites-empty-state"
@@ -384,21 +364,15 @@ export default function RobotaxiInvitesScreen({ navigation, route }) {
                 />
               </View>
 
-              <PrototypeMenuSection title="Histórico">
-                <PrototypeMenuInfoRow label="Recebidos" value={String(receivedInvites.length)} />
-                <PrototypeMenuInfoRow label="Aceites recebidos" value={String(receivedAcceptedCount)} />
-                <PrototypeMenuInfoRow label="Ativos enviados" value={String(activeInvites.length)} last />
-              </PrototypeMenuSection>
-
               <InviteHistoryRows
-                title="Enviados recentes"
+                title="Enviados"
                 invites={sentInvites}
                 emptyMessage="Nenhum convite enviado ainda."
                 testID="robotaxi-invites-sent-history"
               />
 
               <InviteHistoryRows
-                title="Aceitos por você"
+                title="Convites que você aceitou"
                 invites={receivedInvites}
                 emptyMessage="Nenhum convite aceito neste perfil."
                 testID="robotaxi-invites-received-history"

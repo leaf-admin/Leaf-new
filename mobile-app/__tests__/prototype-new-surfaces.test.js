@@ -270,7 +270,7 @@ describe('prototype new surfaces', () => {
       />
     );
 
-    expect(screen.getByText('Convide passageiros')).toBeTruthy();
+    expect(screen.getByText('Convide para a Leaf')).toBeTruthy();
 
     await waitFor(() => {
       expect(screen.getByText('PSG-OLD')).toBeTruthy();
