@@ -43,11 +43,19 @@ const REVERSE_GEOCODE_CACHE_TTL_SECONDS = parseCacheTtlSeconds(
   process.env.PLACES_REVERSE_GEOCODE_CACHE_TTL_SECONDS || '2592000',
   30 * 24 * 60 * 60,
 );
+// 4 casas (~11 m): a mesma rua/número resolve igual; com 5 (~1 m) quase toda
+// coordenada virava uma chave nova (5,4 mil entradas e reaproveitamento baixo).
 const REVERSE_GEOCODE_CACHE_PRECISION = Math.max(
   4,
-  Math.min(6, Number.parseInt(process.env.PLACES_REVERSE_GEOCODE_CACHE_PRECISION || '5', 10) || 5),
+  Math.min(6, Number.parseInt(process.env.PLACES_REVERSE_GEOCODE_CACHE_PRECISION || '4', 10) || 4),
 );
 const EARTH_RADIUS_KM = 6371;
+// Pedidos iguais de rota que chegam juntos (a prévia do mapa e a rota da corrida saem no
+// mesmo segundo) iam os dois ao Google. O segundo agora espera o primeiro: no mesmo
+// processo pela mesma promessa; entre gateways por uma trava curta no Redis.
+const DIRECTIONS_INFLIGHT_LOCK_SECONDS = 10;
+const DIRECTIONS_INFLIGHT_WAIT_MS = 4000;
+const DIRECTIONS_INFLIGHT_POLL_MS = 150;
 const ROUTES_API_TRAFFIC_POLYLINE_ENABLED =
   String(process.env.ENABLE_ROUTES_API_TRAFFIC_POLYLINE || 'false').trim().toLowerCase() === 'true';
 const ROUTES_API_COMPUTE_ROUTES_URL =
@@ -1393,6 +1401,41 @@ class PlacesCacheService {
   }
 
   async fetchDirectionsRoute(options = {}) {
+    if (options?.cacheOnly === true || options?.forceFresh === true) {
+      return this.fetchDirectionsRouteOnce(options);
+    }
+    const inflightKey = JSON.stringify([
+      options?.startLoc, options?.destLoc, options?.waypoints || null,
+      options?.trafficEnabled === true, options?.alternativesEnabled === true,
+    ]);
+    if (!this.inflightDirections) this.inflightDirections = new Map();
+    const pending = this.inflightDirections.get(inflightKey);
+    if (pending) return pending;
+    const request = this.fetchDirectionsRouteOnce(options).finally(() => {
+      this.inflightDirections.delete(inflightKey);
+    });
+    this.inflightDirections.set(inflightKey, request);
+    return request;
+  }
+
+  async waitForDirectionsCache(cacheKey, timeoutMs = DIRECTIONS_INFLIGHT_WAIT_MS) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, DIRECTIONS_INFLIGHT_POLL_MS));
+      const cached = await this.redis.get(cacheKey).catch(() => null);
+      if (!cached) continue;
+      try {
+        const parsed = JSON.parse(cached);
+        const data = parsed?.data ? enrichDirectionsDataWithTolls(parsed.data) : null;
+        if (data && hasUsableDirectionsGeometry(data)) return { ...parsed, data };
+      } catch (_error) {
+        return null;
+      }
+    }
+    return null;
+  }
+
+  async fetchDirectionsRouteOnce(options = {}) {
     try {
       const origin = parseLatLngPair(options?.startLoc);
       const destination = parseLatLngPair(options?.destLoc);
@@ -1480,6 +1523,27 @@ class PlacesCacheService {
           stats,
           cachePolicy,
         };
+      }
+
+      if (this.isInitialized && !forceFresh && directionsCacheTtlSeconds > 0 && typeof this.redis?.set === 'function') {
+        const lockKey = `${cacheKey}:inflight`;
+        const acquired = await this.redis
+          .set(lockKey, '1', 'EX', DIRECTIONS_INFLIGHT_LOCK_SECONDS, 'NX')
+          .catch(() => 'OK');
+        if (acquired !== 'OK') {
+          const coalesced = await this.waitForDirectionsCache(cacheKey);
+          if (coalesced) {
+            stats.redisReads += 1;
+            return {
+              ...coalesced,
+              cached: true,
+              coalesced: true,
+              cacheKey,
+              stats,
+              cachePolicy: coalesced.cachePolicy || cachePolicy,
+            };
+          }
+        }
       }
 
       if (directionsProvider === 'routes_api') {

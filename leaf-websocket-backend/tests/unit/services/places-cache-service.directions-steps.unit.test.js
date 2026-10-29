@@ -347,6 +347,64 @@ describe('places-cache-service directions steps', () => {
     expect(mockRedisConnection.setex).not.toHaveBeenCalled();
   });
 
+  const legacyDirectionsResponse = () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      status: 'OK',
+      routes: [{
+        overview_polyline: { points: VALID_POLYLINE },
+        legs: [{
+          distance: { value: 2500 },
+          duration: { value: 420 },
+          start_location: { lat: -22.9712, lng: -43.1822 },
+          end_location: { lat: -22.9673, lng: -43.179 },
+          start_address: 'Origem',
+          end_address: 'Destino',
+          steps: [],
+        }],
+      }],
+    }),
+  });
+
+  it('asks Google once when two identical route requests arrive together', async () => {
+    const placesCacheService = loadService();
+    placesCacheService.googleApiKey = 'test-google-key';
+    placesCacheService.isInitialized = true;
+    mockRedisConnection.get.mockResolvedValue(null);
+    global.fetch = jest.fn().mockResolvedValue(legacyDirectionsResponse());
+    const request = { startLoc: '-22.9712,-43.1822', destLoc: '-22.9673,-43.1790' };
+
+    const [first, second] = await Promise.all([
+      placesCacheService.fetchDirectionsRoute(request),
+      placesCacheService.fetchDirectionsRoute(request),
+    ]);
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(second).toBe(first);
+    expect(first.data.polylinePoints).toBe(VALID_POLYLINE);
+  });
+
+  it('waits for the route another gateway is already fetching instead of calling Google', async () => {
+    const placesCacheService = loadService();
+    placesCacheService.googleApiKey = 'test-google-key';
+    placesCacheService.isInitialized = true;
+    const cachedPayload = { cached: false, routeCount: 1, waypointsCount: 0, data: { distance_in_km: 2.5, time_in_secs: 420, polylinePoints: VALID_POLYLINE, legs: [], steps: [] } };
+    mockRedisConnection.set = jest.fn().mockResolvedValue(null);
+    mockRedisConnection.get
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue(JSON.stringify(cachedPayload));
+    global.fetch = jest.fn();
+
+    const result = await placesCacheService.fetchDirectionsRoute({ startLoc: '-22.9712,-43.1822', destLoc: '-22.9673,-43.1790' });
+
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ cached: true, coalesced: true });
+    expect(result.data.polylinePoints).toBe(VALID_POLYLINE);
+    delete mockRedisConnection.set;
+  });
+
   it('bypasses directions cache when forceFresh is requested and stores with short traffic TTL', async () => {
     const cachedPayload = {
       cached: false,
@@ -782,7 +840,7 @@ describe('places-cache-service directions steps', () => {
       cached: true,
       source: 'reverse_geocode_cache',
     }));
-    expect(mockRedisConnection.get).toHaveBeenCalledWith('place:reverse:-22.84997:-43.31102');
+    expect(mockRedisConnection.get).toHaveBeenCalledWith('place:reverse:-22.8500:-43.3110');
     expect(result.stats.googleRequests).toBe(0);
     expect(global.fetch).not.toHaveBeenCalled();
   });
@@ -821,7 +879,7 @@ describe('places-cache-service directions steps', () => {
     }));
     expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('/geocode/json?latlng=-22.8499687%2C-43.3110186'));
     expect(mockRedisConnection.setex).toHaveBeenCalledWith(
-      'place:reverse:-22.84997:-43.31102',
+      'place:reverse:-22.8500:-43.3110',
       2592000,
       expect.stringContaining('Av. Vicente de Carvalho'),
     );
