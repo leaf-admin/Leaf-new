@@ -216,6 +216,25 @@ function splitLocationLabel(label = "") {
   };
 }
 
+// Card anatomy: "R. das Pastorinhas, 4 - Jacarepaguá" becomes the street as the
+// title and the neighbourhood in the label, so the title fits one line.
+export function splitTripAddressLabel(label) {
+  const text = String(label || "").trim();
+  const cut = text.lastIndexOf(" - ");
+  if (cut <= 0) return { street: text, area: "" };
+  return { street: text.slice(0, cut).trim(), area: text.slice(cut + 3).trim() };
+}
+
+// "23 min" left in the trip -> "chega às 16:13". Empty when the value is not minutes.
+export function resolveArrivalClockLabel(remainingLabel, now = new Date()) {
+  const match = /^(\d+)\s*min$/.exec(String(remainingLabel || "").trim());
+  if (!match) return "";
+  const arrival = new Date(now.getTime() + Number(match[1]) * 60000);
+  const hours = String(arrival.getHours()).padStart(2, "0");
+  const minutes = String(arrival.getMinutes()).padStart(2, "0");
+  return `chega às ${hours}:${minutes}`;
+}
+
 function resolveRidePreferenceItems(source = {}) {
   const preferences =
     source?.preferences ||
@@ -919,6 +938,19 @@ function DriverLiveRideOverlay({
       : normalizedActiveStatus === "arrived"
         ? "Embarque"
         : "Até o passageiro";
+  // Label of the compact card: state, then the neighbourhood (to pickup) or the
+  // arrival time (in trip), taken out of the title.
+  const compactCardEyebrow = (() => {
+    if (normalizedActiveStatus === "started" && !arrivedAtDestination) {
+      const arrival = resolveArrivalClockLabel(activeTripMetrics.find((metric) => metric.key === "time")?.value);
+      return arrival ? `${navigationModeLabel} · ${arrival}` : navigationModeLabel;
+    }
+    if (normalizedActiveStatus !== "arrived" && normalizedActiveStatus !== "started") {
+      const { area } = splitTripAddressLabel(pickupLabel);
+      return area ? `${navigationModeLabel} · ${area}` : navigationModeLabel;
+    }
+    return navigationModeLabel;
+  })();
   const passengerMetaLabel =
     normalizedActiveStatus === "started"
       ? "A bordo"
@@ -1128,15 +1160,15 @@ function DriverLiveRideOverlay({
         <RobotaxiLifecycleSummary
           eyebrow={isOperationalInterrupted
             ? "INTERRUPÇÃO REGISTRADA"
-            : navigationModeLabel.toUpperCase()}
+            : compactCardEyebrow}
           object={isOperationalInterrupted ? 'help' : normalizedActiveStatus === 'arrived' ? 'privacy' : normalizedActiveStatus === 'started' ? 'activity' : 'places'}
           title={isOperationalInterrupted
             ? "Aguardando decisão do passageiro"
             : normalizedActiveStatus === "started"
-              ? dropoffLabel
+              ? splitTripAddressLabel(dropoffLabel).street
               : normalizedActiveStatus === "arrived"
                 ? "Aguardando o passageiro"
-                : pickupLabel}
+                : splitTripAddressLabel(pickupLabel).street}
           subtitle={isOperationalInterrupted
             ? "Você já está liberado de novas ações nesta corrida."
             : normalizedActiveStatus === "arrived"
@@ -1584,7 +1616,9 @@ function DriverLiveRideOverlay({
             <>
               <View style={styles.offerHeader}>
                 <Text style={styles.offerEyebrow}>
-                  {isContinuationOffer ? "Continuidade de corrida" : "Nova corrida"}
+                  {/* Rótulo da anatomia do card: estado e, numa oferta comum, o Pix já pago
+                      (a corrida só é despachada depois do pagamento). */}
+                  {isContinuationOffer ? "Continuidade de corrida" : "Nova corrida · Pix pago"}
                 </Text>
                 {offerCountdown.label !== "--:--" || offerExpired ? (
                 <View
@@ -1637,13 +1671,20 @@ function DriverLiveRideOverlay({
                   <Text style={styles.offerTollText} numberOfLines={1}>{offerTollLabel}</Text>
                 </View>
               ) : null}
-              <Text style={styles.offerTripLine} numberOfLines={1}>
-                {offerPickupEtaLabel} até o embarque · {distanceLabel} · {offerTripDurationLabel}
-              </Text>
-
-              {/* The offer has seconds to be read: fare, how far, where. One
-                  line per stop, and the passenger and details share a row. */}
+              {/* The offer has seconds to be read: fare, where, then three numbers
+                  of the same weight (card anatomy). The passenger and details share a row. */}
               <LeafJourneyRoute origin={pickupLabel} destination={dropoffLabel} style={styles.offerRoute} dense />
+
+              <View
+                style={[styles.lifecycleTripMetricRow, styles.offerMetricRow]}
+                testID="driver-live-offer-metrics"
+                accessible
+                accessibilityLabel={`${offerPickupEtaLabel} até o embarque, ${distanceLabel}, ${offerTripDurationLabel} de viagem`}
+              >
+                <RobotaxiLifecycleMetric label="até o embarque" value={offerPickupEtaLabel} />
+                <RobotaxiLifecycleMetric label="distância" value={distanceLabel} />
+                <RobotaxiLifecycleMetric label="viagem" value={offerTripDurationLabel} />
+              </View>
 
               <View style={styles.offerPassengerRow}>
                 <RobotaxiLifecycleIdentity
@@ -2203,7 +2244,7 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
   offerTollText: { ...leafTypography.medium, fontSize: 12, lineHeight: 16, color: "#1A330E", flexShrink: 1 },
-  offerTripLine: { ...leafTypography.regular, marginTop: 2, fontSize: 15, lineHeight: 20, color: '#4B5148' },
+  offerMetricRow: { marginTop: 12, marginBottom: 2 },
   offerRoute: { marginTop: 12 },
   offerActions: { marginTop: 14, flexDirection: 'row', alignItems: 'center', gap: 10 },
   offerAction: { width: '100%', minWidth: 0, paddingHorizontal: 12 },

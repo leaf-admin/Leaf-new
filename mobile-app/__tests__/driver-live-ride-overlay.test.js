@@ -63,8 +63,11 @@ describe("DriverLiveRideOverlay", () => {
     expect(screen.queryByTestId("driver-offer-screen")).toBeNull();
     expect(screen.getAllByText("R$ 50,91")).toHaveLength(1);
     expect(screen.getAllByText(/Av. Meriti, 9 - Vila Kosmos/).length).toBeGreaterThan(0);
-    expect(screen.getByText(/16 km/)).toBeTruthy();
-    expect(screen.getByText(/16 km · 31 min/)).toBeTruthy();
+    // Three numbers of the same weight (card anatomy) instead of one text line.
+    expect(screen.getByTestId("driver-live-offer-metrics").props.accessibilityLabel).toMatch(/16 km, 31 min de viagem/);
+    expect(screen.getByText("16 km")).toBeTruthy();
+    expect(screen.getByText("31 min")).toBeTruthy();
+    expect(screen.getByText(/Nova corrida · Pix pago/)).toBeTruthy();
     expect(screen.queryByText("Local combinado")).toBeNull();
   });
 
@@ -392,7 +395,7 @@ describe("DriverLiveRideOverlay", () => {
       />,
     );
 
-    expect(screen.getByText("Em viagem")).toBeTruthy();
+    expect(screen.getByText(/^Em viagem( · chega às \d{2}:\d{2})?$/)).toBeTruthy();
     expect(screen.getByText("1 Ferry Building")).toBeTruthy();
     const cardStyle = StyleSheet.flatten(
       screen.getByTestId("driver-live-trip-card").props.style,
@@ -505,11 +508,11 @@ describe("DriverLiveRideOverlay", () => {
     );
 
     expect(screen.getAllByText("Passageiro Leaf").length).toBeGreaterThan(0);
-    expect(screen.getByText("Em viagem")).toBeTruthy();
+    expect(screen.getByText(/^Em viagem( · chega às \d{2}:\d{2})?$/)).toBeTruthy();
     expect(screen.getByText("8 min")).toBeTruthy();
     expect(screen.getByText("3 km")).toBeTruthy();
     expect(screen.getByLabelText("Finalizar corrida")).toBeTruthy();
-    expect(screen.getByText("Em viagem")).toBeTruthy();
+    expect(screen.getByText(/^Em viagem( · chega às \d{2}:\d{2})?$/)).toBeTruthy();
     expect(screen.getByText("1 Ferry Building")).toBeTruthy();
     expect(screen.queryByText("Progresso da viagem")).toBeNull();
     expect(screen.queryByText("Navegar")).toBeNull();
@@ -802,5 +805,19 @@ describe("driver offer instance key", () => {
     expect(resolveOfferInstanceKey(first)).not.toBe(resolveOfferInstanceKey(reoffer));
     expect(resolveOfferInstanceKey(first)).toBe(resolveOfferInstanceKey({ ...first }));
     expect(resolveOfferInstanceKey(null)).toBe("");
+  });
+});
+
+describe("card anatomy helpers", () => {
+  const { splitTripAddressLabel, resolveArrivalClockLabel } = require("../src/screens/prototype/home/DriverLiveRideOverlay");
+
+  it("moves the neighbourhood out of the title", () => {
+    expect(splitTripAddressLabel("R. das Pastorinhas, 4 - Jacarepaguá")).toEqual({ street: "R. das Pastorinhas, 4", area: "Jacarepaguá" });
+    expect(splitTripAddressLabel("Via Parque Shopping")).toEqual({ street: "Via Parque Shopping", area: "" });
+  });
+
+  it("turns minutes left into an arrival time", () => {
+    expect(resolveArrivalClockLabel("23 min", new Date(2026, 9, 29, 15, 50))).toBe("chega às 16:13");
+    expect(resolveArrivalClockLabel("--")).toBe("");
   });
 });
