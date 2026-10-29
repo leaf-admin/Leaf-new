@@ -93,7 +93,7 @@ export default function MapsPage() {
   const [cityBusyKey, setCityBusyKey] = useState("");
   const [newCityName, setNewCityName] = useState("");
   const [citySearch, setCitySearch] = useState("");
-  const [cityFilterMode, setCityFilterMode] = useState("all");
+  const [cityFilterMode, setCityFilterMode] = useState("active");
   const [cityCapDraft, setCityCapDraft] = useState({});
   const [cityWaitlistDraft, setCityWaitlistDraft] = useState({});
   const [geofenceBusy, setGeofenceBusy] = useState(false);
@@ -328,7 +328,6 @@ export default function MapsPage() {
   );
   const selectedStateTotalCities = Number(selectedState?.totalCities || selectedState?.cities?.length || 0);
   const selectedStateActiveCities = Number(selectedState?.activeCities || 0);
-  const selectedStateInactiveCities = Math.max(selectedStateTotalCities - selectedStateActiveCities, 0);
   const selectedStateWaitlistCities = useMemo(() => {
     const cities = selectedState?.cities || [];
     return cities.filter((city) => cityWaitlistDraft[city.key] ?? city.waitlistEnabled !== false).length;
@@ -469,72 +468,37 @@ export default function MapsPage() {
     setGeofenceRegionDraft((previous) => (previous === nextDraft ? previous : nextDraft));
   }, [readOnly]);
 
+  const summary = locations?.summary || {};
+  const geofenceActive = Boolean(geoConfig?.geofence?.active);
+  const geofenceEnabled = geoConfig?.geofence?.enabled !== false;
+  const geofencePoints = Number(geoConfig?.geofence?.regionPoints || 0);
+  const mapUpdatedLabel = formatTimeLabel(locations?.lastUpdate);
+
   return (
     <ProtectedRoute>
       <main className="page-shell">
         <header className="header">
-          <h1>Mapas e Geofence</h1>
+          <div>
+            <h1>Mapa operacional</h1>
+            <p>Motoristas ao vivo e a área onde a Leaf aceita corridas.</p>
+          </div>
+          <div className="header-actions">
+            {mapUpdatedLabel ? <span className="table-muted">Atualizado às {mapUpdatedLabel}</span> : null}
+            <button className="button-secondary" onClick={refreshMapLocations}>Atualizar</button>
+          </div>
         </header>
         <AppNav />
         {loading ? <LoadingState message="Carregando dados de mapa..." /> : null}
 
-        <section className="grid">
-          <Panel
-            className="panel-span-full map-main-panel"
-            title="Mapa Operacional e Geofence"
-            subtitle="Mapa principal com geofence editável, estado de runtime e controles condensados."
-          >
-            {geoLoading ? <p>Carregando configuração geográfica...</p> : null}
+        <section className="grid grid-kpi">
+          <KpiCard title="Motoristas online" value={summary.totalDrivers || 0} />
+          <KpiCard title="Disponíveis" value={summary.availableDrivers || 0} tone="positive" />
+          <KpiCard title="Em corrida" value={summary.busyDrivers || 0} />
+          <KpiCard title="Corridas ativas" value={summary.activeBookings || 0} />
+        </section>
 
-            <div className="filters map-status-strip">
-              <span className="meta-badge">Atualização: API/polling</span>
-              <span className={h3StatusMeta.className}>H3: {h3StatusMeta.label}</span>
-              <span className={geoConfig?.geofence?.active ? "status-ok" : "status-warn"}>
-                Geofence runtime: {geoConfig?.geofence?.active ? "ativo" : "inativo"}
-              </span>
-              <span className={geoConfig?.geofence?.enabled !== false ? "status-ok" : "status-warn"}>
-                Configuração: {geoConfig?.geofence?.enabled !== false ? "habilitada" : "desabilitada"}
-              </span>
-              <span className="meta-badge">Pontos: {geoConfig?.geofence?.regionPoints || 0}</span>
-              <span className="meta-badge">Storage: {geoConfig?.geofenceStorage || "-"}</span>
-              <span className={geoConfig?.geofence?.bypassEnabled ? "status-warn" : "status-ok"}>
-                Bypass: {geoConfig?.geofence?.bypassEnabled ? "ligado" : "desligado"}
-              </span>
-              {readOnly ? <span className="status-warn">Somente leitura</span> : null}
-            </div>
-
-            {readOnlyMessage ? <p className="panel-subtitle">{readOnlyMessage}</p> : null}
-
-            <div className="filters">
-              <button onClick={refreshMapLocations}>Atualizar mapa</button>
-              <button onClick={loadGeoConfig}>Atualizar geografia</button>
-              <button
-                onClick={() => requestMapMutation({
-                  title: geoConfig?.geofence?.enabled !== false ? "Desativar geofence?" : "Ativar geofence?",
-                  description: "A alteração muda a área em que cotações e corridas podem ser criadas.",
-                  confirmLabel: geoConfig?.geofence?.enabled !== false ? "Desativar geofence" : "Ativar geofence",
-                  task: toggleGeofenceEnabled,
-                })}
-                disabled={readOnly || confirmationOpen || geoLoading || geofenceBusy}
-              >
-                {geoConfig?.geofence?.enabled !== false ? "Desativar geofence" : "Ativar geofence"}
-              </button>
-              <button
-                onClick={() => requestMapMutation({
-                  title: "Salvar geofence?",
-                  description: "O polígono salvo passa a governar a elegibilidade operacional após a validação do backend.",
-                  confirmLabel: "Salvar geofence",
-                  task: saveGeofenceRegion,
-                })}
-                disabled={readOnly || confirmationOpen || geoLoading || geofenceBusy}
-              >
-                Salvar geofence
-              </button>
-              <button onClick={resetGeofenceDraft} disabled={geoLoading || geofenceBusy}>
-                Reverter rascunho
-              </button>
-            </div>
-
+        <section className="map-layout">
+          <Panel className="map-main-panel" title="Ao vivo" subtitle="Posições do Redis, atualizadas a cada 30 s. Use as camadas para ver oferta e demanda.">
             <GoogleDriversMap
               drivers={locations?.locations?.drivers || []}
               h3Cells={h3Cells}
@@ -542,15 +506,55 @@ export default function MapsPage() {
               h3Error={h3Error}
               h3LastUpdatedAt={h3LastUpdatedAt}
               onViewportChange={handleMapViewportChange}
-              mapHeight="clamp(460px, 58vh, 680px)"
+              mapHeight="clamp(460px, 62vh, 720px)"
               geofenceRegion={geofenceRegionForMap}
               geofenceEditable={!readOnly}
               onGeofenceChange={handleGeofenceMapChange}
               showH3SyncLabel={false}
             />
+          </Panel>
+
+          <Panel className="service-area-panel" title="Área de atendimento" subtitle="Fora do polígono o app não cota nem cria corridas.">
+            {geoLoading ? <p className="table-muted">Carregando área...</p> : null}
+            <div className="service-area-status">
+              <span className={geofenceActive ? "status-ok" : "status-warn"}>
+                {geofenceActive ? "Valendo agora" : geofenceEnabled ? "Habilitada, sem efeito" : "Desligada"}
+              </span>
+              <span className="table-muted">{geofencePoints > 0 ? `${geofencePoints} pontos` : "Sem polígono"}</span>
+            </div>
+
+            {readOnly ? (
+              <div className="notice-banner" role="status">
+                <p>Edição desligada neste ambiente. Para desenhar a área, ligue as alterações do painel (ENABLE_ADMIN_MUTATIONS).</p>
+              </div>
+            ) : (
+              <ol className="service-area-steps">
+                <li>No mapa, toque em <strong>Traçar geofence</strong> e marque os pontos.</li>
+                <li>Toque em <strong>Concluir traçado</strong>; arraste os vértices para ajustar.</li>
+                <li>Salve a área. O backend valida antes de passar a valer.</li>
+              </ol>
+            )}
+
+            <div className="service-area-actions">
+              <button
+                className="btn-primary"
+                onClick={() => requestMapMutation({
+                  title: "Salvar área de atendimento?",
+                  description: "O polígono salvo passa a governar a elegibilidade operacional após a validação do backend.",
+                  confirmLabel: "Salvar área",
+                  task: saveGeofenceRegion,
+                })}
+                disabled={readOnly || confirmationOpen || geoLoading || geofenceBusy || geofenceDraftInvalid}
+              >
+                Salvar área
+              </button>
+              <button className="button-secondary" onClick={resetGeofenceDraft} disabled={geoLoading || geofenceBusy}>
+                Descartar rascunho
+              </button>
+            </div>
 
             <details className="technical-details">
-              <summary>Editar geofence em JSON (opcional)</summary>
+              <summary>Editar pontos em JSON</summary>
               <div style={{ padding: "12px" }}>
                 <textarea
                   id="geofence-region-draft"
@@ -561,41 +565,41 @@ export default function MapsPage() {
                   style={{ width: "100%", resize: "vertical", fontFamily: "monospace" }}
                   placeholder='[[-43.8,-23.1],[-43.1,-23.1],[-43.1,-22.7],[-43.8,-22.7],[-43.8,-23.1]]'
                 />
-                <small style={{ color: "#64748b" }}>
-                  O método recomendado é editar direto no mapa; use JSON só para ajustes finos.
-                </small>
+                <small className="table-muted">Prefira editar no mapa; use JSON só para ajustes finos.</small>
                 {geofenceDraftInvalid ? (
                   <small style={{ display: "block", color: "#b91c1c", marginTop: 6 }}>
-                    JSON inválido. Ajuste o formato para habilitar visualização no mapa.
+                    JSON inválido. Ajuste o formato para ver a área no mapa.
                   </small>
                 ) : null}
               </div>
             </details>
-          </Panel>
-        </section>
 
-        <section className="grid grid-kpi">
-          <KpiCard title="Motoristas" value={locations?.summary?.totalDrivers || 0} />
-          <KpiCard title="Disponíveis" value={locations?.summary?.availableDrivers || 0} tone="positive" />
-          <KpiCard title="Passageiros ativos" value={locations?.summary?.activePassengers || 0} />
-          <KpiCard title="Corridas ativas" value={locations?.summary?.activeBookings || 0} />
+            <div className="service-area-danger">
+              <span className="table-muted">
+                {geofenceEnabled ? "Desligar a área libera corridas em qualquer lugar." : "Ligar a área volta a restringir as corridas ao polígono."}
+              </span>
+              <button
+                className="button-secondary"
+                onClick={() => requestMapMutation({
+                  title: geofenceEnabled ? "Desligar área de atendimento?" : "Ligar área de atendimento?",
+                  description: "A alteração muda a área em que cotações e corridas podem ser criadas.",
+                  confirmLabel: geofenceEnabled ? "Desligar área" : "Ligar área",
+                  task: toggleGeofenceEnabled,
+                })}
+                disabled={readOnly || confirmationOpen || geoLoading || geofenceBusy}
+              >
+                {geofenceEnabled ? "Desligar área" : "Ligar área"}
+              </button>
+            </div>
+          </Panel>
         </section>
 
         <section className="grid">
           <Panel
             className="panel-span-full"
-            title="Controle Geografico (Geofence + Cidades)"
-            subtitle="Operação geográfica em visão compacta e acionável."
+            title="Cidades atendidas"
+            subtitle={`${selectedStateActiveCities} de ${selectedStateTotalCities} cidades ativas · capacidade ${selectedStateCapacity} motoristas · waitlist em ${selectedStateWaitlistCities}`}
           >
-            <div className="filters map-status-strip">
-              <span className="meta-badge">Estado: {selectedState?.stateCode || selectedStateCode}</span>
-              <span className="meta-badge">Ativas: {selectedStateActiveCities}</span>
-              <span className="meta-badge">Inativas: {selectedStateInactiveCities}</span>
-              <span className="meta-badge">Total: {selectedStateTotalCities}</span>
-              <span className="meta-badge">Waitlist ligado: {selectedStateWaitlistCities}</span>
-              <span className="meta-badge">Capacidade estado: {selectedStateCapacity}</span>
-              <span className="meta-badge">Storage cidades: {geoConfig?.storage || "-"}</span>
-            </div>
 
             <div className="geo-toolbar-grid">
               <label className="geo-toolbar-field">
@@ -748,8 +752,20 @@ export default function MapsPage() {
               ) : null}
             </div>
 
+            <details className="technical-details">
+              <summary>Detalhes técnicos</summary>
+              <div className="filters map-status-strip" style={{ margin: 12 }}>
+                <span className={h3StatusMeta.className}>H3: {h3StatusMeta.label}</span>
+                <span className={geofenceActive ? "status-ok" : "status-warn"}>Geofence runtime: {geofenceActive ? "ativo" : "inativo"}</span>
+                <span className={geofenceEnabled ? "status-ok" : "status-warn"}>Configuração: {geofenceEnabled ? "habilitada" : "desabilitada"}</span>
+                <span className="meta-badge">Storage geofence: {geoConfig?.geofenceStorage || "-"}</span>
+                <span className="meta-badge">Storage cidades: {geoConfig?.storage || "-"}</span>
+                <span className={geoConfig?.geofence?.bypassEnabled ? "status-warn" : "status-ok"}>Bypass: {geoConfig?.geofence?.bypassEnabled ? "ligado" : "desligado"}</span>
+                <button onClick={loadGeoConfig}>Recarregar geografia</button>
+              </div>
+            </details>
             <TechnicalDetails
-              title="Debug técnico (opcional)"
+              title="Payload técnico"
               data={{
                 geofence: geoConfig?.geofence || {},
                 cityActivationSummary: geoConfig?.cityActivation?.summary || {},
