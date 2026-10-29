@@ -74,6 +74,15 @@ function scopeEnabledForCampaign(config, type) {
   return config?.driver?.enabled !== false;
 }
 
+const INVITE_TYPE_LABELS = { passenger_referral: "Passageiro", driver_referral: "Motorista", founder_wave: "Fundador" };
+const INVITE_STATUS_LABELS = { pending: "Pendente", accepted: "Aceito", qualified: "Qualificado", rewarded: "Recompensado", expired: "Expirado", canceled: "Cancelado" };
+
+function formatInviteDate(value) {
+  const date = value ? new Date(value) : null;
+  if (!date || Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit" });
+}
+
 export default function ProgramsPage() {
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
@@ -161,6 +170,9 @@ export default function ProgramsPage() {
     }));
   };
 
+  const rewardsEnabled = config?.rewardsEnabled === true;
+  const setRewardsEnabled = (value) => setConfig((prev) => ({ ...(prev || {}), rewardsEnabled: value }));
+
   const saveConfig = async () => {
     if (!config) return;
     if (!canMutatePrograms) {
@@ -173,6 +185,7 @@ export default function ProgramsPage() {
       setError("");
       setNotice("");
       await leafAPI.updateReferralProgramsConfig({
+        rewardsEnabled,
         driver: {
           enabled: config?.driver?.enabled !== false,
           maxInvitesPerDriver: toNumber(config?.driver?.maxInvitesPerDriver, 3),
@@ -183,6 +196,7 @@ export default function ProgramsPage() {
         },
         passenger: {
           enabled: config?.passenger?.enabled !== false,
+          maxInvitesPerPassenger: toNumber(config?.passenger?.maxInvitesPerPassenger, 5),
           discountPercent: toNumber(config?.passenger?.discountPercent, 10),
           maxDiscountRides: toNumber(config?.passenger?.maxDiscountRides, 3),
           nonCumulative: config?.passenger?.nonCumulative !== false,
@@ -366,9 +380,21 @@ export default function ProgramsPage() {
               <p>Sem configuração carregada.</p>
             ) : (
               <div className="section-stack">
+                <div className="notice-banner" role="status">
+                  <p>
+                    {rewardsEnabled
+                      ? "Recompensas ligadas: convites aceitos geram desconto ou meses grátis conforme os campos abaixo."
+                      : "Convite sem recompensa: liga quem convidou a quem entrou, sem desconto nem meses grátis."}
+                  </p>
+                </div>
+                <label className="form-field form-field-checkbox">
+                  <span>Recompensas por convite</span>
+                  <input type="checkbox" checked={rewardsEnabled} onChange={(e) => setRewardsEnabled(e.target.checked)} />
+                </label>
+
                 <div className="form-grid">
                   <label className="form-field form-field-checkbox">
-                    <span>Driver habilitado</span>
+                    <span>Convites de motorista ligados</span>
                     <input
                       type="checkbox"
                       checked={config?.driver?.enabled !== false}
@@ -376,7 +402,7 @@ export default function ProgramsPage() {
                     />
                   </label>
                   <label className="form-field">
-                    Máx convites/driver
+                    Máx. convites por motorista
                     <input
                       type="number"
                       min="0"
@@ -407,6 +433,7 @@ export default function ProgramsPage() {
                     <input
                       type="number"
                       min="0"
+                      disabled={!rewardsEnabled}
                       value={config?.driver?.rewardMonths ?? 1}
                       onChange={(e) => updateConfigField("driver", "rewardMonths", e.target.value)}
                     />
@@ -417,11 +444,20 @@ export default function ProgramsPage() {
 
                 <div className="form-grid">
                   <label className="form-field form-field-checkbox">
-                    <span>Passenger habilitado</span>
+                    <span>Convites de passageiro ligados</span>
                     <input
                       type="checkbox"
                       checked={config?.passenger?.enabled !== false}
                       onChange={(e) => updateConfigField("passenger", "enabled", e.target.checked)}
+                    />
+                  </label>
+                  <label className="form-field">
+                    Máx. convites por passageiro
+                    <input
+                      type="number"
+                      min="0"
+                      value={config?.passenger?.maxInvitesPerPassenger ?? 5}
+                      onChange={(e) => updateConfigField("passenger", "maxInvitesPerPassenger", e.target.value)}
                     />
                   </label>
                   <label className="form-field">
@@ -430,6 +466,7 @@ export default function ProgramsPage() {
                       type="number"
                       min="0"
                       max="10"
+                      disabled={!rewardsEnabled}
                       value={config?.passenger?.discountPercent ?? 10}
                       onChange={(e) => updateConfigField("passenger", "discountPercent", e.target.value)}
                     />
@@ -439,6 +476,7 @@ export default function ProgramsPage() {
                     <input
                       type="number"
                       min="0"
+                      disabled={!rewardsEnabled}
                       value={config?.passenger?.maxDiscountRides ?? 3}
                       onChange={(e) => updateConfigField("passenger", "maxDiscountRides", e.target.value)}
                     />
@@ -697,38 +735,40 @@ export default function ProgramsPage() {
 
           <Panel
             className="panel-span-full"
-            title="Ciclo de vida dos convites"
-            subtitle="Últimos convites criados, aceitos e qualificados pelo novo fluxo Leaf."
+            title="Quem convidou quem"
+            subtitle="Os 50 convites mais recentes, do mais novo para o mais antigo."
           >
             <div className="table-shell">
               <table className="table table-compact">
                 <thead>
                   <tr>
+                    <th>Criado em</th>
                     <th>Código</th>
                     <th>Tipo</th>
-                    <th>Status</th>
+                    <th>Situação</th>
+                    <th>Quem convidou</th>
+                    <th>Convidado</th>
                     <th>Recompensa</th>
-                    <th>Convidador</th>
-                    <th>Aceito por</th>
                   </tr>
                 </thead>
                 <tbody>
                   {(summary?.invites?.recent || []).length === 0 ? (
                     <tr>
-                      <td colSpan={6}>Ainda não há convites recentes no novo fluxo.</td>
+                      <td colSpan={7}>Ainda não há convites.</td>
                     </tr>
                   ) : (
                     (summary?.invites?.recent || []).map((invite) => (
                       <tr key={invite.id || invite.code}>
-                        <td>
-                          <strong>{invite.code || "-"}</strong>
-                          <span className="table-muted">{invite.id || "-"}</span>
-                        </td>
-                        <td>{invite.type || "-"}</td>
-                        <td>{invite.status || "-"}</td>
-                        <td>{invite.rewardStatus || "-"}</td>
+                        <td>{formatInviteDate(invite.createdAt)}</td>
+                        <td><strong>{invite.code || "-"}</strong></td>
+                        <td>{INVITE_TYPE_LABELS[invite.type] || invite.type || "-"}</td>
+                        <td>{INVITE_STATUS_LABELS[String(invite.status || "").toLowerCase()] || invite.status || "-"}</td>
                         <td>{invite.inviterId || "-"}</td>
-                        <td>{invite.acceptedBy || "-"}</td>
+                        <td>
+                          {invite.acceptedBy || "-"}
+                          {invite.inviteePhoneLast4 ? <span className="table-muted">tel. final {invite.inviteePhoneLast4}</span> : null}
+                        </td>
+                        <td>{invite.rewardStatus === "granted" ? "Concedida" : "Sem recompensa"}</td>
                       </tr>
                     ))
                   )}

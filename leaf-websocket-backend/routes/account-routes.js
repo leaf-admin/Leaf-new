@@ -903,6 +903,29 @@ router.put('/api/account/profile', requireFirebase, async (req, res) => {
   }
 });
 
+// Conquistas: calculadas aqui (o app só mostra), com cache de 6 h por pessoa.
+router.get('/api/account/achievements', requireFirebase, async (req, res) => {
+  try {
+    const userId = req.user.uid;
+    const result = await resolveAccountProfile(userId, req.user);
+    const profile = result.profile || {};
+    const role = String(profile.usertype || profile.userType || '').toLowerCase() === 'driver' ? 'driver' : 'customer';
+    // Carregado aqui: o serviço puxa avaliações e Firebase só quando a rota é usada.
+    const { getAccountAchievements } = require('../services/account-achievements-service');
+    const achievements = await getAccountAchievements({
+      userId,
+      role,
+      memberSince: profile.createdAt || profile.created_at || null,
+      firestore: admin.firestore(),
+      redis: redisPool.getConnection?.() || null,
+    });
+    return res.json({ success: true, achievements });
+  } catch (error) {
+    logger.error('Erro ao calcular conquistas da conta:', error);
+    return res.status(500).json({ success: false, message: 'Não foi possível carregar as conquistas' });
+  }
+});
+
 router.get('/api/account/preferences', requireFirebase, async (req, res) => {
   try {
     const userDoc = await admin.firestore().collection('users').doc(req.user.uid).get();

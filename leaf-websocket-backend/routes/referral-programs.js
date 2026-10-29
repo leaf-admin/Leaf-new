@@ -30,6 +30,13 @@ const DEFAULT_PASSENGER_DISCOUNT_PERCENT = Number.parseFloat(process.env.REFERRA
 const DEFAULT_PASSENGER_MAX_RIDES = Number.parseInt(process.env.REFERRAL_PASSENGER_MAX_RIDES || '3', 10);
 const DEFAULT_FOUNDER_MONTHS = Number.parseInt(process.env.FOUNDER_DEFAULT_FREE_MONTHS || '6', 10);
 const DEFAULT_INVITE_EXPIRES_DAYS = Number.parseInt(process.env.REFERRAL_INVITE_EXPIRES_DAYS || '30', 10);
+const DEFAULT_PASSENGER_MAX_INVITES = Number.parseInt(process.env.REFERRAL_PASSENGER_MAX_INVITES || '5', 10);
+
+// Convite sem recompensa (decisão de 2026-10-29): com rewardsEnabled=false o convite
+// só liga quem convidou a quem entrou. Nenhum desconto, mês grátis ou benefício é criado.
+function referralRewardsEnabled(config = {}) {
+  return config?.rewardsEnabled === true;
+}
 const MAX_INVITE_CODE_ATTEMPTS = Number.parseInt(process.env.REFERRAL_INVITE_CODE_ATTEMPTS || '8', 10);
 
 const publicInviteLookupLimiter = rateLimit({
@@ -329,6 +336,7 @@ function getDefaultProgramConfig() {
     version: 1,
     updatedAt: nowIso(),
     updatedBy: 'system',
+    rewardsEnabled: false,
     driver: {
       enabled: true,
       maxInvitesPerDriver: DEFAULT_DRIVER_MAX_INVITES,
@@ -339,6 +347,7 @@ function getDefaultProgramConfig() {
     },
     passenger: {
       enabled: true,
+      maxInvitesPerPassenger: DEFAULT_PASSENGER_MAX_INVITES,
       discountPercent: DEFAULT_PASSENGER_DISCOUNT_PERCENT,
       maxDiscountRides: DEFAULT_PASSENGER_MAX_RIDES,
       nonCumulative: true,
@@ -469,6 +478,7 @@ async function countDriverTripsWithinWindow(driverId, startTs, endTs) {
 }
 
 async function applyPassengerBenefit(invite, config) {
+  if (!referralRewardsEnabled(config)) return null;
   const inviteeId = normalizeIdentifier(invite.acceptedBy || invite.inviteeId);
   if (!inviteeId) return null;
 
@@ -641,6 +651,8 @@ router.patch('/config', authenticateJWT, requireRole(ADMIN_ROLES), requireAdminM
     next.driver.rewardMonths = toPositiveInt(next.driver.rewardMonths, DEFAULT_DRIVER_REWARD_MONTHS);
     next.driver.qualificationWindowDays = toPositiveInt(next.driver.qualificationWindowDays, DEFAULT_DRIVER_QUALIFICATION_DAYS);
 
+    next.rewardsEnabled = payload.rewardsEnabled === undefined ? referralRewardsEnabled(current) : payload.rewardsEnabled === true;
+    next.passenger.maxInvitesPerPassenger = toPositiveInt(next.passenger.maxInvitesPerPassenger, DEFAULT_PASSENGER_MAX_INVITES);
     next.passenger.discountPercent = toPercent(next.passenger.discountPercent, DEFAULT_PASSENGER_DISCOUNT_PERCENT);
     next.passenger.maxDiscountRides = toPositiveInt(next.passenger.maxDiscountRides, DEFAULT_PASSENGER_MAX_RIDES);
 
@@ -835,10 +847,9 @@ router.post('/invites/driver', ensureUserFromFirebaseToken, async (req, res) => 
       activeCampaign?.params?.requiredCompletedTrips ?? config.driver.requiredCompletedTrips,
       DEFAULT_DRIVER_REQUIRED_TRIPS
     );
-    const rewardMonths = toPositiveInt(
-      activeCampaign?.params?.rewardMonths ?? config.driver.rewardMonths,
-      DEFAULT_DRIVER_REWARD_MONTHS
-    );
+    const rewardMonths = referralRewardsEnabled(config)
+      ? toPositiveInt(activeCampaign?.params?.rewardMonths ?? config.driver.rewardMonths, DEFAULT_DRIVER_REWARD_MONTHS)
+      : 0;
     const qualificationWindowDays = toPositiveInt(
       activeCampaign?.params?.qualificationWindowDays ?? config.driver.qualificationWindowDays,
       DEFAULT_DRIVER_QUALIFICATION_DAYS
@@ -917,6 +928,19 @@ router.post('/invites/passenger', ensureUserFromFirebaseToken, async (req, res) 
       return res.status(400).json(campaignQuotaError);
     }
 
+    const maxInvitesPerPassenger = toPositiveInt(config.passenger.maxInvitesPerPassenger, DEFAULT_PASSENGER_MAX_INVITES);
+    const passengerInvites = allInvites.filter((invite) =>
+      normalizeIdentifier(invite.inviterId) === inviterId &&
+      normalizeCampaignType(invite.type) === 'passenger_referral' &&
+      ['pending', 'accepted', 'qualified', 'rewarded'].includes(String(invite.status || '').toLowerCase())
+    );
+    if (passengerInvites.length >= maxInvitesPerPassenger) {
+      return res.status(400).json({
+        error: 'Limite de convites atingido',
+        limit: maxInvitesPerPassenger
+      });
+    }
+
     if (config.passenger.avoidDuplicateInvitees !== false) {
       const duplicated = allInvites.find((invite) =>
         normalizeCampaignType(invite.type) === 'passenger_referral' &&
@@ -929,14 +953,13 @@ router.post('/invites/passenger', ensureUserFromFirebaseToken, async (req, res) 
       }
     }
 
-    const discountPercent = toPercent(
-      activeCampaign?.params?.discountPercent ?? config.passenger.discountPercent,
-      DEFAULT_PASSENGER_DISCOUNT_PERCENT
-    );
-    const maxDiscountRides = toPositiveInt(
-      activeCampaign?.params?.maxDiscountRides ?? config.passenger.maxDiscountRides,
-      DEFAULT_PASSENGER_MAX_RIDES
-    );
+    const rewardsEnabled = referralRewardsEnabled(config);
+    const discountPercent = rewardsEnabled
+      ? toPercent(activeCampaign?.params?.discountPercent ?? config.passenger.discountPercent, DEFAULT_PASSENGER_DISCOUNT_PERCENT)
+      : 0;
+    const maxDiscountRides = rewardsEnabled
+      ? toPositiveInt(activeCampaign?.params?.maxDiscountRides ?? config.passenger.maxDiscountRides, DEFAULT_PASSENGER_MAX_RIDES)
+      : 0;
     const nonCumulative = activeCampaign?.params?.nonCumulative !== false && config.passenger.nonCumulative !== false;
 
     const createdAt = nowIso();
@@ -1139,7 +1162,8 @@ router.post('/invites/driver/evaluate', authenticateJWT, requireRole(ADMIN_ROLES
     };
 
     let reward = null;
-    if (qualified && String(invite.rewardStatus || '').toLowerCase() !== 'granted') {
+    // Convite criado sem recompensa (rewardMonths 0) qualifica, mas não concede meses grátis.
+    if (qualified && Number(invite.rewardMonths) > 0 && String(invite.rewardStatus || '').toLowerCase() !== 'granted') {
       const rewardMonths = toPositiveInt(invite.rewardMonths, DEFAULT_DRIVER_REWARD_MONTHS);
       const freeUntil = await extendFreeMonthsForUser(inviterId, rewardMonths, {
         source: 'driver_referral',
@@ -1308,7 +1332,11 @@ router.get('/summary', authenticateJWT, requireRole(ADMIN_ROLES), async (_req, r
         rewardRate: invites.length > 0
           ? Number((invites.filter((invite) => String(invite.rewardStatus || '').toLowerCase() === 'granted').length / invites.length).toFixed(4))
           : 0,
-        recent: invites.slice(0, 8).map((invite) => ({
+        // Mais recentes primeiro: o dashboard mostra quem convidou quem.
+        recent: [...invites]
+          .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
+          .slice(0, 50)
+          .map((invite) => ({
           id: invite.id,
           code: invite.code,
           type: invite.type,
@@ -1318,8 +1346,10 @@ router.get('/summary', authenticateJWT, requireRole(ADMIN_ROLES), async (_req, r
           acceptedBy: invite.acceptedBy || null,
           createdAt: invite.createdAt || null,
           acceptedAt: invite.acceptedAt || null,
+          inviteePhoneLast4: String(invite.inviteePhone || '').replace(/\D/g, '').slice(-4) || null,
         }))
       },
+      rewardsEnabled: referralRewardsEnabled(config),
       funnel: {
         driver: {
           invited: driverInvites.length,
