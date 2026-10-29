@@ -6,7 +6,7 @@ import AppNav from "@/src/components/AppNav";
 import { leafAPI } from "@/src/services/api";
 import KpiCard from "@/src/components/ui/KpiCard";
 import Panel from "@/src/components/ui/Panel";
-import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
+import { ErrorText, LoadingState, NoticeText } from "@/src/components/ui/PageFeedback";
 import { KeyValueGrid, TechnicalDetails } from "@/src/components/ui/DataViews";
 import { useAuth } from "@/src/contexts/AuthContext";
 import {
@@ -212,12 +212,12 @@ export default function WaitlistPage() {
           />
         </section>
         {roleMessage || mutationMessage || !globalWaitlistEnabled ? (
-          <ErrorText message={actionBlockedMessage} />
+          <NoticeText message={actionBlockedMessage} />
         ) : null}
 
         <section className="grid">
           <Panel
-            title="Stats gerais"
+            title="Resumo"
             subtitle="Painel resumido de capacidade, pendências e distribuição por cidade."
           >
             <KeyValueGrid

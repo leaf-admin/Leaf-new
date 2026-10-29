@@ -213,7 +213,7 @@ export default function SubscriptionsPage() {
 
         <section className="grid">
           <Panel
-            title="Gestao de Assinaturas"
+            title="Gestão de assinaturas"
             subtitle={readOnlyMessage || "Lista filtrável com ações rápidas de cobrança e benefício."}
           >
             <div className="table-shell table-shell-tall">
@@ -226,7 +226,7 @@ export default function SubscriptionsPage() {
                     <th>Pendente</th>
                     <th>Status</th>
                     <th>Pagamento</th>
-                    <th>Acoes</th>
+                    <th>Ações</th>
                   </tr>
                 </thead>
                 <tbody>
