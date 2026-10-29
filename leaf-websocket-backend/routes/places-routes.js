@@ -13,6 +13,7 @@ const { logger } = require('../utils/logger');
 const { placesAccess } = require('../middleware/places-access');
 const { requireFirebaseUser } = require('../middleware/firebase-user-auth');
 const redisPool = require('../utils/redis-pool');
+const rideRoutePlanStore = require('../services/ride-route-plan-store');
 const streetGraphService = require('../services/street-graph-service');
 const { authenticateJWT, requireRole } = require('../middleware/jwt-auth');
 
@@ -846,6 +847,35 @@ router.post('/api/places/directions', placesAccess('directions'), async (req, re
       });
     }
 
+    // Rota da corrida (motorista -> embarque -> destino): uma por corrida, compartilhada.
+    const ridePlanUid = req.authenticatedUser?.uid || null;
+    const ridePlanRedis = redisPool.getConnection?.() || null;
+    const ridePlanRequest = routeScope === 'active_ride_navigation' && telemetry.bookingId && waypoints && ridePlanRedis
+      ? {
+        bookingId: telemetry.bookingId,
+        pickup: rideRoutePlanStore.firstWaypoint(waypoints),
+        destination: rideRoutePlanStore.parsePoint(destLoc),
+      }
+      : null;
+    let ridePlanOwner = false;
+    if (ridePlanRequest?.pickup && ridePlanRequest.destination &&
+        await rideRoutePlanStore.isRideParticipant(ridePlanRedis, ridePlanRequest.bookingId, ridePlanUid)) {
+      const claim = await rideRoutePlanStore.claimOrWait(ridePlanRedis, ridePlanRequest);
+      if (claim.plan) {
+        return res.json({
+          status: 'success',
+          source: 'ride_route_plan',
+          cached: true,
+          telemetryCaptured: false,
+          routeCount: 1,
+          waypointsCount: 1,
+          cachePolicy: { forceFresh: false, ttlSeconds: rideRoutePlanStore.PLAN_TTL_SECONDS },
+          data: claim.plan.data,
+        });
+      }
+      ridePlanOwner = claim.owner === true;
+    }
+
     const budgetGuard = await resolveDirectionsBudgetGuard(telemetry.bookingId);
     let result = null;
     let budgetGuardFallbackUsed = false;
@@ -979,6 +1009,10 @@ router.post('/api/places/directions', placesAccess('directions'), async (req, re
         code: 'invalid_route_geometry',
         message: 'Não foi possível obter rota válida para os pontos informados.',
       });
+    }
+
+    if (ridePlanOwner && result?.data && placesCacheService.hasUsableDirectionsGeometry(result.data)) {
+      await rideRoutePlanStore.savePlan(ridePlanRedis, { ...ridePlanRequest, data: result.data });
     }
 
     const billedGoogleRequest = Number(result?.stats?.googleRequests || 0) > 0;
