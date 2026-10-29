@@ -61,6 +61,15 @@ function isCanceled(status) {
   return value.startsWith('CANCEL');
 }
 
+// Quem cancelou: o id quando a corrida guarda; senão o motivo gravado pelo backend
+// ("Cancelado pelo passageiro." / "...pelo motorista").
+function canceledBySelf(ride = {}, { userId, role }) {
+  const actorId = String(ride.canceledBy || ride.cancelledBy || ride.cancelledById || '').trim();
+  if (actorId) return actorId === userId;
+  const reason = String(ride.cancellationReason || ride.cancelReason || '').toLowerCase();
+  return role === 'driver' ? reason.includes('motorista') : reason.includes('passageiro');
+}
+
 // Pure: turns raw ride records into the counters the rules use.
 function summarizeRides(rides = [], { userId, role, now = Date.now() } = {}) {
   const windowStart = now - QUALITY_WINDOW_DAYS * DAY_MS;
@@ -78,9 +87,8 @@ function summarizeRides(rides = [], { userId, role, now = Date.now() } = {}) {
       continue;
     }
     // Conta só o cancelamento feito pela própria pessoa depois do aceite.
-    const canceledBy = String(ride?.canceledBy || ride?.cancelledById || '').trim();
     const accepted = Boolean(ride?.acceptedAt || ride?.driverId);
-    if (isCanceled(status) && canceledBy === userId && accepted && Number.isFinite(at) && at >= windowStart) {
+    if (isCanceled(status) && canceledBySelf(ride, { userId, role }) && accepted && Number.isFinite(at) && at >= windowStart) {
       selfCancellationsInWindow += 1;
     }
   }
@@ -141,19 +149,23 @@ function computeAchievements(stats = {}, { role, memberSinceMs, now = Date.now()
   };
 }
 
+// As corridas guardam o passageiro como passengerId (customerId só em registros antigos).
 async function loadRides(firestore, scope, { userId, role }) {
-  const field = role === 'driver' ? 'driverId' : 'customerId';
-  const snapshot = await firestore
-    .collection(scope.collections.rides)
-    .where(field, '==', userId)
-    .limit(RIDES_READ_LIMIT)
-    .get();
-  return snapshot.docs.map((doc) => doc.data() || {});
+  const fields = role === 'driver' ? ['driverId'] : ['passengerId', 'customerId'];
+  for (const field of fields) {
+    const snapshot = await firestore
+      .collection(scope.collections.rides)
+      .where(field, '==', userId)
+      .limit(RIDES_READ_LIMIT)
+      .get();
+    if (snapshot.docs.length > 0) return snapshot.docs.map((doc) => doc.data() || {});
+  }
+  return [];
 }
 
 async function getAccountAchievements({ userId, role, memberSince, firestore, redis = null, now = Date.now() }) {
   const safeRole = normalizeRole(role);
-  const cacheKey = `account_achievements:v1:${userId}:${safeRole}`;
+  const cacheKey = `account_achievements:v2:${userId}:${safeRole}`;
   if (redis) {
     const cached = await redis.get(cacheKey).catch(() => null);
     if (cached) {
