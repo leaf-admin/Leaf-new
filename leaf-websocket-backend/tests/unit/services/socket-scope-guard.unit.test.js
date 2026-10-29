@@ -240,6 +240,40 @@ describe('socket-scope-guard', () => {
     });
   });
 
+  it('reads redis for chat when the in-memory copy from another gateway lacks the driver', async () => {
+    const redis = {
+      hgetall: jest.fn().mockResolvedValue({
+        bookingId: 'ride_chat_other_gateway',
+        customerId: 'passenger_1',
+        driverId: 'driver_1',
+        status: 'ARRIVED'
+      })
+    };
+    const io = {
+      activeBookings: new Map([
+        ['ride_chat_other_gateway', {
+          bookingId: 'ride_chat_other_gateway',
+          customerId: 'passenger_1',
+          status: 'SEARCHING'
+        }]
+      ])
+    };
+
+    const passenger = await assertRideParticipant({
+      socket: { userId: 'passenger_1', userType: 'customer' },
+      io,
+      redisPool: { getConnection: () => redis },
+      bookingId: 'ride_chat_other_gateway',
+      preferPersistentTerminal: true
+    });
+
+    expect(passenger).toMatchObject({
+      allowed: true,
+      participantRole: 'passenger',
+      scope: expect.objectContaining({ source: 'redis', customerId: 'passenger_1', driverId: 'driver_1' })
+    });
+  });
+
   it('keeps the in-memory copy when redis has no record', async () => {
     const redis = { hgetall: jest.fn().mockResolvedValue({}) };
     const io = {
