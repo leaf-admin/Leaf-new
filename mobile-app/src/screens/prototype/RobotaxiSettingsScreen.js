@@ -5,7 +5,6 @@ import * as Application from 'expo-application';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSelector } from 'react-redux';
 import { Feather } from '@expo/vector-icons';
-import { LeafObjectIcon } from '../../components/prototype/LeafVisualElements';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
 import PrototypeDismissibleSheet from '../../components/prototype/PrototypeDismissibleSheet';
 import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
@@ -84,7 +83,6 @@ function SettingRow({
       accessibilityRole={onValueChange ? undefined : informational ? 'text' : 'button'}
       accessibilityState={{ disabled }}
     >
-      <LeafObjectIcon symbol={icon} size={20} color={tone === 'danger' ? SETTINGS_COLOR.danger : SETTINGS_COLOR.text} />
       <View style={[styles.settingBody, divider && styles.settingBodyDivider]}>
       <View style={styles.settingTextWrap}>
         <Text style={[styles.settingTitle, tone === 'danger' && styles.settingTitleDanger]}>
@@ -477,8 +475,9 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
 }
 
 const styles = StyleSheet.create({
-  sectionTitle: { ...leafTypography.medium, fontSize: 13, lineHeight: 18, color: SETTINGS_COLOR.secondary, marginTop: 24, marginBottom: 8, marginLeft: 4 },
-  group: { backgroundColor: '#F4F4F2', borderRadius: 16, paddingLeft: 16, overflow: 'hidden' },
+  // Lista agrupada (3B): mesmo padrão dos menus da conta.
+  sectionTitle: { ...leafTypography.semiBold, fontSize: 12, lineHeight: 16, letterSpacing: 0.72, textTransform: 'uppercase', color: '#767676', marginTop: 26, marginBottom: 2 },
+  group: { backgroundColor: 'transparent' },
   feedback: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 12 },
   container: {
     flex: 1,
@@ -530,9 +529,9 @@ const styles = StyleSheet.create({
     paddingTop: 4,
     paddingBottom: 28,
   },
-  settingRow: { flexDirection: 'row', alignItems: 'center', gap: 14 },
-  settingBody: { flex: 1, minHeight: 52, flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10, paddingRight: 14 },
-  settingBodyDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#DCDCD8' },
+  settingRow: { flexDirection: 'row', alignItems: 'center' },
+  settingBody: { flex: 1, minHeight: 54, flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10 },
+  settingBodyDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#E5E5E5' },
   settingValue: { ...leafTypography.regular, fontSize: 15, lineHeight: 20, color: '#767676', maxWidth: '45%' },
   settingTextWrap: {
     flex: 1,
@@ -541,8 +540,8 @@ const styles = StyleSheet.create({
   },
   settingTitle: {
     color: SETTINGS_COLOR.text,
-    ...leafTypography.medium,
-    fontSize: 16,
+    ...leafTypography.regular,
+    fontSize: 17,
     lineHeight: 22,
   },
   settingTitleDanger: {
