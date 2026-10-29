@@ -1,3 +1,4 @@
+import { shouldAcceptIncomingChatMessage } from './chatMessageRouting';
 import { compactPersistedRideRecord } from "./persistedRideCompaction";
 import {
   buildRideComfortFromPreferences,
@@ -760,6 +761,8 @@ const DEFAULT_RUNTIME_STATE = Object.freeze({
   chatLoading: false,
   chatSending: false,
   chatError: "",
+  // Última mensagem recebida da outra pessoa na corrida ativa, para o banner com ação.
+  incomingChatNotice: null,
   supportLoading: false,
   supportError: "",
   supportLastTicket: null,
@@ -13263,15 +13266,7 @@ function attachChatListeners(profile = null) {
       return;
     }
 
-    if (!runtimeState.activeChatId && !runtimeState.activeChatBookingId) {
-      return;
-    }
-
-    if (
-      runtimeState.activeChatId &&
-      incomingChatId !== runtimeState.activeChatId &&
-      incomingChatId !== runtimeState.activeChatBookingId
-    ) {
+    if (!shouldAcceptIncomingChatMessage(runtimeState, incomingChatId)) {
       return;
     }
 
@@ -13280,9 +13275,21 @@ function attachChatListeners(profile = null) {
       return;
     }
 
+    const isFromOtherParticipant = normalized.author !== "you";
     setRuntimeState((previous) => ({
       chatMessages: mergeChatMessages(previous.chatMessages, [normalized]),
       chatError: "",
+      ...(isFromOtherParticipant
+        ? {
+            incomingChatNotice: {
+              id: normalized.id,
+              bookingId: String(incomingChatId),
+              text: normalized.text,
+              senderType: sanitizeText(payload?.senderType, ""),
+              receivedAt: Date.now(),
+            },
+          }
+        : {}),
     }));
   };
 
@@ -15624,6 +15631,7 @@ async function requestPrototypeRide(profile, payload) {
     },
     activeChatId: null,
     activeChatBookingId: null,
+    incomingChatNotice: null,
     chatMessages: [],
     chatError: "",
     lastError: "",
@@ -22438,6 +22446,12 @@ export function usePrototypeRideRuntime(options = null) {
     [profile],
   );
 
+  const dismissIncomingChatNotice = useCallback(() => {
+    if (runtimeState.incomingChatNotice) {
+      setRuntimeState({ incomingChatNotice: null });
+    }
+  }, []);
+
   const openSupportTicket = useCallback(
     async (payload) => {
       return createPrototypeSupportTicket(profile, payload);
@@ -22722,6 +22736,7 @@ export function usePrototypeRideRuntime(options = null) {
     updateRiderProfile,
     loadChatSession,
     sendChatMessage,
+    dismissIncomingChatNotice,
     openSupportTicket,
     reportIncident,
     setDriverOnline,

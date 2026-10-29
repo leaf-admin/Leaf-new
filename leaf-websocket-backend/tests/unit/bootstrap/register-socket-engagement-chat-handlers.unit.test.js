@@ -225,6 +225,40 @@ describe('registerSocketEngagementChatHandlers', () => {
     );
   });
 
+  it('delivers through the receiver user room so the message crosses gateways', async () => {
+    const { handlers, io, receiverSocket } = createHarness({
+      socketUserId: 'passenger_1',
+      socketUserType: 'customer',
+      bookingStatus: 'ARRIVED'
+    });
+    const roomEmit = jest.fn();
+    io.to = jest.fn(() => ({ emit: roomEmit }));
+
+    await handlers.sendMessage({ bookingId: 'ride_1', message: 'Estou indo' });
+
+    expect(io.to).toHaveBeenCalledWith('driver_driver_1');
+    expect(roomEmit).toHaveBeenCalledWith(
+      'newMessage',
+      expect.objectContaining({ bookingId: 'ride_1', senderId: 'passenger_1', text: 'Estou indo' })
+    );
+    expect(receiverSocket.emit).not.toHaveBeenCalledWith('newMessage', expect.any(Object));
+  });
+
+  it('delivers a driver message to the passenger room', async () => {
+    const { handlers, io } = createHarness({
+      socketUserId: 'driver_1',
+      socketUserType: 'driver',
+      bookingStatus: 'ARRIVED'
+    });
+    const roomEmit = jest.fn();
+    io.to = jest.fn(() => ({ emit: roomEmit }));
+
+    await handlers.sendMessage({ bookingId: 'ride_1', message: 'Cheguei no portão' });
+
+    expect(io.to).toHaveBeenCalledWith('customer_passenger_1');
+    expect(roomEmit).toHaveBeenCalledWith('newMessage', expect.objectContaining({ senderType: 'driver' }));
+  });
+
   it.each(['EARLY_ENDED_BY_RIDER', 'INTERRUPTED_OPERATIONAL_ENDED'])(
     'blocks create, send and history for terminal status %s',
     async (bookingStatus) => {

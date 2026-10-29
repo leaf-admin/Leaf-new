@@ -36,6 +36,7 @@ import { resolveDriverOfferDeadlineMs } from './driverOfferCountdown';
 import DriverTripStatusBanner from './home/DriverTripStatusBanner';
 import LeafNativeNavigationBanner from './home/LeafNativeNavigationBanner';
 import DriverTransientStateCard from './home/DriverTransientStateCard';
+import RideChatMessageBanner from './home/RideChatMessageBanner';
 import RobotaxiReceiptScreen from './RobotaxiReceiptScreen';
 import { PROTOTYPE_REGION } from './robotaxiPrototypeData';
 import { subscribePrototypeMapOcclusion, usePrototypeMapOcclusion } from './prototypeMapOcclusion';
@@ -1992,6 +1993,8 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     driverActiveRide,
     driverTripMeta,
     driverTransientCard,
+    incomingChatNotice,
+    dismissIncomingChatNotice,
     driverExtensionRequest,
     driverTripAssist,
     boardingDeadlineAt,
@@ -10398,6 +10401,17 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
             // Below the top row (location, earnings pill, notifications), not over it.
             insetsTop={insets.top + 76}
             suppressActivationStatusAlerts={driverHasAcceptedOrActiveWork}
+          />
+        ) : null}
+
+        {runtimeHomeSurfaceReady && isDriverRole && driverActivationResolved && incomingChatNotice ? (
+          <RideChatMessageBanner
+            notice={incomingChatNotice}
+            bookingId={driverActiveRide?.bookingId || driverActiveRide?.id || activeBookingId}
+            // In a live ride the top row is gone: the banner sits at the top edge.
+            top={hasDriverLiveRideOverlay ? insets.top + 8 : insets.top + 76}
+            onReply={handleOpenDriverChat}
+            onDismiss={dismissIncomingChatNotice}
           />
         ) : null}
 
