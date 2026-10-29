@@ -892,7 +892,7 @@ function DriverHomeOverlay({
         >
           <LeafGlassSurface interactive pointerEvents="none" style={styles.driverEarningsPillGlass} />
           <View style={[styles.driverEarningsPillDot, (sliderStatus === "online" || sliderStatus === "ride") && styles.driverEarningsPillDotOnline]} />
-          <LeafAnimatedAmount style={styles.driverEarningsPillValue} numberOfLines={1} label={currentGoalProgressLabel} showDelta deltaPlacement="below" />
+          <LeafAnimatedAmount style={styles.driverEarningsPillValue} numberOfLines={1} label={currentGoalProgressLabel} showDelta deltaPlacement="below" memoryKey="driver-earnings-today" />
           {/* Safety signal stays visible without expanding the panel. */}
           {onlineLimitHintVisible ? <Ionicons name="time-outline" size={16} color={DRIVER_HOME_COLOR.warningText} accessibilityLabel="Próximo ao limite de horas online" /> : null}
           <Ionicons name={earningsExpanded ? "chevron-up" : "chevron-down"} size={16} color="#6A6A6A" />
