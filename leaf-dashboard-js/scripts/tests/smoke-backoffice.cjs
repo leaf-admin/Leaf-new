@@ -40,7 +40,7 @@ const routes = [
   { path: "/drivers/smoke-driver", heading: "Maria Souza Lima" },
   { path: "/drivers/review-queue", heading: "Fila de Revisão de Documentos" },
   { path: "/drivers/smoke-driver/documents", heading: "Documentos do Motorista" },
-  { path: "/maps", heading: "Mapas e Geofence" },
+  { path: "/maps", heading: "Mapa operacional" },
   { path: "/metrics", heading: "Métricas" },
   { path: "/metrics/history", heading: "Historico de metricas" },
   { path: "/metrics/marketplace", heading: "Saúde do marketplace" },

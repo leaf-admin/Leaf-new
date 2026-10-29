@@ -362,3 +362,19 @@ input[type="checkbox"], input[type="radio"] {
 }
 .notice-banner::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--dot-warn); flex: none; }
 .notice-banner p { margin: 0; }
+
+/* ---------- Mapa operacional ----------
+   Mapa grande à esquerda; a área de atendimento (geofence) num painel ao lado,
+   com o passo a passo e a ação perigosa (desligar) separada no fim. */
+.header-actions { display: flex; align-items: center; gap: 12px; margin-left: auto; }
+.map-layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 20px; align-items: start; margin-bottom: 20px; }
+.map-layout .panel { margin: 0; }
+.service-area-panel .panel-body, .service-area-panel { display: grid; gap: 14px; align-content: start; }
+.service-area-status { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--bg-soft); font-size: 13px; }
+.service-area-steps { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: 13px; color: var(--text-soft); }
+.service-area-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.service-area-danger { display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); font-size: 12.5px; }
+.service-area-danger button { justify-self: start; color: var(--danger-text, #b42318); }
+@media (max-width: 1100px) {
+  .map-layout { grid-template-columns: 1fr; }
+}
