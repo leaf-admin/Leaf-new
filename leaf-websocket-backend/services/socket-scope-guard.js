@@ -266,7 +266,14 @@ async function resolveRideScope({
     const scopeError = validateCachedScope(fromRedis);
     if (scopeError) return scopeError;
     const redisScope = { found: true, ...extractRideScope(fromRedis, safeBookingId), source: 'redis' };
-    if (!memoryScope || !preferPersistentTerminal || isTerminalRideScopeStatus(redisScope.status)) {
+    // A cópia local sem os dois participantes (aceite em outro gateway) não
+    // vence o Redis nem quando o chamador prefere o registro persistido terminal.
+    if (
+      !memoryScope ||
+      !preferPersistentTerminal ||
+      !memoryScopeComplete ||
+      isTerminalRideScopeStatus(redisScope.status)
+    ) {
       return redisScope;
     }
   }
