@@ -680,26 +680,42 @@ function registerSocketEngagementChatHandlers({
                 timestamp: new Date().toISOString()
             });
 
-            // Notificar o receptor se estiver conectado
-            if (finalReceiverId && io.connectedUsers) {
-                const receiverSocket = io.connectedUsers.get(finalReceiverId);
-                if (receiverSocket) {
-                    receiverSocket.emit('newMessage', {
-                        success: true,
-                        messageId: persistedMessageId,
-                        chatId: conversationId,
-                        bookingId: conversationId,
-                        senderId: senderId,
-                        text: messageText,
-                        message: messageText,
-                        senderType: canonicalSenderType,
-                        timestamp: new Date().toISOString()
-                    });
+            // Notificar o receptor. A sala do usuário (driver_<id> / customer_<id>) passa
+            // pelo adapter Redis e alcança o outro gateway; connectedUsers só conhece
+            // os sockets deste gateway e fica como fallback sem adapter.
+            if (finalReceiverId) {
+                const newMessagePayload = {
+                    success: true,
+                    messageId: persistedMessageId,
+                    chatId: conversationId,
+                    bookingId: conversationId,
+                    senderId: senderId,
+                    text: messageText,
+                    message: messageText,
+                    senderType: canonicalSenderType,
+                    timestamp: new Date().toISOString()
+                };
+                const receiverRoom = finalReceiverId === policy.state.driverId
+                    ? `driver_${finalReceiverId}`
+                    : `customer_${finalReceiverId}`;
+                let delivered = false;
+                if (typeof io.to === 'function') {
+                    io.to(receiverRoom).emit('newMessage', newMessagePayload);
+                    delivered = true;
+                } else if (io.connectedUsers) {
+                    const receiverSocket = io.connectedUsers.get(finalReceiverId);
+                    if (receiverSocket) {
+                        receiverSocket.emit('newMessage', newMessagePayload);
+                        delivered = true;
+                    }
+                }
+                if (delivered) {
                     logStructured('info', 'Mensagem enviada para receptor', {
                         service: 'websocket',
                         operation: 'sendMessage',
                         senderId: senderId,
                         receiverId: finalReceiverId,
+                        receiverRoom,
                         conversationId: conversationId
                     });
                 }

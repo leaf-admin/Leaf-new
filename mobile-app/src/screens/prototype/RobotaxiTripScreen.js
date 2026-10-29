@@ -16,6 +16,7 @@ import PrototypeMapLayer from '../../components/prototype/PrototypeMapLayer';
 import { resolveRegisteredVehicleColor } from '../../components/prototype/vehicleMarkerIdentity';
 import PrototypeConnectionStatusPill from '../../components/prototype/PrototypeConnectionStatusPill';
 import PassengerRideMomentBanner, { PASSENGER_ON_MY_WAY_MESSAGE } from './home/PassengerRideMomentBanner';
+import RideChatMessageBanner from './home/RideChatMessageBanner';
 import WooviPaymentModal from '../../components/payment/WooviPaymentModal';
 import SecurePaymentBadge from '../../components/payment/SecurePaymentBadge';
 import robotaxiPrototypeTokens from '../../components/design-system/robotaxiPrototypeTokens';
@@ -637,7 +638,9 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     endTripEarlyFlow,
     respondOperationalContinuationFlow,
     terminalRideGuards,
-    sendChatMessage
+    sendChatMessage,
+    incomingChatNotice,
+    dismissIncomingChatNotice
   } = usePrototypeRideRuntime();
   const insets = useSafeAreaInsets();
   const { height: windowHeight, width: windowWidth } = useWindowDimensions();
@@ -2549,6 +2552,15 @@ export default function RobotaxiTripScreen({ navigation, route }) {
             arrivalText={resolvedTripArrivalText}
             top={insets.top + 8}
             onOnMyWay={handlePassengerOnMyWay}
+          />
+        ) : null}
+        {incomingChatNotice ? (
+          <RideChatMessageBanner
+            notice={incomingChatNotice}
+            bookingId={passengerSupportContext.bookingId}
+            top={insets.top + 8}
+            onReply={handleOpenPassengerChat}
+            onDismiss={dismissIncomingChatNotice}
           />
         ) : null}
         <PrototypeDismissibleSheet
