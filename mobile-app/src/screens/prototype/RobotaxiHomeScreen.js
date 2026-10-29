@@ -54,6 +54,7 @@ import {
   distanceBetweenCoordinatesKm,
   resolveMapViewportCenterY,
 } from './prototypeRouteViewport';
+import { routeAheadStartIndex } from './passengerRouteAhead';
 import {
   PROTOTYPE_TRAFFIC_SEGMENT_COLORS,
   resolveTrafficFareStatusPresentation,
@@ -401,6 +402,12 @@ const MERCATOR_METERS_PER_PIXEL_AT_ZOOM_0 = 156543.03392;
 const FOLLOW_CAMERA_RECENTER_RATIO = 0.18;
 const NAV_CAMERA_MIN_MOVE_METERS = 8;
 const NAV_CAMERA_MIN_HEADING_DEG = 12;
+// Driver map shows the whole leg still ahead (car to pickup or destination),
+// north up, between the banner and the card (Izaak, 2026-10-29). Refit only
+// after the car moved this much or this long passed, so the map stays calm.
+const NAV_OVERVIEW_REFIT_METERS = 120;
+const NAV_OVERVIEW_REFIT_MS = 20000;
+const NAV_OVERVIEW_ANIMATION_MS = 600;
 
 function isFollowRegionClose(previous, next) {
   if (!previous || !next) return false;
@@ -7044,130 +7051,85 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       return;
     }
 
-    const resolvedCameraHeading = resolveSmoothedNavigationHeading(
-      lastNativeNavigationHeadingRef.current,
-      leafNativeNavigationCameraHeading,
-    );
-    // Dead zone: parked or crawling, GPS jitter alone must not move the camera.
-    // A measured banner/card resize still needs a camera update while parked.
+    const navigationRoute = Array.isArray(driverTripAssistNativeNavigation?.routeCoordinates)
+      ? driverTripAssistNativeNavigation.routeCoordinates.filter(isFiniteCoordinate)
+      : [];
+    const navigationTarget = driverTripAssistNativeNavigation?.targetCoordinate || activeRoute?.destination || null;
+    const routeAhead = navigationRoute.length > 1
+      ? navigationRoute.slice(routeAheadStartIndex(navigationRoute, activeDriverNavigationCoordinate) + 1)
+      : (isFiniteCoordinate(navigationTarget) ? [navigationTarget] : []);
+    const overviewCoordinates = [activeDriverNavigationCoordinate, ...routeAhead];
+    if (overviewCoordinates.length < 2) {
+      return;
+    }
     const navigationViewportKey = [mapHeight, routeViewportOcclusion.top, routeViewportOcclusion.bottom].join(':');
     const lastPose = lastNativeNavigationCameraPoseRef.current;
     if (lastPose && lastPose.key === leafNativeNavigationKey && lastPose.viewportKey === navigationViewportKey) {
       const movedMeters = measureRouteLengthMeters([lastPose.coordinate, activeDriverNavigationCoordinate]);
-      const headingDelta = Number.isFinite(Number(resolvedCameraHeading)) && Number.isFinite(Number(lastPose.heading))
-        ? Math.abs(((Number(resolvedCameraHeading) - Number(lastPose.heading) + 540) % 360) - 180)
-        : 0;
-      if (movedMeters < NAV_CAMERA_MIN_MOVE_METERS && headingDelta < NAV_CAMERA_MIN_HEADING_DEG) {
+      if (movedMeters < NAV_OVERVIEW_REFIT_METERS && now - lastPose.at < NAV_OVERVIEW_REFIT_MS) {
         return;
       }
+    }
+    // The navigation banner is not part of the measured occlusion: keep the route below it.
+    const overviewOcclusion = {
+      ...routeViewportOcclusion,
+      top: showLeafNativeNavigation
+        ? Math.max(Number(routeViewportOcclusion.top) || 0, insets.top + NAVIGATION_BANNER_CLEARANCE)
+        : Number(routeViewportOcclusion.top) || 0,
+    };
+    const overviewRegion = buildRouteViewportRegion({
+      coordinates: overviewCoordinates,
+      mapWidth: mapWidth || windowWidth,
+      mapHeight: mapHeight || windowHeight,
+      activeOcclusion: overviewOcclusion,
+      insets,
+      viewportPadding: buildVisibleRouteEdgePadding({
+        mapHeight: mapHeight || windowHeight,
+        activeOcclusion: overviewOcclusion,
+        insets,
+        sidePadding: ROUTE_SIDE_PADDING,
+        topExtraPadding: ROUTE_TOP_EXTRA_PADDING,
+        bottomExtraPadding: ROUTE_BOTTOM_EXTRA_PADDING,
+        minVisibleHeight: MAP_MIN_VISIBLE_HEIGHT,
+        overlayBiasRatio: 0.36,
+      }),
+      minVisibleHeight: MAP_MIN_VISIBLE_HEIGHT,
+    });
+    if (!overviewRegion) {
+      return;
     }
     lastNativeNavigationCameraPoseRef.current = {
       key: leafNativeNavigationKey,
       viewportKey: navigationViewportKey,
       coordinate: activeDriverNavigationCoordinate,
-      heading: resolvedCameraHeading,
+      at: now,
     };
     lastNativeNavigationCameraAtRef.current = now;
-    lastNativeNavigationHeadingRef.current = resolvedCameraHeading;
-    const navigationSpeedKmh = Number(driverTripAssistNativeNavigation?.currentSpeedKmh);
-    const resolvedCameraZoom = Number.isFinite(Number(driverTripAssistNativeNavigation?.cameraZoom))
-      ? Number(driverTripAssistNativeNavigation.cameraZoom)
-      : resolveNavigationCameraZoom(
-          navigationSpeedKmh,
-          driverTripAssistNativeNavigation?.remainingDistanceMeters,
-          driverTripAssistNativeNavigation?.totalDistanceMeters,
-        );
-    // Driver navigation stays top-down. The previous speed-based pitch made
-    // the map tilt into an isometric view after accepting/starting a ride.
-    const resolvedCameraPitch = resolveNavigationCameraPitch();
-    const resolvedCameraAnchorY = Number.isFinite(Number(driverTripAssistNativeNavigation?.cameraAnchorY))
-      ? Number(driverTripAssistNativeNavigation.cameraAnchorY)
-      : NAVIGATION_CAMERA_ANCHOR_Y;
-    // Place the car in the lower part of the map that is actually visible
-    // (between the navigation banner and the floating card), so the road
-    // ahead fills that window. Anchoring on the full map height put the car,
-    // and the route ahead of it, behind the card.
-    const safeMapHeight = Number(mapHeight) > 0 ? Number(mapHeight) : windowHeight;
-    const visibleTop = Math.max(Number(routeViewportOcclusion.top) || 0, insets.top + NAVIGATION_BANNER_CLEARANCE);
-    const visibleBottom = Math.max(
-      visibleTop + 120,
-      safeMapHeight - (Number(routeViewportOcclusion.bottom) || 0),
-    );
-    const carScreenY = visibleTop + (visibleBottom - visibleTop) * NAVIGATION_CAR_VISIBLE_ANCHOR;
-    const latitudeCosine = Math.max(
-      0.18,
-      Math.cos((Number(activeDriverNavigationCoordinate.latitude) * Math.PI) / 180),
-    );
-    const metersPerPixel =
-      (MERCATOR_METERS_PER_PIXEL_AT_ZOOM_0 * latitudeCosine) / (2 ** resolvedCameraZoom);
-    // Positive: camera centre ahead of the car; negative: behind it.
-    const lookAheadKm = Number.isFinite(Number(resolvedCameraHeading))
-      ? ((carScreenY - safeMapHeight / 2) * metersPerPixel) / 1000
-      : 0;
-    const cameraCenterCoordinate = Number.isFinite(Number(resolvedCameraHeading)) && lookAheadKm !== 0
-      ? offsetCoordinateByDistance(
-          activeDriverNavigationCoordinate,
-          Math.abs(lookAheadKm),
-          lookAheadKm > 0 ? resolvedCameraHeading : (resolvedCameraHeading + 180) % 360,
-        )
-      : activeDriverNavigationCoordinate;
-    const animationDurationMs = Number.isFinite(Number(driverTripAssistNativeNavigation?.cameraAnimationDurationMs))
-      ? Number(driverTripAssistNativeNavigation.cameraAnimationDurationMs)
-      : NAVIGATION_CAMERA_ANIMATION_MS;
-    mapRef.current.animateCamera(
-      {
-        center: {
-          latitude: cameraCenterCoordinate.latitude,
-          longitude: cameraCenterCoordinate.longitude,
-        },
-        zoom: resolvedCameraZoom,
-        heading: resolvedCameraHeading ?? 0,
-        pitch: resolvedCameraPitch,
-      },
-      { duration: animationDurationMs }
-    );
-    appendPrototypeRuntimeDebugStep('leaf_native_camera_follow', {
+    mapRef.current.animateCamera({ heading: 0, pitch: 0 }, { duration: 0 });
+    mapRef.current.animateToRegion(overviewRegion, NAV_OVERVIEW_ANIMATION_MS);
+    appendPrototypeRuntimeDebugStep('leaf_native_camera_overview', {
       key: leafNativeNavigationKey,
-      latitude: Number(activeDriverNavigationCoordinate.latitude.toFixed(6)),
-      longitude: Number(activeDriverNavigationCoordinate.longitude.toFixed(6)),
-      cameraLatitude: Number(cameraCenterCoordinate.latitude.toFixed(6)),
-      cameraLongitude: Number(cameraCenterCoordinate.longitude.toFixed(6)),
-      heading: Number.isFinite(Number(resolvedCameraHeading))
-        ? Number(Number(resolvedCameraHeading).toFixed(1))
-        : 0,
-      routeHeading: Number.isFinite(Number(leafNativeNavigationCameraHeading))
-        ? Number(Number(leafNativeNavigationCameraHeading).toFixed(1))
-        : null,
-      zoom: resolvedCameraZoom,
-      pitch: resolvedCameraPitch,
-      anchorY: resolvedCameraAnchorY,
-      speedKmh: Number.isFinite(navigationSpeedKmh)
-        ? Number(navigationSpeedKmh.toFixed(1))
-        : 0,
-      lookAheadKm,
-      throttleMs: LEAF_NATIVE_NAV_CAMERA_THROTTLE_MS,
-      animationMs: animationDurationMs,
+      points: overviewCoordinates.length,
+      latitudeDelta: Number(Number(overviewRegion.latitudeDelta).toFixed(4)),
     });
   }, [
     activeDriverNavigationCoordinate,
-    driverTripAssistNativeNavigation?.cameraAnchorY,
-    driverTripAssistNativeNavigation?.cameraAnimationDurationMs,
-    driverTripAssistNativeNavigation?.cameraZoom,
-    driverTripAssistNativeNavigation?.currentSpeedKmh,
-    driverTripAssistNativeNavigation?.remainingDistanceMeters,
-    driverTripAssistNativeNavigation?.totalDistanceMeters,
+    activeRoute?.destination,
+    driverTripAssistNativeNavigation?.routeCoordinates,
+    driverTripAssistNativeNavigation?.targetCoordinate,
     homeMapInteractiveReady,
     isSearchingMode,
-    leafNativeNavigationCameraHeading,
     leafNativeNavigationKey,
     mapHeight,
+    mapWidth,
     nativeNavigationRouteRevealKey,
-    routeViewportOcclusion.bottom,
-    routeViewportOcclusion.top,
+    routeViewportOcclusion,
     shouldFreezeBackgroundMapCamera,
+    showLeafNativeNavigation,
     driverFollowCameraActive,
-    insets.top,
+    insets,
     windowHeight,
+    windowWidth,
   ]);
 
   const handleMapRegionChangeComplete = useCallback((nextRegion) => {
@@ -7365,6 +7327,16 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     ) {
       return;
     }
+    // At the pickup the whole trip to the destination is what matters next:
+    // frame car plus route, like the quote does (Izaak, 2026-10-29).
+    const tripRoute = Array.isArray(activeRoute?.coordinates)
+      ? activeRoute.coordinates.filter(isFiniteCoordinate)
+      : [];
+    if (tripRoute.length > 1) {
+      driverWaitingCameraKeyRef.current = bookingKey;
+      focusRoute({ ...activeRoute, coordinates: [coordinate, ...tripRoute] }, true);
+      return;
+    }
     const camera = buildPickupMapCamera({
       coordinate,
       // Not closer: from about zoom 16.5 Google's Android base map shades
@@ -7385,6 +7357,8 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     }
   }, [
     activeBookingId,
+    activeRoute,
+    focusRoute,
     activeDriverNavigationCoordinate,
     driverLiveRideHeightMeasured,
     driverWaitingAtPickup,
@@ -10105,7 +10079,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           userAvatarLetter={profileInitial}
           driverCoordinate={presentedDriverCoordinate}
           driverHeading={presentedDriverHeading}
-          mapCameraHeading={driverFollowCameraActive ? leafNativeNavigationCameraHeading ?? 0 : 0}
+          mapCameraHeading={0}
           showTraffic={shouldShowTrafficLayer}
           searchingMode={presentedSearchingMode}
           searchCenterCoordinate={presentedSearchingMode ? searchCenterCoordinate : null}
