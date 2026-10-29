@@ -411,6 +411,11 @@ const NAV_OVERVIEW_ANIMATION_MS = 600;
 // Height of the navigation banner below the safe area, measured on the Android QA
 // phone (about 220 pt): the overview keeps the route start out from under it.
 const NAV_OVERVIEW_BANNER_CLEARANCE = 236;
+// Between the banner and the pickup card only ~220 pt of map are left. The regular
+// route paddings (bias, extras, 180 pt minimum) ate that window and the fit fell back
+// to a frame that ran under the card, so the overview uses lean ones.
+const NAV_OVERVIEW_MIN_VISIBLE_HEIGHT = 120;
+const NAV_OVERVIEW_EDGE_PADDING = 10;
 
 function isFollowRegionClose(previous, next) {
   if (!previous || !next) return false;
@@ -2033,6 +2038,13 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const mapRef = useRef(null);
   const lastRouteLayoutKeyRef = useRef('');
   const lastNativeNavigationCameraAtRef = useRef(0);
+  // A refit skipped by the throttle (e.g. the card finished opening right after the
+  // first fit) is retried once the throttle window ends, instead of being lost.
+  const [overviewRetryNonce, setOverviewRetryNonce] = useState(0);
+  const overviewRetryTimerRef = useRef(null);
+  useEffect(() => () => {
+    if (overviewRetryTimerRef.current) clearTimeout(overviewRetryTimerRef.current);
+  }, []);
   const lastNativeNavigationHeadingRef = useRef(null);
   const lastNativeNavigationCameraPoseRef = useRef(null);
   const lastFollowRegionRef = useRef(null);
@@ -7046,7 +7058,14 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     }
 
     const now = Date.now();
-    if (now - lastNativeNavigationCameraAtRef.current < LEAF_NATIVE_NAV_CAMERA_THROTTLE_MS) {
+    const throttleLeftMs = LEAF_NATIVE_NAV_CAMERA_THROTTLE_MS - (now - lastNativeNavigationCameraAtRef.current);
+    if (throttleLeftMs > 0) {
+      if (!overviewRetryTimerRef.current) {
+        overviewRetryTimerRef.current = setTimeout(() => {
+          overviewRetryTimerRef.current = null;
+          setOverviewRetryNonce((value) => value + 1);
+        }, throttleLeftMs + 50);
+      }
       return;
     }
 
@@ -7097,12 +7116,13 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
         activeOcclusion: overviewOcclusion,
         insets,
         sidePadding: ROUTE_SIDE_PADDING,
-        topExtraPadding: ROUTE_TOP_EXTRA_PADDING,
-        bottomExtraPadding: ROUTE_BOTTOM_EXTRA_PADDING,
-        minVisibleHeight: MAP_MIN_VISIBLE_HEIGHT,
-        overlayBiasRatio: 0.36,
+        topExtraPadding: NAV_OVERVIEW_EDGE_PADDING,
+        bottomExtraPadding: NAV_OVERVIEW_EDGE_PADDING,
+        minVisibleHeight: NAV_OVERVIEW_MIN_VISIBLE_HEIGHT,
+        minRouteAreaHeight: NAV_OVERVIEW_MIN_VISIBLE_HEIGHT,
+        overlayBiasRatio: 0,
       }),
-      minVisibleHeight: MAP_MIN_VISIBLE_HEIGHT,
+      minVisibleHeight: NAV_OVERVIEW_MIN_VISIBLE_HEIGHT,
     });
     if (!overviewRegion) {
       return;
@@ -7128,6 +7148,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     driverTripAssistNativeNavigation?.targetCoordinate,
     driverTripAssistStatus,
     presentedRouteCoordinates,
+    overviewRetryNonce,
     homeMapInteractiveReady,
     isSearchingMode,
     leafNativeNavigationKey,
