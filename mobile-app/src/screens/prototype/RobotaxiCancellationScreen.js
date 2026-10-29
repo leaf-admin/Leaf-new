@@ -11,6 +11,7 @@ import {
   RobotaxiLifecycleButton,
   RobotaxiLifecycleCard,
   RobotaxiLifecycleDisclosure,
+  compact,
   robotaxiLifecycleMetrics,
 } from '../../components/prototype/RobotaxiLifecycleUI';
 import robotaxiPrototypeTokens from '../../components/design-system/robotaxiPrototypeTokens';
@@ -451,11 +452,12 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
   },
+  // Same title scale as RobotaxiLifecycleSummary, so every card reads alike.
   terminalTitle: {
     color: color.text.primary,
     ...leafTypography.semiBold,
-    fontSize: typography.title.size,
-    lineHeight: typography.title.lineHeight,
+    fontSize: compact(24, 20),
+    lineHeight: compact(29, 25),
   },
   terminalSubtitle: {
     marginTop: 4,
