@@ -96,6 +96,25 @@ describe("DriverHomeOverlay", () => {
     expect(online.getByTestId("driver-home-online-state")).toBeTruthy();
   });
 
+  it("tells an online driver outside the operation area instead of searching for rides", () => {
+    const props = {
+      driverId: "driver_1",
+      driverOnline: true,
+      driverCanGoOnline: true,
+      driverActivationResolved: true,
+      onToggleOnline: () => {},
+      onOpenActivation: () => {},
+    };
+    const inside = render(<DriverHomeOverlay {...props} />);
+    expect(inside.getByTestId("driver-home-searching")).toBeTruthy();
+    expect(inside.queryByTestId("driver-home-outside-service-area")).toBeNull();
+    inside.unmount();
+
+    const outside = render(<DriverHomeOverlay {...props} driverOutsideServiceArea />);
+    expect(outside.getByTestId("driver-home-outside-service-area")).toBeTruthy();
+    expect(outside.queryByTestId("driver-home-searching")).toBeNull();
+  });
+
   it("announces the availability action and current status in user-facing language", () => {
     const scenarios = [
       {
