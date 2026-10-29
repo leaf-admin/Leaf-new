@@ -55,6 +55,14 @@ describe('account achievements', () => {
     expect(stats).toMatchObject({ completedTrips: 1, completedInWindow: 1, selfCancellationsInWindow: 1 });
   });
 
+  it('reads who canceled from the stored reason when the ride has no actor id', () => {
+    const stats = summarizeRides([
+      { status: 'cancelled', driverId: 'd1', cancellationReason: 'Cancelado pelo passageiro.', cancelledAt: new Date(NOW - DAY).toISOString() },
+      { status: 'cancelled', driverId: 'd1', cancellationReason: 'Cancelado pelo motorista.', cancelledAt: new Date(NOW - DAY).toISOString() },
+    ], { userId: 'pax_1', role: 'customer', now: NOW });
+    expect(stats.selfCancellationsInWindow).toBe(1);
+  });
+
   it('reads rides once and caches the result', async () => {
     ratingService.getUserRatings.mockResolvedValue({ success: true, averageRating: 5, totalRatings: 2 });
     const get = jest.fn().mockResolvedValue({ docs: [{ data: () => ({ status: 'COMPLETED', completedAt: NOW - DAY }) }] });
@@ -72,5 +80,7 @@ describe('account achievements', () => {
     expect(second).toEqual(first);
     expect(get).toHaveBeenCalledTimes(1);
     expect(firestore.collection).toHaveBeenCalledWith('rides');
+    // Passageiro: busca por passengerId primeiro.
+    expect(firestore.collection.mock.results[0].value.where).toHaveBeenCalledWith('passengerId', '==', 'pax_1');
   });
 });
