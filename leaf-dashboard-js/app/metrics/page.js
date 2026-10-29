@@ -159,7 +159,7 @@ export default function MetricsPage() {
               }}
             />
           </Panel>
-          <Panel title="Distribuição de corridas (visual)">
+          <Panel title="Distribuição de corridas hoje">
             <div className="bar-list">
               {[
                 { label: "Total", value: Number(data?.ridesDaily?.totalToday || 0), tone: "default" },

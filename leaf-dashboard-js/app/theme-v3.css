@@ -340,3 +340,25 @@ input[type="checkbox"], input[type="radio"] {
   background: var(--text); color: #fff; border-radius: 10px; font-size: 12px; box-shadow: var(--shadow-pop);
 }
 .trend-tooltip strong { font-size: 12.5px; }
+
+/* ---------- Listas de números (KeyValueGrid) ----------
+   Linhas de definição em vez de caixinhas empilhadas dentro do card:
+   rótulo à esquerda, valor à direita, separador fino. A conciliação mantém a sua grade. */
+.metric-list { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); column-gap: 28px; row-gap: 0; }
+.metric-list .row {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
+  border: 0; border-bottom: 1px solid var(--line); border-radius: 0;
+  padding: 10px 0; background: transparent;
+}
+.metric-list .label { font-size: 13px; color: var(--text-soft); }
+.metric-list .value { font-size: 14px; font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+
+/* ---------- Aviso de modo somente leitura ----------
+   Bloqueio de perfil não é erro: aviso neutro, com o ponto âmbar do status. */
+.notice-banner {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--surface); border: 1px solid var(--line); color: var(--text-soft);
+  border-radius: var(--radius-lg); padding: 10px 14px; font-size: 13px; box-shadow: var(--shadow-card);
+}
+.notice-banner::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--dot-warn); flex: none; }
+.notice-banner p { margin: 0; }

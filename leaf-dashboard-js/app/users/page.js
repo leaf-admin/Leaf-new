@@ -94,7 +94,7 @@ export default function UsersPage() {
     <ProtectedRoute>
       <main className="page-shell">
         <header className="header">
-          <h1>Usuarios</h1>
+          <h1>Usuários</h1>
           <div className="filters">
             <input
               placeholder="buscar..."

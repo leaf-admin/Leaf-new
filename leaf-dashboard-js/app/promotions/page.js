@@ -366,7 +366,7 @@ export default function PromotionsPage() {
                     <th>Inicio</th>
                     <th>Fim</th>
                     <th>Resgates</th>
-                    <th>Acoes</th>
+                    <th>Ações</th>
                   </tr>
                 </thead>
                 <tbody>

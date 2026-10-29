@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import ProtectedRoute from "@/src/components/ProtectedRoute";
 import AppNav from "@/src/components/AppNav";
 import Panel from "@/src/components/ui/Panel";
-import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
+import { ErrorText, LoadingState, NoticeText } from "@/src/components/ui/PageFeedback";
 import { KeyValueGrid, TechnicalDetails } from "@/src/components/ui/DataViews";
 import { useAuth } from "@/src/contexts/AuthContext";
 import { leafAPI } from "@/src/services/api";
@@ -605,7 +605,7 @@ export default function CampaignCenterPage() {
         <AppNav />
         {loading ? <LoadingState message="Carregando campanhas in-app..." /> : null}
         {roleMessage || featureMessage || mutationMessage ? (
-          <ErrorText message={actionBlockedMessage} />
+          <NoticeText message={actionBlockedMessage} />
         ) : null}
         {notice ? <p className="success-text">{notice}</p> : null}
 
@@ -1181,7 +1181,7 @@ export default function CampaignCenterPage() {
                     <th>Surface</th>
                     <th>Janela</th>
                     <th>Metricas</th>
-                    <th>Acoes</th>
+                    <th>Ações</th>
                   </tr>
                 </thead>
                 <tbody>

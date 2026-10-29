@@ -5,7 +5,7 @@ import ProtectedRoute from "@/src/components/ProtectedRoute";
 import AppNav from "@/src/components/AppNav";
 import Panel from "@/src/components/ui/Panel";
 import KpiCard from "@/src/components/ui/KpiCard";
-import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
+import { ErrorText, LoadingState, NoticeText } from "@/src/components/ui/PageFeedback";
 import { leafAPI } from "@/src/services/api";
 import { KeyValueGrid, TechnicalDetails } from "@/src/components/ui/DataViews";
 import { useAuth } from "@/src/contexts/AuthContext";
@@ -316,7 +316,7 @@ export default function ProgramsPage() {
         <AppNav />
         {loading ? <LoadingState message="Carregando programas de convite..." /> : null}
         {roleMessage || featureMessage || mutationMessage ? (
-          <ErrorText message={roleMessage || featureMessage || mutationMessage} />
+          <NoticeText message={roleMessage || featureMessage || mutationMessage} />
         ) : null}
         {notice ? <p className="success-text">{notice}</p> : null}
 

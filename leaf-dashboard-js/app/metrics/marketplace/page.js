@@ -188,7 +188,7 @@ export default function MarketplaceMetricsPage() {
       <main className="page-shell">
         <header className="header">
           <div>
-            <h1>Marketplace Health</h1>
+            <h1>Saúde do marketplace</h1>
             <p className="kpi-subtitle">Aba dedicada com foco em liquidez, eficiência e crescimento</p>
           </div>
           <div className="filters">
