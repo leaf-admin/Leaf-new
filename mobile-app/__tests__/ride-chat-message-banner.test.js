@@ -59,6 +59,12 @@ describe('shouldAcceptIncomingChatMessage', () => {
     expect(shouldAcceptIncomingChatMessage(state, 'ride_9')).toBe(false);
   });
 
+  it('accepts the active ride message when a chat from an earlier ride is still saved', () => {
+    const state = { activeChatId: 'ride_old', activeChatBookingId: 'ride_old', driverActiveRide: { bookingId: 'ride_new' } };
+    expect(shouldAcceptIncomingChatMessage(state, 'ride_new')).toBe(true);
+    expect(shouldAcceptIncomingChatMessage(state, 'ride_other')).toBe(false);
+  });
+
   it('accepts the active ride message when no chat is open', () => {
     expect(shouldAcceptIncomingChatMessage({ driverActiveRide: { bookingId: 'ride_1' } }, 'ride_1')).toBe(true);
     expect(shouldAcceptIncomingChatMessage({ activeBookingId: 'ride_1' }, 'ride_1')).toBe(true);
