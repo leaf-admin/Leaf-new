@@ -50,6 +50,7 @@ import {
   summarizeOpenWithdrawals,
 } from './driverWithdrawalStatus';
 import kycService from '../services/KYCService';
+import UserAuthService from '../services/UserAuthService';
 import { usePrototypeMapOcclusion } from './prototype/prototypeMapOcclusion';
 import { usePrototypeRideRuntime } from './prototype/prototypeRideRuntime';
 import {
@@ -392,6 +393,10 @@ export default function EarningsReportScreen({ navigation, route }) {
   const [withdrawPassword, setWithdrawPassword] = useState('');
   const [withdrawError, setWithdrawError] = useState('');
   const [withdrawRequestId, setWithdrawRequestId] = useState(null);
+  // The withdrawal needs the app password, which signup never asks for. 'missing'
+  // replaces the password field with a shortcut to create it, then comes back here.
+  const [appPasswordStatus, setAppPasswordStatus] = useState('unknown');
+  const [resumeWithdrawAfterPassword, setResumeWithdrawAfterPassword] = useState(false);
   const [isProcessingWithdraw, setIsProcessingWithdraw] = useState(false);
   const [withdrawProcessingSummary, setWithdrawProcessingSummary] = useState(null);
   const [recentWithdrawals, setRecentWithdrawals] = useState([]);
@@ -669,6 +674,33 @@ export default function EarningsReportScreen({ navigation, route }) {
     }
   }
 
+  async function refreshAppPasswordStatus() {
+    const status = await UserAuthService.getPasswordStatus();
+    // A failed check keeps the field: the server still refuses a withdrawal without a password.
+    setAppPasswordStatus(status ? (status.hasPassword ? 'ready' : 'missing') : 'unknown');
+  }
+
+  function openWithdrawFlow() {
+    setWithdrawModalVisible(true);
+    refreshAppPasswordStatus();
+  }
+
+  function goCreateAppPassword() {
+    // The withdrawal is a native Modal, which would cover the password screen.
+    setWithdrawModalVisible(false);
+    setWithdrawError('');
+    setResumeWithdrawAfterPassword(true);
+    navigation?.navigate?.('LeafAccountPassword', { purpose: 'withdrawal' });
+  }
+
+  useEffect(() => {
+    if (!resumeWithdrawAfterPassword || typeof navigation?.addListener !== 'function') return undefined;
+    return navigation.addListener('focus', () => {
+      setResumeWithdrawAfterPassword(false);
+      openWithdrawFlow();
+    });
+  }, [navigation, resumeWithdrawAfterPassword]);
+
   function finalizeWithdrawalSuccess(result, amount, fee, totalDebit) {
     const settlementToShow = toNumber(result.subscriptionSettlementInReais, 0);
     const totalToShow = toNumber(result.totalDebitInReais, totalDebit);
@@ -854,6 +886,12 @@ export default function EarningsReportScreen({ navigation, route }) {
           return;
         }
 
+        if (result.code === 'WITHDRAWAL_PASSWORD_NOT_CONFIGURED') {
+          setAppPasswordStatus('missing');
+          setWithdrawError('');
+          return;
+        }
+
         setWithdrawError(result.error || 'Falha ao solicitar saque');
         return;
       }
@@ -1007,7 +1045,8 @@ export default function EarningsReportScreen({ navigation, route }) {
     });
   }, [barSeries, chartInnerHeight, chartInnerWidth]);
 
-  const withdrawDisabled = !withdrawValue || !pixKey || !withdrawPassword || !!withdrawError || isProcessingWithdraw;
+  const withdrawDisabled = !withdrawValue || !pixKey || !withdrawPassword || !!withdrawError || isProcessingWithdraw
+    || appPasswordStatus === 'missing';
   const currentWithdrawAmount = toNumber(String(withdrawValue).replace(',', '.'), 0);
   const currentWithdrawBreakdown = getWithdrawCostBreakdown(currentWithdrawAmount);
   const screenBackground = isDarkMode ? '#0C131F' : '#E7EAEA';
@@ -1279,7 +1318,7 @@ export default function EarningsReportScreen({ navigation, route }) {
                   <TouchableOpacity
                     style={styles.withdrawPillButton}
                     activeOpacity={0.86}
-                    onPress={() => setWithdrawModalVisible(true)}
+                    onPress={openWithdrawFlow}
                     testID="driver-earnings-withdraw-button"
                     accessibilityRole="button"
                     accessibilityLabel="Realizar saque"
@@ -1626,6 +1665,27 @@ export default function EarningsReportScreen({ navigation, route }) {
 
             <View style={styles.cleanHairline} />
 
+            {appPasswordStatus === 'missing' ? (
+              <View style={styles.withdrawPasswordSetup} testID="driver-earnings-withdraw-password-setup">
+                <Ionicons name="lock-closed-outline" size={20} color="#1A330E" />
+                <View style={styles.withdrawFeeNoteCopy}>
+                  <Text style={styles.withdrawFeeNoteTitle}>Crie sua senha do app</Text>
+                  <Text style={styles.withdrawFeeNoteText}>
+                    O saque é confirmado com a senha do app, e você ainda não criou uma. Leva um minuto e depois você volta para cá.
+                  </Text>
+                  <TouchableOpacity
+                    style={styles.withdrawPasswordSetupButton}
+                    activeOpacity={0.86}
+                    onPress={goCreateAppPassword}
+                    testID="driver-earnings-withdraw-create-password"
+                    accessibilityRole="button"
+                    accessibilityLabel="Criar senha do app"
+                  >
+                    <Text style={styles.withdrawPasswordSetupButtonText}>Criar senha</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : (
             <View style={styles.withdrawField}>
               <View style={styles.withdrawFieldHeader}>
                 <Text style={styles.withdrawFieldLabel}>Senha do app</Text>
@@ -1646,6 +1706,7 @@ export default function EarningsReportScreen({ navigation, route }) {
                 accessibilityHint="Obrigatória para confirmar o saque."
               />
             </View>
+            )}
 
             <View style={styles.cleanHairline} />
 
@@ -2276,6 +2337,32 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 10,
+  },
+  withdrawPasswordSetup: {
+    marginTop: 8,
+    borderRadius: 16,
+    backgroundColor: '#F1F5EE',
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  withdrawPasswordSetupButton: {
+    alignSelf: 'flex-start',
+    marginTop: 12,
+    height: 40,
+    paddingHorizontal: 18,
+    borderRadius: 12,
+    backgroundColor: '#252525',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  withdrawPasswordSetupButtonText: {
+    color: '#FFFFFF',
+    ...leafTypography.semiBold,
+    fontSize: 14,
+    lineHeight: 20,
   },
   withdrawFeeNoteWarning: {
     backgroundColor: '#F5F1E6',
