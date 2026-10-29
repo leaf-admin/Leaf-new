@@ -2196,7 +2196,7 @@ const styles = StyleSheet.create({
   // Floating offer card: inset from every edge so the map stays visible around it.
   offerLifecycleCard: {
     marginHorizontal: 12,
-    borderRadius: 24,
+    borderRadius: 28,
     paddingHorizontal: 20,
     paddingTop: 18,
     backgroundColor: color.bg.panelSolid,
@@ -3272,7 +3272,7 @@ const styles = StyleSheet.create({
   cancelPromptCard: {
     width: "100%",
     maxWidth: 360,
-    borderRadius: 26,
+    borderRadius: 28,
     backgroundColor: "#FFFFFF",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.76)",

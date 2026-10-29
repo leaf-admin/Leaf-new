@@ -1733,7 +1733,7 @@ const styles = StyleSheet.create({
   summaryCard: {
     width: "100%",
     maxWidth: 430,
-    borderRadius: 24,
+    borderRadius: 28,
     borderWidth: 1,
     borderColor: "rgba(207,216,205,0.92)",
     backgroundColor: DRIVER_HOME_COLOR.sheet,

@@ -10899,7 +10899,7 @@ const styles = StyleSheet.create({
   },
   driverHomeSkeletonCard: {
     minHeight: DRIVER_BOTTOM_CTA_FALLBACK_HEIGHT,
-    borderRadius: 32,
+    borderRadius: 28,
     paddingHorizontal: 28,
     paddingTop: 21,
     paddingBottom: 18,
@@ -11035,7 +11035,7 @@ const styles = StyleSheet.create({
   driverHomeSkeletonPromoCard: {
     height: 188,
     marginTop: 12,
-    borderRadius: 32,
+    borderRadius: 28,
     borderWidth: 1,
     borderColor: '#E5E5E5',
     backgroundColor: 'rgba(255,255,255,0.96)',
