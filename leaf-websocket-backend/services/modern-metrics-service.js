@@ -131,6 +131,12 @@ function inWindow(value, start, end) {
   return ts >= start.getTime() && ts <= end.getTime();
 }
 
+function toSaoPauloDateKey(date) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit'
+  }).format(date);
+}
+
 function getRideRevenue(ride) {
   return resolveRideRevenue(ride);
 }
@@ -251,6 +257,45 @@ class ModernMetricsService {
       .where('createdAt', '<=', end));
 
     return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+  }
+
+  // Last `days` calendar days (São Paulo), one row per day, oldest first:
+  // requests, completed, cancelled and GMV of completed rides. One bounded read.
+  async getRidesDailySeries({ days = 14, now = new Date() } = {}) {
+    const span = Math.min(31, Math.max(1, Number.parseInt(days, 10) || 14));
+    const keys = [];
+    for (let offset = span - 1; offset >= 0; offset -= 1) {
+      keys.push(toSaoPauloDateKey(new Date(now.getTime() - offset * 24 * 60 * 60 * 1000)));
+    }
+    const start = new Date(`${keys[0]}T00:00:00-03:00`);
+    const end = new Date(`${keys[keys.length - 1]}T23:59:59.999-03:00`);
+    const firestore = getFirestore();
+    if (!firestore) throw readBudget.unavailable();
+    const snapshot = await readBudget.firestoreSnapshot(firestore
+      .collection('rides')
+      .where('createdAt', '>=', start)
+      .where('createdAt', '<=', end));
+
+    const rows = new Map(keys.map((date) => [date, { date, requests: 0, completed: 0, cancelled: 0, gmv: 0 }]));
+    snapshot.docs.forEach((doc) => {
+      const ride = doc.data() || {};
+      const createdAt = pickFirstTimestamp(ride.createdAt, ride.tripdate, ride.timestamp);
+      const row = Number.isFinite(createdAt) ? rows.get(toSaoPauloDateKey(new Date(createdAt))) : null;
+      if (!row) return;
+      row.requests += 1;
+      if (COMPLETED_STATUSES.has(ride.status)) {
+        row.completed += 1;
+        row.gmv += getRideRevenue(ride);
+      } else if (CANCELLED_STATUSES.has(ride.status)) {
+        row.cancelled += 1;
+      }
+    });
+    return {
+      days: [...rows.values()].map((row) => ({ ...row, gmv: roundMoney(row.gmv) })),
+      startDate: start.toISOString(),
+      endDate: end.toISOString(),
+      timeZone: 'America/Sao_Paulo'
+    };
   }
 
   async getRidesDailyStats() {

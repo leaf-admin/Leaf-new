@@ -250,7 +250,9 @@ function resolveRidePreferenceItems(source = {}) {
     soundLabel
       ? {
           key: "sound",
-          icon: "volume-low-outline",
+          icon: preferences.comfort?.sound?.value === "music"
+            ? "musical-notes-outline"
+            : "volume-mute-outline",
           label: soundLabel,
         }
       : null,
@@ -1167,6 +1169,23 @@ function DriverLiveRideOverlay({
             />
           ))}
         </View>
+        {/* Passenger comfort, set before the request: shown on the way to pickup. */}
+        {!isOperationalInterrupted &&
+        (normalizedActiveStatus === "accepted" || normalizedActiveStatus === "arrived") &&
+        ridePreferenceItems.length > 0 ? (
+          <View
+            style={styles.tripPreferenceRow}
+            testID="driver-live-trip-preferences"
+            accessibilityLabel={`Preferências do passageiro: ${ridePreferenceItems.map((item) => item.label).join(", ")}`}
+          >
+            {ridePreferenceItems.map((item) => (
+              <View key={item.key} style={styles.tripPreferenceChip}>
+                <Ionicons name={item.icon} size={14} color="#1A330E" />
+                <Text style={styles.tripPreferenceChipText} numberOfLines={1}>{item.label}</Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
         {boardingWaitHint ? (
           <Text style={styles.boardingWaitHint} testID="driver-live-boarding-wait-hint">
             {boardingWaitHint}
@@ -2108,6 +2127,27 @@ function DriverLiveRideOverlay({
 export default memo(DriverLiveRideOverlay);
 
 const styles = StyleSheet.create({
+  tripPreferenceRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 10,
+  },
+  tripPreferenceChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    height: 30,
+    paddingHorizontal: 12,
+    borderRadius: 15,
+    backgroundColor: "#F1F5EE",
+  },
+  tripPreferenceChipText: {
+    ...leafTypography.medium,
+    fontSize: 13,
+    lineHeight: 18,
+    color: "#1A330E",
+  },
   lifecycleHandleArea: { height: 30, alignItems: 'center', justifyContent: 'flex-start' },
   lifecycleHandle: { width: 32, height: 3, borderRadius: 2, backgroundColor: '#E5E5E5' },
   lifecycleJourneyRoute: { marginTop: 16 },

@@ -1562,11 +1562,13 @@ describe('prototype ride screens', () => {
     );
 
     expect(screen.getByTestId('cancellation-financial-summary')).toBeTruthy();
+    expect(screen.getByTestId('cancellation-terminal-header')).toBeTruthy();
+    expect(screen.getByTestId('cancellation-refund-highlight')).toBeTruthy();
+    expect(screen.getByText('Reembolso integral')).toBeTruthy();
     expect(screen.getByText('Pix pago')).toBeTruthy();
-    expect(screen.getByText('Reembolso')).toBeTruthy();
     expect(screen.getByText('Taxa de cancelamento')).toBeTruthy();
     expect(screen.getAllByText('R$ 13,42')).toHaveLength(2);
-    expect(screen.getByText('R$ 0,00')).toBeTruthy();
+    expect(screen.getByText('Sem taxa')).toBeTruthy();
     expect(screen.getByLabelText('Voltar ao mapa')).toBeTruthy();
   });
 

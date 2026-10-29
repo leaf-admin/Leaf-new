@@ -66,6 +66,17 @@ const PASSENGER_ITEMS = [
     subtitle: 'Pix antes do embarque',
   },
   {
+    key: 'ride-preferences',
+    status: CURRENT_SURFACE_STATUS.CURRENT,
+    title: 'Preferências de viagem',
+    icon: 'thermometer-outline',
+    route: 'LeafRidePreferences',
+    openDirect: true,
+    roles: ['customer'],
+    section: 'rides',
+    subtitle: 'Temperatura do ar e som'
+  },
+  {
     key: 'saved-places',
     status: CURRENT_SURFACE_STATUS.CURRENT,
     title: 'Endereços salvos',

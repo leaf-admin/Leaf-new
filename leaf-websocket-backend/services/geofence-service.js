@@ -616,6 +616,40 @@ class GeofenceService {
     }
 
     /**
+     * Onde o motorista está em relação à área de operação, para avisá-lo ao
+     * ficar online. Só informa: quem bloqueia corridas fora da área é o pedido
+     * do passageiro (validateRideLocations). null quando não há região aplicada.
+     */
+    describeDriverServiceArea(lat, lng) {
+        const latitude = Number(lat);
+        const longitude = Number(lng);
+        if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+        if (!this.getOperationalStatus().available) return null;
+        return {
+            inside: this.isPointInPolygon(latitude, longitude),
+            regionName: this.regionMetadata?.name || null
+        };
+    }
+
+    /**
+     * Se um bairro que o motorista quer evitar pode ter corridas: embarque só
+     * dentro da região, destino dentro da área de destino (ou da região, no
+     * piloto). Avalia o contorno e o centro. null quando não há região aplicada.
+     */
+    describeAreaServiceability(points = []) {
+        if (!this.getOperationalStatus().available) return null;
+        const valid = (Array.isArray(points) ? points : [])
+            .map((point) => ({ lat: Number(point?.lat ?? point?.latitude), lng: Number(point?.lng ?? point?.longitude) }))
+            .filter((point) => Number.isFinite(point.lat) && Number.isFinite(point.lng));
+        if (!valid.length) return null;
+        const pickupPossible = valid.some((point) => this.isPointInPolygon(point.lat, point.lng));
+        const destinationPossible = isDestinationRegionRequired()
+            ? pickupPossible
+            : valid.some((point) => this.isPointInDestinationBounds(point.lat, point.lng));
+        return { pickupPossible, destinationPossible };
+    }
+
+    /**
      * Verificar se geofence está ativo
      * @returns {boolean} true se geofence está ativo
      */

@@ -61,11 +61,16 @@ jest.mock('../../../services/driver-eligibility-service', () => ({
   }),
 }));
 
+jest.mock('../../../services/geofence-service', () => ({
+  describeDriverServiceArea: jest.fn(() => ({ inside: true, regionName: 'Rio' })),
+}));
+
 jest.mock('../../../services/driver-online-projection-service', () => ({
   commitDriverOnlineProjection: jest.fn().mockResolvedValue({ success: true }),
 }));
 
 const registerSocketDriverControlHandlers = require('../../../bootstrap/register-socket-driver-control-handlers');
+const geofenceService = require('../../../services/geofence-service');
 const { assessDriverArrivalAtPickup } = require('../../../utils/pickup-arrival-policy');
 const { resolveDriverActivationState } = require('../../../services/driver-activation-state-service');
 const driverEligibilityService = require('../../../services/driver-eligibility-service');
@@ -300,6 +305,25 @@ describe('register-socket-driver-control-handlers notificationAction scope', () 
         bookingId: 'booking_1',
         cached: true,
       })
+    );
+  });
+
+  it('tells the driver going online whether they are inside the operation area', async () => {
+    resolveDriverActivationState.mockResolvedValue({ canAttemptOnline: true, canGoOnline: true });
+    redis.hgetall.mockResolvedValueOnce({
+      driverId: 'driver_1',
+      dispatchEligible: 'true',
+      lat: '-22.70',
+      lng: '-43.20',
+    });
+    geofenceService.describeDriverServiceArea.mockReturnValueOnce({ inside: false, regionName: 'Rio' });
+
+    await socket.trigger('setDriverStatus', { status: 'online', isOnline: true });
+
+    expect(geofenceService.describeDriverServiceArea).toHaveBeenCalledWith(-22.7, -43.2);
+    expect(socket.emit).toHaveBeenCalledWith(
+      'driverStatusUpdated',
+      expect.objectContaining({ success: true, serviceArea: { inside: false, regionName: 'Rio' } })
     );
   });
 

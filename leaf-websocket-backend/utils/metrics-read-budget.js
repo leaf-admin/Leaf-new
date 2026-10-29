@@ -1,11 +1,43 @@
 'use strict';
+const MAX_ACTIVE_READS = 2;
+// The overview page loads several cards at once: a few may wait briefly for a
+// slot instead of failing. The queue stays bounded in size and in time.
+const MAX_WAITING_READS = 6;
+const MAX_WAIT_MS = 8000;
 let activeReads = 0;
+const waiting = [];
+
+function waitForSlot() {
+  if (waiting.length >= MAX_WAITING_READS) {
+    return Promise.reject(unavailable('Consultas administrativas temporariamente ocupadas'));
+  }
+  return new Promise((resolve, reject) => {
+    const entry = { resolve, timer: null };
+    entry.timer = setTimeout(() => {
+      const index = waiting.indexOf(entry);
+      if (index >= 0) waiting.splice(index, 1);
+      reject(unavailable('Consultas administrativas temporariamente ocupadas'));
+    }, MAX_WAIT_MS);
+    waiting.push(entry);
+  });
+}
+
+function releaseSlot() {
+  const next = waiting.shift();
+  if (next) {
+    // The slot passes straight to the next read: activeReads stays the same.
+    clearTimeout(next.timer);
+    next.resolve();
+    return;
+  }
+  activeReads--;
+}
 
 async function admit(read) {
-  if (activeReads >= 2) throw unavailable('Consultas administrativas temporariamente ocupadas');
-  activeReads++;
+  if (activeReads >= MAX_ACTIVE_READS) await waitForSlot();
+  else activeReads++;
   try { return await read(); }
-  finally { activeReads--; }
+  finally { releaseSlot(); }
 }
 
 function unavailable(message = 'Métricas temporariamente indisponíveis') {

@@ -65,6 +65,27 @@ describe('active ride sync utils', () => {
     });
   });
 
+  it('shares only the passenger comfort from the booking preferences', async () => {
+    const redis = {
+      get: jest.fn().mockResolvedValue('booking_1'),
+      hgetall: jest.fn().mockResolvedValue({
+        status: 'ACCEPTED',
+        customerId: 'passenger_1',
+        driverId: 'driver_1',
+        preferences: JSON.stringify({
+          femaleDriverOnly: true,
+          comfort: { temperature: { value: 'cool', label: 'Ar mais fresco' }, sound: 'any' },
+        }),
+      }),
+    };
+
+    const snapshot = await buildActiveRideSnapshotForUser(redis, 'passenger_1', 'customer');
+
+    expect(snapshot.preferences).toEqual({
+      comfort: { temperature: { value: 'cool', label: 'Ar mais fresco' } },
+    });
+  });
+
   it('clears a passenger active index that still points to a completed booking', async () => {
     const redis = {
       get: jest.fn(async (key) => {

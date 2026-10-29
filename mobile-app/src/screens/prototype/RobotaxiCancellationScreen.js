@@ -11,6 +11,7 @@ import {
   RobotaxiLifecycleButton,
   RobotaxiLifecycleCard,
   RobotaxiLifecycleDisclosure,
+  compact,
   robotaxiLifecycleMetrics,
 } from '../../components/prototype/RobotaxiLifecycleUI';
 import robotaxiPrototypeTokens from '../../components/design-system/robotaxiPrototypeTokens';
@@ -267,38 +268,58 @@ export default function RobotaxiCancellationScreen({ navigation, route }) {
         <PrototypeDismissibleSheet onClose={handleDismiss} sheetStyle={[styles.sheetWrap, { bottom: sheetBottom }]}>
           <RobotaxiLifecycleCard onLayout={handleCardLayout} style={[styles.card, { paddingBottom: robotaxiLifecycleMetrics.cardPaddingBottom }]}>
 
-            <RobotaxiLifecycleSummary
-              title={isTerminalCancellation ? terminalCancellationTitle : 'Cancelar corrida'}
-              subtitle={isTerminalCancellation
-                ? terminalSubtitle
-                : isPassengerCancellation
+            {isTerminalCancellation ? (
+              // Closing card: a status mark, then the money the passenger cares about.
+              <View style={styles.terminalHeader} testID="cancellation-terminal-header">
+                <View style={[styles.statusBadge, cancellationContext.bookingStatus === 'completed' && styles.statusBadgeNeutral]}>
+                  <Ionicons
+                    name={cancellationContext.bookingStatus === 'completed' ? 'flag-outline' : 'close'}
+                    size={20}
+                    color={cancellationContext.bookingStatus === 'completed' ? color.accent.primary : color.feedback.danger}
+                  />
+                </View>
+                <View style={styles.terminalHeaderCopy}>
+                  <Text style={styles.terminalTitle} testID="cancellation-terminal-title">{terminalCancellationTitle}</Text>
+                  <Text style={styles.terminalSubtitle}>{terminalSubtitle}</Text>
+                </View>
+              </View>
+            ) : (
+              <RobotaxiLifecycleSummary
+                title="Cancelar corrida"
+                subtitle={isPassengerCancellation
                   ? 'Ao cancelar agora, encerramos esta solicitação e você volta para o mapa.'
                   : 'Confirme o cancelamento para voltar ao estado inicial.'}
-              object="activity"
-            />
+                object="activity"
+              />
+            )}
 
             {isTerminalCancellation && hasFinancialOutcome ? (
               <View style={styles.financialSummary} testID="cancellation-financial-summary">
-                {originalPaidAmount !== null && originalPaidAmount > 0 ? (
-                  <View style={styles.financialRow}>
-                    <Text style={styles.financialLabel}>Pix pago</Text>
-                    <Text style={styles.financialValue}>{formatCurrencyBRL(originalPaidAmount)}</Text>
-                  </View>
-                ) : null}
                 {refundAmount !== null && refundAmount > 0 ? (
-                  <View style={styles.financialRow}>
-                    <Text style={styles.financialLabel}>Reembolso</Text>
-                    <Text style={styles.financialValue}>{formatCurrencyBRL(refundAmount)}</Text>
+                  <View style={styles.refundHighlight} testID="cancellation-refund-highlight">
+                    <Text style={styles.refundLabel}>{isIntegralRefund ? 'Reembolso integral' : 'Reembolso'}</Text>
+                    <Text style={styles.refundValue}>{formatCurrencyBRL(refundAmount)}</Text>
+                    <Text style={styles.refundCaption}>Volta para o mesmo Pix do pagamento.</Text>
                   </View>
                 ) : null}
-                {cancellationFee !== null ? (
-                  <View style={[styles.financialRow, styles.financialRowLast]}>
-                    <Text style={styles.financialLabel}>Taxa de cancelamento</Text>
-                    <Text style={styles.financialValue}>{formatCurrencyBRL(cancellationFee)}</Text>
-                  </View>
-                ) : null}
+                <View style={styles.financialDetails}>
+                  {originalPaidAmount !== null && originalPaidAmount > 0 ? (
+                    <View style={styles.financialRow}>
+                      <Text style={styles.financialLabel}>Pix pago</Text>
+                      <Text style={styles.financialValue}>{formatCurrencyBRL(originalPaidAmount)}</Text>
+                    </View>
+                  ) : null}
+                  {cancellationFee !== null ? (
+                    <View style={styles.financialRow}>
+                      <Text style={styles.financialLabel}>Taxa de cancelamento</Text>
+                      <Text style={[styles.financialValue, cancellationFee > 0 && styles.financialValueFee]}>
+                        {cancellationFee > 0 ? formatCurrencyBRL(cancellationFee) : 'Sem taxa'}
+                      </Text>
+                    </View>
+                  ) : null}
+                </View>
               </View>
-            ) : (
+            ) : isTerminalCancellation ? null : (
               <View style={styles.warningBox}>
                 <Text style={styles.warningText}>
                   {isPassengerCancellation && hasDriverOnTheWay
@@ -411,30 +432,84 @@ const styles = StyleSheet.create({
     lineHeight: typography.micro.lineHeight,
     textAlign: 'left'
   },
+  terminalHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 14,
+  },
+  statusBadge: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: color.feedback.dangerSoft,
+  },
+  statusBadgeNeutral: {
+    backgroundColor: color.surface.activeSoft,
+  },
+  terminalHeaderCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  // Same title scale as RobotaxiLifecycleSummary, so every card reads alike.
+  terminalTitle: {
+    color: color.text.primary,
+    ...leafTypography.semiBold,
+    fontSize: compact(24, 20),
+    lineHeight: compact(29, 25),
+  },
+  terminalSubtitle: {
+    marginTop: 4,
+    color: color.text.secondary,
+    ...leafTypography.regular,
+    fontSize: 14,
+    lineHeight: 20,
+  },
   financialSummary: {
-    marginTop: 10,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#E5E5E5',
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 0,
+    marginTop: 16,
+  },
+  refundHighlight: {
+    borderRadius: 16,
+    backgroundColor: color.surface.activeSoft,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  refundLabel: {
+    color: color.accent.primary,
+    ...leafTypography.medium,
+    fontSize: typography.caption.size,
+    lineHeight: typography.caption.lineHeight,
+  },
+  refundValue: {
+    marginTop: 2,
+    color: color.accent.primary,
+    ...leafTypography.semiBold,
+    fontSize: typography.display.size,
+    lineHeight: typography.display.lineHeight,
+  },
+  refundCaption: {
+    marginTop: 2,
+    color: color.text.secondary,
+    ...leafTypography.regular,
+    fontSize: typography.micro.size,
+    lineHeight: typography.micro.lineHeight,
+  },
+  financialDetails: {
+    marginTop: 6,
   },
   financialRow: {
-    minHeight: 54,
+    minHeight: 40,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: color.border.subtle,
-  },
-  financialRowLast: {
-    borderBottomWidth: 0,
   },
   financialLabel: {
     flex: 1,
     color: color.text.secondary,
     ...leafTypography.regular,
-    fontSize: 14,
-    lineHeight: 20,
+    fontSize: typography.caption.size,
+    lineHeight: typography.caption.lineHeight,
   },
   financialValue: {
     marginLeft: 12,
@@ -442,6 +517,9 @@ const styles = StyleSheet.create({
     ...leafTypography.medium,
     fontSize: typography.caption.size,
     lineHeight: typography.caption.lineHeight,
+  },
+  financialValueFee: {
+    color: color.feedback.warning,
   },
   cancelButton: {
     marginTop: 8,
