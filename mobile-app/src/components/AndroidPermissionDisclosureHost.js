@@ -6,9 +6,9 @@ import {
   StatusBar,
   StyleSheet,
   Text,
-  TouchableOpacity,
   View,
 } from 'react-native';
+import LeafTouchable from './design-system/LeafTouchable';
 import {
   SafeAreaInsetsContext,
   initialWindowMetrics,
@@ -145,22 +145,22 @@ export default function AndroidPermissionDisclosureHost() {
           </ScrollView>
 
           <View style={styles.actions}>
-            <TouchableOpacity
+            <LeafTouchable
               testID="android-permission-disclosure-cancel"
               style={styles.secondaryButton}
               onPress={() => finish(false)}
               activeOpacity={0.75}
             >
               <Text style={styles.secondaryButtonText}>{cancelText}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
+            </LeafTouchable>
+            <LeafTouchable
               testID="android-permission-disclosure-accept"
               style={styles.primaryButton}
               onPress={() => finish(true)}
               activeOpacity={0.82}
             >
               <Text style={styles.primaryButtonText}>{confirmText}</Text>
-            </TouchableOpacity>
+            </LeafTouchable>
           </View>
         </View>
       </View>

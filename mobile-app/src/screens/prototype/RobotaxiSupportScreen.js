@@ -1,6 +1,7 @@
 import leafTypography from '../../components/prototype/LeafTypography';
 import React, { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Linking, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, Alert, Linking, ScrollView, StatusBar, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import LeafTouchable from '../../components/design-system/LeafTouchable';
 import { AppConfig } from '../../../config/AppConfig';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -130,7 +131,7 @@ function resolveSupportReturnRoute(context = {}) {
 
 function SupportOptionRow({ item, active, onPress, rowTestID, last = false }) {
   return (
-    <TouchableOpacity
+    <LeafTouchable
       style={[styles.optionRow, active && styles.optionRowActive, last && styles.optionRowLast]}
       activeOpacity={0.78}
       onPress={onPress}
@@ -149,7 +150,7 @@ function SupportOptionRow({ item, active, onPress, rowTestID, last = false }) {
       </View>
       {/* Radio, not a chevron: tapping selects the subject for "Abrir ticket"; it does not navigate. */}
       <Ionicons name={active ? 'radio-button-on' : 'radio-button-off'} size={20} color={active ? '#1A330E' : color.text.muted} />
-    </TouchableOpacity>
+    </LeafTouchable>
   );
 }
 

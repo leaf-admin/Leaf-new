@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import LeafTouchable from '../../components/design-system/LeafTouchable';
 import { CommonActions } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -65,20 +66,20 @@ export default function LeafSavedPlacePickerScreen({ navigation, route }) {
 
   return <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={[styles.page, { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 20 }]} testID="leaf-saved-place-picker-screen">
     <View style={styles.header}>
-      <TouchableOpacity style={styles.back} accessibilityRole="button" accessibilityLabel="Voltar" onPress={() => navigation.goBack()}><Ionicons name="arrow-back" size={22} color="#222222" /></TouchableOpacity>
+      <LeafTouchable style={styles.back} accessibilityRole="button" accessibilityLabel="Voltar" onPress={() => navigation.goBack()}><Ionicons name="arrow-back" size={22} color="#222222" /></LeafTouchable>
       <Text style={styles.title}>Buscar endereço</Text>
     </View>
     <View style={styles.search}>
       <Ionicons name="search-outline" size={21} color="#222222" />
       <TextInput style={styles.input} value={query} onChangeText={setQuery} autoFocus placeholder="Rua, local ou endereço" accessibilityLabel="Buscar endereço" testID="leaf-place-search-input" autoCorrect={false} editable={validOwner && !resolving} maxLength={180} />
     </View>
-    {visible.error ? <View accessibilityRole="alert"><Text style={styles.error}>{visible.error}</Text>{validOwner ? <TouchableOpacity onPress={() => setRetry(value => value + 1)} style={styles.retry} accessibilityRole="button"><Text style={styles.name}>Tentar novamente</Text></TouchableOpacity> : null}</View> : null}
+    {visible.error ? <View accessibilityRole="alert"><Text style={styles.error}>{visible.error}</Text>{validOwner ? <LeafTouchable onPress={() => setRetry(value => value + 1)} style={styles.retry} accessibilityRole="button"><Text style={styles.name}>Tentar novamente</Text></LeafTouchable> : null}</View> : null}
     {visible.loading || resolving ? <ActivityIndicator style={styles.loading} color="#6A6A6A" accessibilityLabel={resolving ? 'Confirmando endereço' : 'Buscando endereços'} /> : null}
     <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
       {!search && visible.items.length ? <Text style={styles.detail}>Recentes</Text> : null}
-      {visible.items.map((item, index) => <TouchableOpacity key={item.id || index} style={styles.row} onPress={() => select(item)} disabled={resolving || !validOwner} accessibilityRole="button" accessibilityLabel={item.address || item.name} testID={`leaf-place-search-result-${index}`}>
+      {visible.items.map((item, index) => <LeafTouchable key={item.id || index} style={styles.row} onPress={() => select(item)} disabled={resolving || !validOwner} accessibilityRole="button" accessibilityLabel={item.address || item.name} testID={`leaf-place-search-result-${index}`}>
         <LeafObjectIcon name="places" size={22} /><View style={styles.copy}><Text style={styles.name}>{item.name || item.address}</Text>{item.address && item.address !== item.name ? <Text style={styles.detail}>{item.address}</Text> : null}</View><Ionicons name="chevron-forward" size={14} color="#6A6A6A" />
-      </TouchableOpacity>)}
+      </LeafTouchable>)}
       {!visible.loading && !visible.error && !visible.items.length ? <Text style={styles.detail}>{search.length >= 3 ? 'Nenhum endereço encontrado. Tente outro nome.' : 'Digite pelo menos 3 caracteres para buscar.'}</Text> : null}
     </ScrollView>
   </KeyboardAvoidingView>;

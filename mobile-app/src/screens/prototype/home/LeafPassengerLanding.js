@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Easing, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
+import LeafTouchable from '../../../components/design-system/LeafTouchable';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
@@ -79,12 +80,12 @@ export default function LeafPassengerLanding({
     <View pointerEvents="box-none" style={[styles.top, { paddingTop: insets.top + 16 }]}>
       <View style={styles.header}>
         <Text style={styles.title} accessibilityRole="header">Viajar</Text>
-        <TouchableOpacity style={styles.iconButton} onPress={onSettingsPress} accessibilityRole="button" accessibilityLabel="Configurações" testID="leaf-home-preferences">
+        <LeafTouchable style={styles.iconButton} onPress={onSettingsPress} accessibilityRole="button" accessibilityLabel="Configurações" testID="leaf-home-preferences">
           {/* Configurações do app (notificações, idioma, privacidade): engrenagem, não filtros. */}
           <Ionicons name="settings-outline" size={22} color="#222222" />
-        </TouchableOpacity>
+        </LeafTouchable>
       </View>
-      <TouchableOpacity onPress={onDestinationPress} onLongPress={onVoicePress} activeOpacity={0.88}
+      <LeafTouchable onPress={onDestinationPress} onLongPress={onVoicePress} activeOpacity={0.88}
         accessibilityRole="button" accessibilityLabel="Escolher destino da viagem" accessibilityHint="Toque e segure para ditar o destino por voz"
         testID="passenger-home-destination-input" style={styles.searchShadow}>
         <View style={styles.search}>
@@ -94,12 +95,12 @@ export default function LeafPassengerLanding({
           <Text style={styles.searchTitle}>Para onde?</Text>
           <Text style={styles.now}>Agora</Text>
         </View>
-      </TouchableOpacity>
+      </LeafTouchable>
     </View>
 
     <PickupMapLabel anchor={pickupAnchor} moving={mapMoving} label={pickupLabel} onPress={onPickupPress} />
 
-    <TouchableOpacity
+    <LeafTouchable
       onPress={onRecenterPress}
       style={[styles.iconButton, styles.recenter, { bottom: insets.bottom + 96 }]}
       accessibilityRole="button"
@@ -107,7 +108,7 @@ export default function LeafPassengerLanding({
       testID="prototype-top-left-control"
     >
       <Ionicons name="navigate-outline" size={21} color="#222222" />
-    </TouchableOpacity>
+    </LeafTouchable>
   </View>;
 }
 

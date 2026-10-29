@@ -1,6 +1,7 @@
 import leafTypography from './LeafTypography';
 import React from 'react';
-import { StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import LeafTouchable from '../design-system/LeafTouchable';
 import { Feather } from '@expo/vector-icons';
 import Animated, { Easing, FadeInUp, useReducedMotion } from 'react-native-reanimated';
 import { LeafObjectIcon } from './LeafVisualElements';
@@ -132,7 +133,7 @@ export function PrototypeMenuRow({
   expanded,
 }) {
   const isInteractiveRow = Boolean(onPress) || disabled;
-  const RowComponent = isInteractiveRow ? TouchableOpacity : View;
+  const RowComponent = isInteractiveRow ? LeafTouchable : View;
   const iconName = typeof icon === 'string' ? icon : null;
 
   return (
@@ -226,7 +227,7 @@ export function PrototypeMenuGroupRow({
   accessibilityHint,
 }) {
   const danger = tone === 'danger';
-  const Row = onPress ? TouchableOpacity : View;
+  const Row = onPress ? LeafTouchable : View;
   return (
     <Row
       style={styles.groupRow}
@@ -295,7 +296,7 @@ export function PrototypeMenuCloseButton({
   testID,
 }) {
   return (
-    <TouchableOpacity
+    <LeafTouchable
       style={styles.closeButton}
       activeOpacity={0.78}
       onPress={onPress}
@@ -304,7 +305,7 @@ export function PrototypeMenuCloseButton({
       testID={testID}
     >
       <Feather name={CLOSE_BUTTON_GLYPHS[icon] || icon} size={20} color={color.text.primary} />
-    </TouchableOpacity>
+    </LeafTouchable>
   );
 }
 

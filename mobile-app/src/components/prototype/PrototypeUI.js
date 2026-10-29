@@ -6,9 +6,9 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  TouchableOpacity,
   View,
 } from "react-native";
+import LeafTouchable from "../design-system/LeafTouchable";
 import { Ionicons } from "@expo/vector-icons";
 import Animated, { Easing, FadeInUp, useReducedMotion } from "react-native-reanimated";
 import robotaxiPrototypeTokens from "../design-system/robotaxiPrototypeTokens";
@@ -106,7 +106,7 @@ export function DestinationInput({
       )}
 
       {typeof onPressRightIcon === "function" ? (
-        <TouchableOpacity
+        <LeafTouchable
           activeOpacity={0.86}
           onPress={onPressRightIcon}
           disabled={rightIconDisabled}
@@ -115,7 +115,7 @@ export function DestinationInput({
           accessibilityLabel={rightIconAccessibilityLabel}
         >
           {trailingIcon}
-        </TouchableOpacity>
+        </LeafTouchable>
       ) : (
         trailingIcon
       )}
@@ -127,7 +127,7 @@ export function DestinationInput({
   }
 
   return (
-    <TouchableOpacity
+    <LeafTouchable
       onPress={handlePress}
       activeOpacity={0.9}
       accessible
@@ -136,7 +136,7 @@ export function DestinationInput({
       accessibilityLabel={accessibilityLabel}
     >
       {content}
-    </TouchableOpacity>
+    </LeafTouchable>
   );
 }
 
@@ -152,7 +152,7 @@ export function PrototypePrimaryButton({
   accessibilityLabel,
 }) {
   return (
-    <TouchableOpacity
+    <LeafTouchable
       style={[
         styles.primaryButton,
         disabled && styles.primaryButtonDisabled,
@@ -177,7 +177,7 @@ export function PrototypePrimaryButton({
         />
       ) : null}
       <Text style={[styles.primaryButtonText, textStyle]}>{label}</Text>
-    </TouchableOpacity>
+    </LeafTouchable>
   );
 }
 

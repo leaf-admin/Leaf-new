@@ -13,10 +13,10 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  TouchableOpacity,
   View,
   useWindowDimensions,
 } from 'react-native';
+import LeafTouchable from '../components/design-system/LeafTouchable';
 import DatePicker from 'react-native-date-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { LeafObjectIcon } from '../components/prototype/LeafVisualElements';
@@ -1184,7 +1184,7 @@ export default function EarningsReportScreen({ navigation, route }) {
           <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
 
           <View style={styles.cleanHeaderRow}>
-            <TouchableOpacity
+            <LeafTouchable
               style={styles.cleanBackHit}
               activeOpacity={0.76}
               onPress={() => setWithdrawProcessingSummary(null)}
@@ -1193,7 +1193,7 @@ export default function EarningsReportScreen({ navigation, route }) {
               accessibilityLabel="Voltar para ganhos"
             >
               <Ionicons name="arrow-back" size={20} color="#222222" />
-            </TouchableOpacity>
+            </LeafTouchable>
             <Text style={styles.cleanHeaderTitle}>Saque em conferência</Text>
           </View>
           <Text style={styles.cleanHeaderSubtitle}>Conferimos cada saque antes de enviar o Pix.</Text>
@@ -1252,13 +1252,13 @@ export default function EarningsReportScreen({ navigation, route }) {
             <Text style={styles.processingNoteText}>O status ficará disponível no extrato de ganhos.</Text>
           </View>
 
-          <TouchableOpacity
+          <LeafTouchable
             style={styles.cleanPrimaryButton}
             activeOpacity={0.88}
             onPress={() => setWithdrawProcessingSummary(null)}
           >
             <Text style={styles.cleanPrimaryButtonText}>Voltar para ganhos</Text>
-          </TouchableOpacity>
+          </LeafTouchable>
         </View>
       </PrototypeScreenTransition>
     );
@@ -1316,7 +1316,7 @@ export default function EarningsReportScreen({ navigation, route }) {
                 </View>
 
                 {withdrawalsEnabled ? (
-                  <TouchableOpacity
+                  <LeafTouchable
                     style={styles.withdrawPillButton}
                     activeOpacity={0.86}
                     onPress={openWithdrawFlow}
@@ -1325,7 +1325,7 @@ export default function EarningsReportScreen({ navigation, route }) {
                     accessibilityLabel="Realizar saque"
                   >
                     <Text style={styles.withdrawPillButtonText}>Realizar saque</Text>
-                  </TouchableOpacity>
+                  </LeafTouchable>
                 ) : (
                   <View style={styles.withdrawDisabledPill}>
                     <Text style={styles.withdrawDisabledPillText}>Piloto assistido</Text>
@@ -1358,7 +1358,7 @@ export default function EarningsReportScreen({ navigation, route }) {
                 ].map(segment => {
                   const active = activeSegment === segment.key;
                   return (
-                    <TouchableOpacity
+                    <LeafTouchable
                       key={segment.key}
                       style={styles.periodTab}
                       activeOpacity={0.82}
@@ -1368,7 +1368,7 @@ export default function EarningsReportScreen({ navigation, route }) {
                         {segment.label}
                       </Text>
                       <View style={[styles.periodTabUnderline, active && styles.periodTabUnderlineActive]} />
-                    </TouchableOpacity>
+                    </LeafTouchable>
                   );
                 })}
               </View>
@@ -1450,9 +1450,9 @@ export default function EarningsReportScreen({ navigation, route }) {
 
               <View style={styles.detailHeaderRow}>
                 <Text style={styles.cleanSectionTitle}>Detalhamento de hoje</Text>
-                <TouchableOpacity activeOpacity={0.75} onPress={openCustomFilterModal}>
+                <LeafTouchable activeOpacity={0.75} onPress={openCustomFilterModal}>
                   <Text style={styles.detailHeaderAction}>Ver tudo</Text>
-                </TouchableOpacity>
+                </LeafTouchable>
               </View>
 
               <View style={styles.cleanList}>
@@ -1586,7 +1586,7 @@ export default function EarningsReportScreen({ navigation, route }) {
             contentContainerStyle={styles.withdrawScrollContent}
           >
             <View style={styles.cleanHeaderRow}>
-              <TouchableOpacity
+              <LeafTouchable
                 style={styles.cleanBackHit}
                 activeOpacity={0.76}
                 accessibilityRole="button"
@@ -1600,7 +1600,7 @@ export default function EarningsReportScreen({ navigation, route }) {
                 }}
               >
                 <Ionicons name="arrow-back" size={20} color="#222222" />
-              </TouchableOpacity>
+              </LeafTouchable>
               <Text style={styles.cleanHeaderTitle}>Realizar saque</Text>
             </View>
             <Text style={styles.cleanHeaderSubtitle}>Informe o valor e confirme com sua senha.</Text>
@@ -1674,7 +1674,7 @@ export default function EarningsReportScreen({ navigation, route }) {
                   <Text style={styles.withdrawFeeNoteText}>
                     O saque é confirmado com a senha do app, e você ainda não criou uma. Leva um minuto e depois você volta para cá.
                   </Text>
-                  <TouchableOpacity
+                  <LeafTouchable
                     style={styles.withdrawPasswordSetupButton}
                     activeOpacity={0.86}
                     onPress={goCreateAppPassword}
@@ -1683,7 +1683,7 @@ export default function EarningsReportScreen({ navigation, route }) {
                     accessibilityLabel="Criar senha do app"
                   >
                     <Text style={styles.withdrawPasswordSetupButtonText}>Criar senha</Text>
-                  </TouchableOpacity>
+                  </LeafTouchable>
                 </View>
               </View>
             ) : (
@@ -1767,7 +1767,7 @@ export default function EarningsReportScreen({ navigation, route }) {
               </View>
             </View>
 
-            <TouchableOpacity
+            <LeafTouchable
               style={[styles.cleanPrimaryButton, withdrawDisabled && styles.cleanPrimaryButtonDisabled]}
               activeOpacity={0.88}
               disabled={withdrawDisabled}
@@ -1780,7 +1780,7 @@ export default function EarningsReportScreen({ navigation, route }) {
               <Text style={styles.cleanPrimaryButtonText}>
                 {isProcessingWithdraw ? 'Confirmando...' : 'Confirmar saque'}
               </Text>
-            </TouchableOpacity>
+            </LeafTouchable>
           </ScrollView>
         </KeyboardAvoidingView>
       </Modal>
@@ -1815,12 +1815,12 @@ export default function EarningsReportScreen({ navigation, route }) {
               />
             </View>
             <View style={styles.modalActions}>
-              <TouchableOpacity style={styles.modalCancelButton} activeOpacity={0.86} onPress={() => setCustomFilterModalVisible(false)}>
+              <LeafTouchable style={styles.modalCancelButton} activeOpacity={0.86} onPress={() => setCustomFilterModalVisible(false)}>
                 <Text style={styles.modalCancelText}>Cancelar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.modalConfirmButton} activeOpacity={0.86} onPress={applyCustomFilter}>
+              </LeafTouchable>
+              <LeafTouchable style={styles.modalConfirmButton} activeOpacity={0.86} onPress={applyCustomFilter}>
                 <Text style={styles.modalConfirmText}>Aplicar</Text>
-              </TouchableOpacity>
+              </LeafTouchable>
             </View>
           </View>
         </View>
@@ -1852,9 +1852,9 @@ export default function EarningsReportScreen({ navigation, route }) {
                 <Text style={styles.kycUnavailableText}>
                   {withdrawKycReason || 'Não foi possível preparar a validação agora. Tente novamente em alguns minutos.'}
                 </Text>
-                <TouchableOpacity style={styles.kycUnavailableButton} onPress={handleWithdrawKycFallbackLocal}>
+                <LeafTouchable style={styles.kycUnavailableButton} onPress={handleWithdrawKycFallbackLocal}>
                   <Text style={styles.kycUnavailableButtonText}>Fechar</Text>
-                </TouchableOpacity>
+                </LeafTouchable>
               </View>
             )}
           </>

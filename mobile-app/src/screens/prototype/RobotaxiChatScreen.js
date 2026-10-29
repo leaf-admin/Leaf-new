@@ -1,6 +1,7 @@
 import leafTypography from '../../components/prototype/LeafTypography';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Platform, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Platform, StatusBar, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
+import LeafTouchable from '../../components/design-system/LeafTouchable';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
@@ -210,7 +211,7 @@ export default function RobotaxiChatScreen({ navigation, route }) {
                           : 'Sem mensagens para esta corrida.'}
                     </Text>
                     {hasListError ? (
-                      <TouchableOpacity
+                      <LeafTouchable
                         activeOpacity={0.82}
                         onPress={handleRetryLoad}
                         style={styles.retryButton}
@@ -218,7 +219,7 @@ export default function RobotaxiChatScreen({ navigation, route }) {
                         accessibilityLabel="Tentar novamente carregar chat"
                       >
                         <Text style={styles.retryButtonText}>Tentar novamente</Text>
-                      </TouchableOpacity>
+                      </LeafTouchable>
                     ) : null}
                   </View>
                 }
@@ -240,7 +241,7 @@ export default function RobotaxiChatScreen({ navigation, route }) {
                   />
                 </View>
 
-                <TouchableOpacity
+                <LeafTouchable
                   style={[styles.sendButton, !canSendMessage && styles.sendButtonDisabled]}
                   activeOpacity={0.82}
                   onPress={handleSend}
@@ -255,7 +256,7 @@ export default function RobotaxiChatScreen({ navigation, route }) {
                   ) : (
                     <Ionicons name="send" size={16} color={color.accent.contrast} />
                   )}
-                </TouchableOpacity>
+                </LeafTouchable>
               </View>
 
               {chatError && !hasListError ? <Text style={styles.errorText}>{chatError}</Text> : null}

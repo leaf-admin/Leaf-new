@@ -1,6 +1,7 @@
 import leafTypography from '../../components/prototype/LeafTypography';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, Alert, ScrollView, StatusBar, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
+import LeafTouchable from '../../components/design-system/LeafTouchable';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSelector } from 'react-redux';
 import { Feather } from '@expo/vector-icons';
@@ -190,7 +191,7 @@ export default function RobotaxiProfileScreen({ navigation, route }) {
             ]}
           >
             <View style={styles.headerRow}>
-              <TouchableOpacity
+              <LeafTouchable
                 style={styles.closeButton}
                 onPress={handleDismiss}
                 activeOpacity={0.78}
@@ -198,7 +199,7 @@ export default function RobotaxiProfileScreen({ navigation, route }) {
                 accessibilityLabel="Voltar à conta"
               >
                 <Feather name="arrow-left" size={20} color={PROFILE_COLOR.text} />
-              </TouchableOpacity>
+              </LeafTouchable>
               <View style={styles.headerCopy}>
                 <Text style={styles.screenTitle}>Dados pessoais</Text>
               </View>
@@ -255,13 +256,13 @@ export default function RobotaxiProfileScreen({ navigation, route }) {
                     disabled={savingProfile || !profileDraft.name.trim()}
                     onPress={saveProfile}
                   />
-                  <TouchableOpacity
+                  <LeafTouchable
                     disabled={savingProfile}
                     onPress={exitEditor}
                     style={styles.secondaryAction}
                   >
                     <Text style={styles.secondaryActionText}>Cancelar</Text>
-                  </TouchableOpacity>
+                  </LeafTouchable>
                 </View>
               ) : null}
             </ScrollView>

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import LeafTouchable from '../../components/design-system/LeafTouchable';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LeafObjectIcon } from '../../components/prototype/LeafVisualElements';
@@ -68,16 +69,16 @@ export default function LeafSavedPlacesScreen({ navigation, route }) {
   const edit = place => { choose(place); setEditingId(localOnly.some(item => item.id === place.id) ? null : place.id); setAdding(true); };
   const row = (place, index, saved) => <View key={place.id || index} style={styles.row}>
     <LeafObjectIcon name="places" size={22} />
-    <TouchableOpacity style={styles.copy} accessibilityRole="button" accessibilityLabel={place.name || place.address} testID={`leaf-place-open-${index}`} disabled={busy} onPress={() => saved ? navigation.navigate('RobotaxiPrototypeDestination', { initialSelectedDestination: place }) : choose(place)}>
+    <LeafTouchable style={styles.copy} accessibilityRole="button" accessibilityLabel={place.name || place.address} testID={`leaf-place-open-${index}`} disabled={busy} onPress={() => saved ? navigation.navigate('RobotaxiPrototypeDestination', { initialSelectedDestination: place }) : choose(place)}>
       <Text style={styles.name}>{place.name || place.address}</Text><Text style={styles.detail}>{place.address}</Text>
-    </TouchableOpacity>
+    </LeafTouchable>
     {saved ? <View style={styles.actions}>
-      <TouchableOpacity onPress={() => edit(place)} disabled={busy} style={styles.smallAction} accessibilityRole="button" accessibilityLabel={`Editar endereço ${place.name}`} testID={`leaf-place-edit-${index}`}><Ionicons name="pencil-outline" size={18} color="#6A6A6A" /></TouchableOpacity>
-      <TouchableOpacity onPress={() => Alert.alert('Remover endereço', `Remover "${place.name || place.address}" dos seus endereços salvos?`, [{ text: 'Cancelar', style: 'cancel' }, { text: 'Remover', style: 'destructive', onPress: () => mutate(() => removeSavedPlace(profileUid, place.id)) }])} disabled={busy} style={styles.smallAction} accessibilityRole="button" accessibilityLabel={`Remover endereço ${place.name}`} testID={`leaf-place-remove-${index}`}><Ionicons name="close" size={18} color="#6A6A6A" /></TouchableOpacity>
+      <LeafTouchable onPress={() => edit(place)} disabled={busy} style={styles.smallAction} accessibilityRole="button" accessibilityLabel={`Editar endereço ${place.name}`} testID={`leaf-place-edit-${index}`}><Ionicons name="pencil-outline" size={18} color="#6A6A6A" /></LeafTouchable>
+      <LeafTouchable onPress={() => Alert.alert('Remover endereço', `Remover "${place.name || place.address}" dos seus endereços salvos?`, [{ text: 'Cancelar', style: 'cancel' }, { text: 'Remover', style: 'destructive', onPress: () => mutate(() => removeSavedPlace(profileUid, place.id)) }])} disabled={busy} style={styles.smallAction} accessibilityRole="button" accessibilityLabel={`Remover endereço ${place.name}`} testID={`leaf-place-remove-${index}`}><Ionicons name="close" size={18} color="#6A6A6A" /></LeafTouchable>
     </View> : <Ionicons name="chevron-forward" size={13} color="#6A6A6A" />}
   </View>;
   return <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={[styles.page, { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 20 }]} testID="leaf-saved-places-screen">
-    <View style={styles.header}><TouchableOpacity onPress={() => { if (selected || adding) { setSelected(null); setAdding(false); setEditingId(null); } else navigation.goBack(); }} style={styles.back} accessibilityRole="button" accessibilityLabel="Voltar"><Ionicons name="arrow-back" size={22} color="#222222" /></TouchableOpacity><Text style={styles.title}>Endereços salvos</Text>{/* Refresh status in the header: an inline spinner shifted the list. */}{busy && !initialLoading ? <ActivityIndicator color="#6A6A6A" accessibilityLabel="Atualizando endereços" style={styles.headerSpinner} /> : null}</View>
+    <View style={styles.header}><LeafTouchable onPress={() => { if (selected || adding) { setSelected(null); setAdding(false); setEditingId(null); } else navigation.goBack(); }} style={styles.back} accessibilityRole="button" accessibilityLabel="Voltar"><Ionicons name="arrow-back" size={22} color="#222222" /></LeafTouchable><Text style={styles.title}>Endereços salvos</Text>{/* Refresh status in the header: an inline spinner shifted the list. */}{busy && !initialLoading ? <ActivityIndicator color="#6A6A6A" accessibilityLabel="Atualizando endereços" style={styles.headerSpinner} /> : null}</View>
     <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       {/* Sync source is unknown until the first load settles; don't claim "neste aparelho" meanwhile. */}
       <Text style={styles.detail}>{initialLoading ? 'Sincronizando com sua conta…' : synced ? 'Sincronizados com sua conta' : 'Salvos neste aparelho'}</Text>

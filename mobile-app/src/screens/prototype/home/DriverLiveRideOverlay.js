@@ -14,10 +14,10 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TouchableOpacity,
   useWindowDimensions,
   View,
 } from "react-native";
+import LeafTouchable from "../../../components/design-system/LeafTouchable";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { Ionicons } from "@expo/vector-icons";
 import robotaxiPrototypeTokens from "../../../components/design-system/robotaxiPrototypeTokens";
@@ -1236,7 +1236,7 @@ function DriverLiveRideOverlay({
           row cost the map about 60pt in every ride state. */}
       <View style={[styles.lifecycleTripActionStack, styles.lifecycleTripActionRow]} testID="driver-live-trip-actions">
         {isTripExpanded ? (
-          <TouchableOpacity
+          <LeafTouchable
             style={styles.lifecycleTripMoreButton}
             onPress={() => setIsTripExpanded(false)}
             accessibilityRole="button"
@@ -1245,9 +1245,9 @@ function DriverLiveRideOverlay({
             testID="driver-live-trip-collapse-button"
           >
             <Ionicons name="chevron-down-outline" size={22} color="#222222" />
-          </TouchableOpacity>
+          </LeafTouchable>
         ) : !isTripPeek ? (
-          <TouchableOpacity
+          <LeafTouchable
             style={styles.lifecycleTripMoreButton}
             onPress={() => setIsTripExpanded(true)}
             accessibilityRole="button"
@@ -1256,7 +1256,7 @@ function DriverLiveRideOverlay({
             testID="driver-live-trip-details-button"
           >
             <Ionicons name="ellipsis-horizontal" size={22} color="#222222" />
-          </TouchableOpacity>
+          </LeafTouchable>
         ) : null}
         <View style={styles.lifecycleTripPrimaryAction}>
         {primaryActionLabel && normalizedActiveStatus === "started" ? (
@@ -1318,7 +1318,7 @@ function DriverLiveRideOverlay({
           >
             {fareLabel}
           </Text>
-          <TouchableOpacity
+          <LeafTouchable
             activeOpacity={0.82}
             onPress={() => setIsTripExpanded(false)}
             style={styles.expandedCollapseButton}
@@ -1330,7 +1330,7 @@ function DriverLiveRideOverlay({
               size={17}
               color={color.text.secondary}
             />
-          </TouchableOpacity>
+          </LeafTouchable>
         </View>
       </View>
 
@@ -1695,7 +1695,7 @@ function DriverLiveRideOverlay({
                   style={[styles.offerPassengerIdentity, styles.offerPassengerIdentityInline]}
                   testID="driver-live-passenger-identity"
                 />
-                <TouchableOpacity
+                <LeafTouchable
                   onPress={() => setIsOfferExpanded((current) => !current)}
                   style={styles.offerDetailsLink}
                   hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
@@ -1708,7 +1708,7 @@ function DriverLiveRideOverlay({
                     {isOfferExpanded ? "Ocultar" : "Detalhes"}
                   </Text>
                   <Ionicons name={isOfferExpanded ? "chevron-up" : "chevron-down"} size={16} color="#222222" />
-                </TouchableOpacity>
+                </LeafTouchable>
               </View>
 
               {isOfferExpanded ? (
@@ -1763,7 +1763,7 @@ function DriverLiveRideOverlay({
           ) : (
             <>
               {shouldUseCompactTripCard ? (
-                <TouchableOpacity
+                <LeafTouchable
                   activeOpacity={0.82}
                   onPress={() => setIsTripExpanded(false)}
                   style={styles.collapseControl}
@@ -1776,7 +1776,7 @@ function DriverLiveRideOverlay({
                     color={color.text.secondary}
                   />
                   <Text style={styles.collapseControlText}>Voltar ao resumo</Text>
-                </TouchableOpacity>
+                </LeafTouchable>
               ) : null}
 
               <View style={styles.headerRow}>
@@ -1874,7 +1874,7 @@ function DriverLiveRideOverlay({
 
                   {normalizedExtensionStatus === "driver_decision_pending" ? (
                     <View style={styles.extensionActions}>
-                      <TouchableOpacity
+                      <LeafTouchable
                         activeOpacity={0.82}
                         style={[
                           styles.extensionSecondaryAction,
@@ -1890,9 +1890,9 @@ function DriverLiveRideOverlay({
                             ? "Recusando..."
                             : "Recusar"}
                         </Text>
-                      </TouchableOpacity>
+                      </LeafTouchable>
 
-                      <TouchableOpacity
+                      <LeafTouchable
                         activeOpacity={0.82}
                         style={styles.extensionPrimaryAction}
                         onPress={handleAcceptExtension}
@@ -1905,7 +1905,7 @@ function DriverLiveRideOverlay({
                             ? "Aprovando..."
                             : "Aceitar novo destino"}
                         </Text>
-                      </TouchableOpacity>
+                      </LeafTouchable>
                     </View>
                   ) : null}
                 </View>
@@ -2011,7 +2011,7 @@ function DriverLiveRideOverlay({
               ) : null}
 
               {canCancelActiveRide ? (
-                <TouchableOpacity
+                <LeafTouchable
                   activeOpacity={0.82}
                   style={styles.tripCancelButton}
                   onPress={handleOpenCancelPrompt}
@@ -2027,7 +2027,7 @@ function DriverLiveRideOverlay({
                   <Text style={styles.tripCancelButtonText}>
                     {busyAction === "cancel" ? "Cancelando..." : "Cancelar"}
                   </Text>
-                </TouchableOpacity>
+                </LeafTouchable>
               ) : null}
 
               {primaryActionLabel ? (
@@ -2055,7 +2055,7 @@ function DriverLiveRideOverlay({
               ) : null}
 
               {canInterruptOperational ? (
-                <TouchableOpacity
+                <LeafTouchable
                   activeOpacity={0.82}
                   style={styles.tripInterruptButton}
                   onPress={handleInterruptOperational}
@@ -2076,7 +2076,7 @@ function DriverLiveRideOverlay({
                       ? "Reportando..."
                       : "Reportar problema"}
                   </Text>
-                </TouchableOpacity>
+                </LeafTouchable>
               ) : null}
             </>
           )}
@@ -2085,7 +2085,7 @@ function DriverLiveRideOverlay({
         {shouldUseCompactTripCard ? renderCompactTripActions() : null}
         {hasOffer ? (
               <View style={styles.offerActions} testID="driver-live-offer-actions">
-              <TouchableOpacity
+              <LeafTouchable
                 activeOpacity={0.82}
                 disabled={Boolean(busyAction) || offerExpired}
                 onPress={handleRejectOffer}
@@ -2096,7 +2096,7 @@ function DriverLiveRideOverlay({
                 accessibilityState={{ disabled: Boolean(busyAction) || offerExpired }}
               >
                 <Ionicons name="close" size={24} color="#222222" />
-              </TouchableOpacity>
+              </LeafTouchable>
               <View style={styles.offerAcceptWrap}>
                 <RobotaxiLifecycleButton
                   label={
@@ -2139,7 +2139,7 @@ function DriverLiveRideOverlay({
               {cancelPromptMessage}
             </Text>
             <View style={styles.cancelPromptActions}>
-              <TouchableOpacity
+              <LeafTouchable
                 activeOpacity={0.82}
                 style={styles.cancelPromptYesButton}
                 onPress={handleConfirmCancelRide}
@@ -2147,8 +2147,8 @@ function DriverLiveRideOverlay({
                 accessibilityLabel="Confirmar cancelamento"
               >
                 <Text style={styles.cancelPromptYesText}>Cancelar corrida</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
+              </LeafTouchable>
+              <LeafTouchable
                 activeOpacity={0.86}
                 style={styles.cancelPromptNoButton}
                 onPress={() => setShowCancelPrompt(false)}
@@ -2156,7 +2156,7 @@ function DriverLiveRideOverlay({
                 accessibilityLabel="Continuar corrida"
               >
                 <Text style={styles.cancelPromptNoText}>Manter corrida</Text>
-              </TouchableOpacity>
+              </LeafTouchable>
             </View>
           </View>
         </View>
