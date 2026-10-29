@@ -4,6 +4,7 @@ const { scheduleMapH3Refresh } = require('../utils/map-h3-refresh-broadcaster');
 const { buildActiveRideSnapshotForUser } = require('./active-ride-sync-utils');
 const RideStateManager = require('../services/ride-state-manager');
 const pricingH3ReadModelService = require('../services/pricing-h3-read-model-service');
+const geofenceService = require('../services/geofence-service');
 const { writeVisibleBookingSnapshot } = require('../services/booking-visibility-service');
 const {
     hasRideOfflineIntentPayload,
@@ -1021,6 +1022,9 @@ function registerSocketDriverControlHandlers({
                 destinationModePolicy: destinationIntent.policy || null,
                 vehicleIdentity,
                 driverOnlineDaily,
+                serviceArea: isOnline && hasValidLocation
+                    ? geofenceService.describeDriverServiceArea(lat, lng)
+                    : null,
                 checkedAt: new Date().toISOString()
             });
             scheduleMapH3Refresh(io, {
