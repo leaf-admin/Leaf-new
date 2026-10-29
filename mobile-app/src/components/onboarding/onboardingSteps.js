@@ -2,18 +2,17 @@ import React, { useEffect, useRef } from 'react';
 import { Animated, Easing, Image, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import Reanimated, { FadeInDown, ZoomIn } from 'react-native-reanimated';
 import Svg, { Path } from 'react-native-svg';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import leafTypography from '../prototype/LeafTypography';
 import { LeafAnimatedPressable } from '../prototype/LeafRideUI';
 import { useHapticFeedback } from '../../hooks/useHapticFeedback';
 import { ONB, OnboardingField, OnboardingShell, PrimaryButton, TextLink } from './onboardingKit';
-import { PILOT_SERVICE_AREA_LABEL } from '../../config/driverFeePolicy';
 
 // Telas do onboarding (apresentação). Recebem estado e callbacks por props: o laboratório usa
 // dados de exemplo e o fluxo real liga os serviços de OTP, perfil, OCR e ativação.
 
-const LOGO = require('../../../assets/images/splash_android_icon.png');
 
 export function formatBrazilPhone(digits) {
   const d = String(digits || '').replace(/\D/g, '').slice(0, 11);
@@ -23,24 +22,32 @@ export function formatBrazilPhone(digits) {
 }
 
 // ── Boas-vindas ─────────────────────────────────────────────────────────────────────────────
-// Igual à splash (mesmo verde, mesmo logo, mesmo tamanho e posição): a abertura continua sem
-// salto, e só o slogan e o botão surgem embaixo.
-const SPLASH_GREEN = '#003002';
-const SPLASH_LOGO_SIZE = 288;
+// Foto da cidade com degradê verde, o logo da Leaf e um título só (aprovado no canvas de
+// UI/UX, variação 1B). Os links de termos e privacidade continuam embaixo.
+const CITY_BACKGROUND = require('../../../assets/images/onboarding-city-bg.jpg');
+const WORDMARK_WHITE = require('../../../assets/images/leaf-wordmark-white.png');
 
 export function WelcomeScreen({ onStart, onStartDriver, onOpenTerms, onOpenPrivacy }) {
   const insets = useSafeAreaInsets();
   return (
     <View style={welcome.root} testID="onboarding-welcome">
-      <View style={welcome.logoLayer} pointerEvents="none">
-        <Image source={LOGO} style={welcome.logo} resizeMode="contain" />
-      </View>
+      <Image source={CITY_BACKGROUND} style={StyleSheet.absoluteFill} resizeMode="cover" accessibilityIgnoresInvertColors />
+      <LinearGradient
+        colors={['rgba(0,48,2,0.10)', 'rgba(0,48,2,0.35)', 'rgba(0,32,1,0.94)']}
+        locations={[0, 0.4, 0.78]}
+        style={StyleSheet.absoluteFill}
+        pointerEvents="none"
+      />
+      <Image
+        source={WORDMARK_WHITE}
+        style={[welcome.logo, { top: insets.top + 20 }]}
+        resizeMode="contain"
+        accessibilityRole="image"
+        accessibilityLabel="Leaf"
+      />
       <Reanimated.View entering={FadeInDown.delay(250).duration(500)} style={[welcome.bottom, { paddingBottom: Math.max(20, insets.bottom + 8) }]}>
-        <Text style={welcome.slogan}>Seu app local</Text>
-        <Text style={welcome.pitch} testID="onboarding-welcome-pitch">
-          {`Corridas com preço fechado e Pix. Por enquanto na ${PILOT_SERVICE_AREA_LABEL}.`}
-        </Text>
-        <PrimaryButton label="Começar" tone="light" onPress={onStart} testID="onboarding-welcome-start" />
+        <Text style={welcome.headline} accessibilityRole="header">Feito no Rio.</Text>
+        <PrimaryButton label="Começar" tone="lime" onPress={onStart} testID="onboarding-welcome-start" />
         {onStartDriver ? (
           <Pressable onPress={onStartDriver} hitSlop={10} accessibilityRole="button" testID="onboarding-welcome-driver">
             <Text style={welcome.driverLink}>Quero dirigir com a Leaf</Text>
@@ -466,14 +473,12 @@ export function ReviewStatusStep({ items = [], etaText = 'Avisamos por notifica�
 
 // ── Estilos ─────────────────────────────────────────────────────────────────────────────────
 const welcome = StyleSheet.create({
-  root: { flex: 1, backgroundColor: SPLASH_GREEN },
-  logoLayer: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
-  logo: { width: SPLASH_LOGO_SIZE, height: SPLASH_LOGO_SIZE },
+  root: { flex: 1, backgroundColor: '#003002', overflow: 'hidden' },
+  logo: { position: 'absolute', left: 24, width: 104, height: 27 },
   bottom: { position: 'absolute', left: 24, right: 24, bottom: 0, gap: 16, alignItems: 'center' },
-  slogan: { ...leafTypography.semiBold, fontSize: 22, letterSpacing: -0.2, color: '#FFFFFF' },
-  pitch: { ...leafTypography.regular, fontSize: 15, lineHeight: 21, color: 'rgba(255,255,255,0.82)', textAlign: 'center', marginBottom: 10 },
+  headline: { ...leafTypography.bold, alignSelf: 'stretch', fontSize: 48, lineHeight: 52, letterSpacing: -1.4, color: '#FFFFFF', marginBottom: 6 },
   driverLink: { ...leafTypography.semiBold, fontSize: 15, color: '#FFFFFF', textDecorationLine: 'underline' },
-  legal: { ...leafTypography.regular, fontSize: 12.5, lineHeight: 18, color: 'rgba(255,255,255,0.55)', textAlign: 'center' },
+  legal: { ...leafTypography.regular, fontSize: 12.5, lineHeight: 18, color: 'rgba(255,255,255,0.66)', textAlign: 'center' },
   legalLink: { ...leafTypography.medium, color: 'rgba(255,255,255,0.9)', textDecorationLine: 'underline' },
 });
 const codeStyles = StyleSheet.create({

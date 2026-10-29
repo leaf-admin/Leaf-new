@@ -66,15 +66,15 @@ export default function RobotaxiMenuScreen({ navigation, route }) {
     [activeRole, referralProgramsEnabled]
   );
 
-  // Um nível só, em blocos por assunto (2026-10-28): cada linha abre a tela final.
+  // Um nível só, em seções por assunto (lista agrupada, 3B): cada linha abre a tela final.
   // Ativação aparece só enquanto o motorista ainda não pode ficar online.
   const activationPending = isDriverRole && !(driverCanGoOnline || driverActivationRemote?.canAttemptOnline === true);
   const groups = useMemo(() => {
     const all = roleMenuSections.flatMap(section => section.items);
     const definitions = isDriverRole
-      ? [['work', ['driver-earnings', 'driver-history']], ['registration', [...(activationPending ? ['driver-activation'] : []), 'driver-documents', 'driver-vehicles']], ['support', ['help', 'settings']]]
-      : [['trips', ['trip-history', 'saved-places', 'passenger-invites']], ['support', ['help', 'settings']]];
-    return definitions.map(([key, keys]) => ({ key, items: keys.map(itemKey => all.find(item => item.key === itemKey)).filter(Boolean) }))
+      ? [['work', 'Trabalho', ['driver-earnings', 'driver-history']], ['registration', 'Cadastro', [...(activationPending ? ['driver-activation'] : []), 'driver-documents', 'driver-vehicles']], ['support', 'Suporte', ['help', 'settings']]]
+      : [['trips', 'Viagens', ['trip-history', 'saved-places', 'ride-preferences', 'passenger-invites']], ['support', 'Suporte', ['help', 'settings']]];
+    return definitions.map(([key, title, keys]) => ({ key, title, items: keys.map(itemKey => all.find(item => item.key === itemKey)).filter(Boolean) }))
       .filter(group => group.items.length);
   }, [roleMenuSections, isDriverRole, activationPending]);
   // Estado à direita, só com dados que o runtime já tem (sem chamada nova).
@@ -163,22 +163,16 @@ export default function RobotaxiMenuScreen({ navigation, route }) {
                 <View style={styles.avatar}><Text style={styles.avatarText}>{metrics.initials}</Text></View>
                 <View style={styles.profileCopy}>
                   <Text style={styles.profileName} numberOfLines={1}>{profileName || 'Sua conta'}</Text>
-                  <Text style={styles.profileHint}>Ver cartão de membro</Text>
+                  <Text style={[styles.profileMeta, metricsLoading && styles.metricValueLoading]} numberOfLines={1} testID="leaf-account-metrics"
+                    accessibilityLabel={`Avaliação ${metrics.rating || 'não disponível'}, ${metrics.trips ?? 'sem'} ${isDriverRole ? 'corridas' : 'viagens'}, ${metrics.membership} na Leaf`}>
+                    {metricsLoading ? '…' : [metrics.rating ? `${metrics.rating} ★` : null, metrics.trips != null ? `${metrics.trips} ${isDriverRole ? 'corridas' : 'viagens'}` : null, metrics.membership ? `${metrics.membership} na Leaf` : null].filter(Boolean).join(' · ')}
+                  </Text>
                 </View>
                 <Feather name="chevron-right" size={18} color="#B3B3B3" />
               </TouchableOpacity>
-              <TouchableOpacity style={styles.metrics} activeOpacity={0.7} onPress={() => navigation.navigate('LeafMemberCard')} accessibilityRole="button"
-                accessibilityLabel={`Avaliação ${metrics.rating || 'não disponível'}, ${metrics.trips ?? 'sem'} ${isDriverRole ? 'corridas' : 'viagens'}, ${metrics.membership} na Leaf`} testID="leaf-account-metrics">
-                {[[metrics.rating ? `${metrics.rating} ★` : '—', 'avaliação', true], [metrics.trips ?? '—', isDriverRole ? 'corridas' : 'viagens', true], [metrics.membership, 'na Leaf', false]].map(([value, label, remote]) => (
-                  <View key={label} style={styles.metricTile}>
-                    <Text style={[styles.metricValue, remote && metricsLoading && styles.metricValueLoading]} numberOfLines={1}>{remote && metricsLoading ? '…' : value}</Text>
-                    <Text style={styles.metricLabel}>{label}</Text>
-                  </View>
-                ))}
-              </TouchableOpacity>
               {accountSummary.error ? <TouchableOpacity accessibilityRole="button" onPress={() => accountSummary.refresh({ forceRefresh: true })} style={{ paddingBottom: 14 }} testID="leaf-account-summary-retry"><Text style={{ ...leafTypography.regular, fontSize: 12, color: '#6A6A6A' }}>Não foi possível atualizar todos os dados. Tentar novamente.</Text></TouchableOpacity> : null}
               {groups.map(group => (
-                <PrototypeMenuGroup key={group.key} style={styles.group} testID={`leaf-account-group-${group.key}`}>
+                <PrototypeMenuGroup key={group.key} title={group.title} style={styles.group} testID={`leaf-account-group-${group.key}`}>
                   {group.items.map(item => (
                     <PrototypeMenuGroupRow key={item.key} icon={item.icon} title={item.title}
                       value={item.key === 'driver-vehicles' ? vehiclePlate : undefined}
@@ -223,18 +217,14 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingBottom: 16,
   },
-  profileHeader: { flexDirection: 'row', alignItems: 'center', gap: 14, minHeight: 64, marginBottom: 16 },
-  avatar: { width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center', backgroundColor: '#E5F1DC' },
-  avatarText: { ...leafTypography.semiBold, fontSize: 19, lineHeight: 24, color: '#1A330E' },
+  profileHeader: { flexDirection: 'row', alignItems: 'center', gap: 14, minHeight: 64, marginBottom: 26 },
+  avatar: { width: 60, height: 60, borderRadius: 30, alignItems: 'center', justifyContent: 'center', backgroundColor: '#003002' },
+  avatarText: { ...leafTypography.bold, fontSize: 19, lineHeight: 24, color: '#D4E84A' },
   profileCopy: { flex: 1, minWidth: 0 },
-  profileName: { ...leafTypography.semiBold, fontSize: 20, lineHeight: 26, color: '#222222' },
-  profileHint: { ...leafTypography.regular, fontSize: 14, lineHeight: 19, color: '#6A6A6A', marginTop: 2 },
-  metrics: { flexDirection: 'row', gap: 8, marginBottom: 24 },
-  metricTile: { flex: 1, minWidth: 0, borderRadius: 14, backgroundColor: '#F4F4F2', paddingHorizontal: 12, paddingVertical: 12 },
-  metricValue: { ...leafTypography.semiBold, fontSize: 17, lineHeight: 22, color: '#222222', fontVariant: ['tabular-nums'] },
+  profileName: { ...leafTypography.bold, fontSize: 22, lineHeight: 28, color: '#222222' },
+  profileMeta: { ...leafTypography.regular, fontSize: 14, lineHeight: 19, color: '#6A6A6A', marginTop: 2, fontVariant: ['tabular-nums'] },
   metricValueLoading: { color: '#A6A6A6' },
-  metricLabel: { ...leafTypography.regular, fontSize: 12, lineHeight: 16, color: '#6A6A6A', marginTop: 2 },
-  group: { marginBottom: 20 },
+  group: { marginBottom: 26 },
   logout: { minHeight: 48, marginTop: 4, alignItems: 'center', justifyContent: 'center' },
   logoutText: { ...leafTypography.medium, fontSize: 16, lineHeight: 21, color: '#B42318' },
   version: { ...leafTypography.regular, fontSize: 12, lineHeight: 16, color: '#A6A6A6', textAlign: 'center', marginTop: 4 },

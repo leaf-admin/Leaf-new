@@ -1,4 +1,5 @@
 import leafTypography from './LeafTypography';
+import { LEAF_MOTION_DURATION, LEAF_MOTION_EASING, LEAF_PRESS } from '../design-system/leafMotion';
 import React, { useRef } from 'react';
 import {
   Animated,
@@ -141,23 +142,23 @@ export function RobotaxiLifecycleButton({
 }) {
   const palette = resolveButtonTone(tone);
   const reduceMotion = useReducedMotion();
-  // Press feedback: the button gives slightly under the finger and springs
-  // back, instead of only dimming.
+  // Press feedback (motion level 1): the button gives slightly under the finger
+  // and comes back without bouncing, the same touch as every Leaf button.
   const pressProgress = useRef(new Animated.Value(0)).current;
   const animatePress = (toValue) => {
     if (disabled) return;
-    Animated.spring(pressProgress, {
+    Animated.timing(pressProgress, {
       toValue,
-      speed: toValue ? 48 : 22,
-      bounciness: toValue ? 0 : 6,
+      duration: LEAF_MOTION_DURATION.tap,
+      easing: LEAF_MOTION_EASING,
       useNativeDriver: true,
     }).start();
   };
   const pressStyle = disabled ? null : {
-    opacity: pressProgress.interpolate({ inputRange: [0, 1], outputRange: [1, 0.86] }),
+    opacity: pressProgress.interpolate({ inputRange: [0, 1], outputRange: [1, LEAF_PRESS.opacity] }),
     transform: reduceMotion
       ? []
-      : [{ scale: pressProgress.interpolate({ inputRange: [0, 1], outputRange: [1, 0.97] }) }],
+      : [{ scale: pressProgress.interpolate({ inputRange: [0, 1], outputRange: [1, LEAF_PRESS.scale] }) }],
   };
 
   return (
