@@ -1307,7 +1307,7 @@ export default function EarningsReportScreen({ navigation, route }) {
                   <Text style={styles.balanceLabel}>
                     {withdrawalsEnabled ? 'Disponível para saque' : 'Saldo do motorista'}
                   </Text>
-                  <LeafAnimatedAmount style={styles.balanceValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7} label={`R$ ${formatCurrency(saldoDisponivel)}`} showDelta />
+                  <LeafAnimatedAmount style={styles.balanceValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7} label={`R$ ${formatCurrency(saldoDisponivel)}`} showDelta memoryKey="driver-balance-available" />
                   {earningsLoadFailed ? (
                     <Text style={styles.balanceLoadError} accessibilityRole="alert">
                       Não conseguimos atualizar seus ganhos agora. Os valores podem estar desatualizados.

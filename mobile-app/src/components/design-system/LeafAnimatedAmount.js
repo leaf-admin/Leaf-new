@@ -7,6 +7,14 @@ import { LEAF_MOTION_DURATION, LEAF_MOTION_EASING } from './leafMotion';
 // Motion level 3 (milestone): the driver's money going up after a ride.
 const COUNT_DURATION_MS = LEAF_MOTION_DURATION.milestone;
 const DELTA_VISIBLE_MS = 1600;
+// Last amount shown per memoryKey, kept while the app runs. The driver home is
+// mounted again after the receipt, so the rise from the ride must be measured
+// against what the driver saw before, not against the first value of this mount.
+const lastShownByKey = new Map();
+
+export function resetLeafAnimatedAmountMemory() {
+  lastShownByKey.clear();
+}
 const SETTLE_WINDOW_MS = 6000;
 
 // "R$ 1.234,56" -> 1234.56. Returns null when the label is not a plain amount.
@@ -29,11 +37,12 @@ export function formatBrlAmount(value) {
 // showDelta, a rise also floats a "+ R$ x" chip up and tints the value lime
 // once. The first value shown, non-amount labels and reduced-motion users get
 // plain text.
-export default function LeafAnimatedAmount({ label, style, showDelta = false, deltaPlacement = 'above', ...textProps }) {
+export default function LeafAnimatedAmount({ label, style, showDelta = false, deltaPlacement = 'above', memoryKey, ...textProps }) {
   const reduceMotion = useReducedMotion();
   const target = parseBrlAmount(label);
-  const [shown, setShown] = useState(label);
-  const previousRef = useRef(target);
+  const remembered = memoryKey ? lastShownByKey.get(memoryKey) : undefined;
+  const [shown, setShown] = useState(remembered !== undefined && remembered !== target ? formatBrlAmount(remembered) : label);
+  const previousRef = useRef(remembered !== undefined ? remembered : target);
   // While the screen is still loading, the first values replace each other
   // (cached figure, then the server's). Those are not earnings going up.
   const mountedAtRef = useRef(Date.now());
@@ -43,10 +52,20 @@ export default function LeafAnimatedAmount({ label, style, showDelta = false, de
   const [delta, setDelta] = useState(null);
 
   useEffect(() => {
+    // A zero while the screen loads (no data yet) must not erase the remembered
+    // amount, or the real value arriving next would look like money going up.
+    const loadingZero = remembered !== undefined && target === 0 && remembered > 0
+      && Date.now() - mountedAtRef.current < SETTLE_WINDOW_MS;
+    if (loadingZero) {
+      return undefined;
+    }
     const from = previousRef.current;
     previousRef.current = target;
+    if (memoryKey && target !== null) lastShownByKey.set(memoryKey, target);
     if (frameRef.current) cancelAnimationFrame(frameRef.current);
-    const settling = Date.now() - mountedAtRef.current < SETTLE_WINDOW_MS;
+    // With a remembered value the first change is real (money from a ride), so the
+    // loading window that ignores cached-then-server swaps does not apply.
+    const settling = remembered === undefined && Date.now() - mountedAtRef.current < SETTLE_WINDOW_MS;
     if (reduceMotion || settling || target === null || from === null || from === target) {
       setShown(label);
       return undefined;
@@ -82,7 +101,9 @@ export default function LeafAnimatedAmount({ label, style, showDelta = false, de
     return () => {
       if (frameRef.current) cancelAnimationFrame(frameRef.current);
     };
-  }, [deltaProgress, label, pulse, reduceMotion, showDelta, target]);
+    // remembered is read once per mount on purpose.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deltaProgress, label, memoryKey, pulse, reduceMotion, showDelta, target]);
 
   return (
     <View>
