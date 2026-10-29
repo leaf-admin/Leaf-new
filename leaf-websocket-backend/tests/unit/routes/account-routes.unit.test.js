@@ -699,6 +699,22 @@ describe('account deletion route', () => {
     }, { merge: true });
   });
 
+  it('stores the passenger ride comfort choices and drops unknown values', async () => {
+    mockUserDocGet.mockResolvedValue({ exists: true, data: () => ({ appPreferences: {} }) });
+
+    const response = await request(createApp())
+      .patch('/api/account/preferences')
+      .set('Authorization', 'Bearer firebase-token')
+      .send({ preferences: { rideTemperature: 'cool', rideSound: 'sauna', rideComfortAsked: true } });
+
+    expect(response.status).toBe(200);
+    expect(response.body.preferences).toMatchObject({
+      rideTemperature: 'cool',
+      rideSound: 'any',
+      rideComfortAsked: true,
+    });
+  });
+
   it('blocks vehicle mutations while the authenticated driver is online', async () => {
     mockUserDocGet.mockResolvedValue({
       exists: true,
