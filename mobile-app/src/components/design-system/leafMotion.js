@@ -12,8 +12,10 @@ export const LEAF_MOTION_DURATION = Object.freeze({
   milestone: 900,
 });
 
-// Desacelera devagar e para no ponto (ease-out quint).
-export const LEAF_MOTION_EASING = Easing.bezier(0.22, 1, 0.36, 1);
+// Desacelera devagar e para no ponto (ease-out quint). LEAF_MOTION_EASING é do Animated
+// do React Native; animações do Reanimated montam a sua a partir de LEAF_MOTION_BEZIER.
+export const LEAF_MOTION_BEZIER = Object.freeze([0.22, 1, 0.36, 1]);
+export const LEAF_MOTION_EASING = Easing.bezier(...LEAF_MOTION_BEZIER);
 
 export const LEAF_PRESS = Object.freeze({
   scale: 0.98,
