@@ -17,14 +17,42 @@ describe('administrative metrics read budgets', () => {
     expect(query.limitToFirst).toHaveBeenCalledWith(2001);
   });
 
-  test('two actual database calls keep slots until settled, with no unbounded queue', async () => {
+  test('two database calls run at once; a few more wait for a slot and the queue stays bounded', async () => {
     const resolvers = [];
-    const run = () => budget.admit(() => new Promise(resolve => resolvers.push(resolve)));
-    const a = run(); const b = run();
-    await expect(run()).rejects.toMatchObject({ statusCode: 503 });
-    resolvers.forEach(resolve => resolve('done'));
-    await expect(Promise.all([a, b])).resolves.toEqual(['done', 'done']);
+    const started = [];
+    const run = (id) => budget.admit(() => new Promise(resolve => { started.push(id); resolvers.push(resolve); }));
+    const active = [run('a'), run('b')];
+    const queued = Array.from({ length: 6 }, (_, index) => run(`q${index}`));
+    await expect(run('overflow')).rejects.toMatchObject({ statusCode: 503 });
+    expect(started).toEqual(['a', 'b']);
+
+    resolvers.shift()('done');
+    await expect(active[0]).resolves.toBe('done');
+    await new Promise(resolve => setImmediate(resolve));
+    expect(started).toEqual(['a', 'b', 'q0']);
+
+    while (resolvers.length) {
+      resolvers.shift()('done');
+      await new Promise(resolve => setImmediate(resolve));
+    }
+    await expect(Promise.all([active[1], ...queued])).resolves.toHaveLength(7);
     await expect(budget.admit(async () => 'recovered')).resolves.toBe('recovered');
+  });
+
+  test('a queued read gives up after the wait limit', async () => {
+    jest.useFakeTimers();
+    try {
+      const release = [];
+      const hold = () => budget.admit(() => new Promise(resolve => release.push(resolve)));
+      const held = [hold(), hold()];
+      const queued = budget.admit(async () => 'late');
+      jest.advanceTimersByTime(8001);
+      await expect(queued).rejects.toMatchObject({ statusCode: 503 });
+      release.forEach(resolve => resolve('done'));
+      await Promise.all(held);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   test('provider failure does not enable global fallback', () => {

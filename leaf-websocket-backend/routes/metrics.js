@@ -229,6 +229,31 @@ router.get('/api/metrics/rides/daily', async (req, res) => {
   }
 });
 
+// GET /api/metrics/rides/series?days=14 - Corridas e GMV por dia (gráficos da visão geral).
+// Uma leitura limitada por janela, guardada 10 minutos.
+const RIDES_SERIES_CACHE_TTL_SECONDS = 600;
+router.get('/api/metrics/rides/series', async (req, res) => {
+  try {
+    const days = Math.min(31, Math.max(1, Number.parseInt(req.query.days, 10) || 14));
+    const cacheKey = buildMetricsCacheKey('rides-series', {
+      days,
+      slot: Math.floor(Date.now() / (RIDES_SERIES_CACHE_TTL_SECONDS * 1000))
+    });
+    const cached = await readMetricsCache(cacheKey);
+    if (cached) {
+      res.set('X-Leaf-Metrics-Cache', 'HIT');
+      return res.json(cached);
+    }
+    const series = await modernMetricsService.getRidesDailySeries({ days });
+    await writeMetricsCache(cacheKey, series, RIDES_SERIES_CACHE_TTL_SECONDS);
+    res.set('X-Leaf-Metrics-Cache', 'MISS');
+    return res.json(series);
+  } catch (error) {
+    logError(error, 'Erro ao buscar série diária de corridas:', { service: 'metrics-routes' });
+    res.status(error.statusCode || 500).json({ error: error.statusCode === 503 ? 'Métricas temporariamente indisponíveis' : 'Erro interno do servidor' });
+  }
+});
+
 // ==========================================
 // 👥 MÉTRICAS DE USUÁRIOS
 // ==========================================

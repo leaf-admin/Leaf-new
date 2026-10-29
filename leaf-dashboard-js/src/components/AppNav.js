@@ -24,11 +24,37 @@ function resolveActiveItem(pathname, navGroups) {
   return matches.sort((a, b) => b.href.length - a.href.length)[0];
 }
 
+const NAV_GROUPS_STORAGE_KEY = "leaf.dashboard.nav-groups";
+
+const NAV_ICON_PATHS = {
+  today: "M3 10.5L10 4l7 6.5M5 9v7h4v-4h2v4h4V9",
+  operations: "M7 9a3 3 0 100-6 3 3 0 000 6zM2 17c0-3 2.2-5 5-5s5 2 5 5M13.5 9a2.5 2.5 0 100-5M14 12c2.4.3 4 2.2 4 5",
+  finance: "M3 6.5A2.5 2.5 0 015.5 4h9A2.5 2.5 0 0117 6.5v7a2.5 2.5 0 01-2.5 2.5h-9A2.5 2.5 0 013 13.5v-7zM3 8h14M13 12h1.5",
+  growth: "M3 15l5-5 3 3 6-6M12 7h5v5",
+  system: "M2 10h3l2-5 4 10 2-5h5",
+};
+
+function NavGroupIcon({ name }) {
+  return (
+    <svg className="app-sidebar-group-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <path
+        d={NAV_ICON_PATHS[name] || NAV_ICON_PATHS.today}
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export default function AppNav() {
   const pathname = usePathname();
   const router = useRouter();
   const { user, signOut } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
+  // Which menu groups the operator opened or closed; the active one starts open.
+  const [openGroups, setOpenGroups] = useState({});
   const [runtimeFlags, setRuntimeFlags] = useState(null);
   const menuButtonRef = useRef(null);
   const wasMobileOpenRef = useRef(false);
@@ -116,6 +142,27 @@ export default function AppNav() {
     wasMobileOpenRef.current = mobileOpen;
   }, [mobileOpen]);
 
+  useEffect(() => {
+    try {
+      const stored = JSON.parse(window.localStorage.getItem(NAV_GROUPS_STORAGE_KEY) || "{}");
+      if (stored && typeof stored === "object") setOpenGroups(stored);
+    } catch {
+      // Sem armazenamento local: grupos voltam ao padrão (o ativo aberto).
+    }
+  }, []);
+
+  const toggleGroup = (groupId, nextExpanded) => {
+    setOpenGroups((current) => {
+      const next = { ...current, [groupId]: nextExpanded };
+      try {
+        window.localStorage.setItem(NAV_GROUPS_STORAGE_KEY, JSON.stringify(next));
+      } catch {
+        // Preferência só desta sessão.
+      }
+      return next;
+    });
+  };
+
   const onSignOut = async () => {
     try {
       await signOut();
@@ -178,24 +225,47 @@ export default function AppNav() {
         <nav id="app-sidebar-nav" className="app-sidebar-nav" aria-label="Navegação principal">
           {visibleGroups.map((group) => {
             const groupActive = group.id === activeGroup.id;
+            // "Hoje" (support, approvals) and the current area start open; the rest is one click away.
+            const expanded = openGroups[group.id] ?? (groupActive || group.id === "today");
+            const linksId = `app-sidebar-links-${group.id}`;
             return (
-              <section key={group.id} className="app-sidebar-group">
-                <p className={groupActive ? "app-sidebar-section app-sidebar-section-active" : "app-sidebar-section"}>{group.section}</p>
-                <div className="app-sidebar-links">
-                  {group.items.map((item) => {
-                    const active = activeItem?.href === item.href;
-                    return (
-                      <Link
-                        key={item.href}
-                        href={item.href}
-                        className={active ? "app-sidebar-link app-sidebar-link-active" : "app-sidebar-link"}
-                        aria-current={active ? "page" : undefined}
-                      >
-                        {item.label}
-                      </Link>
-                    );
-                  })}
-                </div>
+              <section
+                key={group.id}
+                className={groupActive ? "app-sidebar-group app-sidebar-group-active" : "app-sidebar-group"}
+              >
+                <button
+                  type="button"
+                  className="app-sidebar-group-toggle"
+                  aria-expanded={expanded}
+                  aria-controls={linksId}
+                  onClick={() => toggleGroup(group.id, !expanded)}
+                >
+                  <NavGroupIcon name={group.icon} />
+                  <span className="app-sidebar-group-label">{group.section}</span>
+                  {!expanded && group.items.length > 1 ? (
+                    <span className="app-sidebar-group-count">{group.items.length}</span>
+                  ) : null}
+                  <svg className="app-sidebar-chevron" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <path d="M6 4l4 4-4 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </button>
+                {expanded ? (
+                  <div className="app-sidebar-links" id={linksId}>
+                    {group.items.map((item) => {
+                      const active = activeItem?.href === item.href;
+                      return (
+                        <Link
+                          key={item.href}
+                          href={item.href}
+                          className={active ? "app-sidebar-link app-sidebar-link-active" : "app-sidebar-link"}
+                          aria-current={active ? "page" : undefined}
+                        >
+                          {item.label}
+                        </Link>
+                      );
+                    })}
+                  </div>
+                ) : null}
               </section>
             );
           })}

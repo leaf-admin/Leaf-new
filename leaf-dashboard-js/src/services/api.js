@@ -370,6 +370,10 @@ class LeafApiService {
     return this.request("/metrics/rides/daily");
   }
 
+  async getRidesSeries(days = 14) {
+    return this.request(`/metrics/rides/series?days=${encodeURIComponent(days)}`);
+  }
+
   async getMetricsFinancial() {
     return this.request("/metrics/financial/rides");
   }
