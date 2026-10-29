@@ -681,6 +681,30 @@ router.post('/api/places/autocomplete', placesAccess('autocomplete'), async (req
       }
     }
 
+    // Antes do Google: lugares já resolvidos na região cujo nome começa com o texto.
+    const prefixMatches = await placesCacheService.searchPlacesByPrefix(query, location);
+    if (prefixMatches.length > 0) {
+      return res.json({
+        status: 'success',
+        source: 'cache_prefix',
+        predictions: prefixMatches.map((cached) => ({
+          place_id: cached.place_id || null,
+          description: cached.address || cached.name || query,
+          source: 'redis_prefix_cache',
+          structured_formatting: {
+            main_text: cached.name || cached.address || query,
+            secondary_text: cached.address || cached.name || query,
+          },
+          types: [],
+          reference: cached.place_id || null,
+          location: { lat: cached.lat, lng: cached.lng },
+          locationSource: 'place_coordinates',
+        })),
+        telemetryCaptured: false,
+        cached: true,
+      });
+    }
+
     const predictions = await placesCacheService.fetchAutocompletePredictions(query, {
       location,
       sessionToken,

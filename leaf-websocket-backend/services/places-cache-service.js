@@ -407,6 +407,15 @@ function buildQueryCacheKey(alias, geoScope = null) {
   return geoScope ? `place:v2:geo:${geoScope}:${alias}` : `place:${alias}`;
 }
 
+// Índice por prefixo dos lugares já resolvidos numa região: a busca "via pa" encontra
+// "via parque shopping" sem chamar o Google. Mesmo prazo do cache do lugar (30 dias).
+const PREFIX_INDEX_MIN_QUERY_LEN = 3;
+const PREFIX_INDEX_LIMIT = 5;
+
+function buildPrefixIndexKey(geoScope = null) {
+  return `places:prefix:v1:${geoScope || 'global'}`;
+}
+
 function haversineKm(origin, destination) {
   const a = normalizeCacheLocation(origin);
   const b = normalizeCacheLocation(destination);
@@ -845,6 +854,58 @@ class PlacesCacheService {
    * @param {object} placeData - Dados do lugar do Google Places
    * @returns {Promise<boolean>} - true se salvou com sucesso
    */
+  async indexPlaceForPrefixSearch({ alias, name, geoScope, payload }) {
+    if (typeof this.redis?.zadd !== 'function') return;
+    const aliases = new Set([alias]);
+    if (name && isValidQuery(name)) aliases.add(normalizeQuery(name));
+    const indexKey = buildPrefixIndexKey(geoScope);
+    try {
+      for (const entry of aliases) {
+        if (entry !== alias) {
+          await this.redis.setex(buildQueryCacheKey(entry, geoScope), this.cacheTTL, JSON.stringify(payload));
+        }
+        await this.redis.zadd(indexKey, 0, entry);
+      }
+      await this.redis.expire(indexKey, this.cacheTTL);
+    } catch (error) {
+      logger.warn(`⚠️ [PlacesCache] Falha ao indexar prefixo: ${error.message}`);
+    }
+  }
+
+  // Lugares já resolvidos cujo nome começa com o texto digitado, na região e depois no geral.
+  async searchPlacesByPrefix(query, location = null, limit = PREFIX_INDEX_LIMIT) {
+    if (!this.isInitialized || typeof this.redis?.zrangebylex !== 'function') return [];
+    if (!isValidQuery(query)) return [];
+    const prefix = normalizeQuery(query);
+    if (!prefix || prefix.length < PREFIX_INDEX_MIN_QUERY_LEN) return [];
+    const geoScope = resolveQueryGeoScope(location);
+    const scopes = geoScope ? [geoScope, null] : [null];
+    const results = [];
+    const seen = new Set();
+    try {
+      for (const scope of scopes) {
+        const aliases = await this.redis.zrangebylex(
+          buildPrefixIndexKey(scope), `[${prefix}`, `[${prefix}\xff`, 'LIMIT', 0, limit,
+        );
+        for (const entry of aliases || []) {
+          const raw = await this.redis.get(buildQueryCacheKey(entry, scope));
+          if (!raw) continue;
+          const place = JSON.parse(raw);
+          const identity = place.place_id || `${place.lat},${place.lng}`;
+          if (seen.has(identity) || !isCachedPlaceCompatibleWithLocation(place, location)) continue;
+          seen.add(identity);
+          results.push(place);
+          if (results.length >= limit) return results;
+        }
+      }
+    } catch (error) {
+      logger.warn(`⚠️ [PlacesCache] Falha na busca por prefixo: ${error.message}`);
+      return results;
+    }
+    if (results.length) this.incrementHit();
+    return results;
+  }
+
   async savePlace(query, placeData, options = {}) {
     try {
       if (!isValidQuery(query) || !placeData) {
@@ -880,6 +941,7 @@ class PlacesCacheService {
               JSON.stringify(scopedCacheData),
             );
           }
+          await this.indexPlaceForPrefixSearch({ alias, name: cacheData.name, geoScope, payload: scopedCacheData });
           logger.info(`💾 [PlacesCache] Place salvo no cache: ${alias}${geoScope ? ` geo:${geoScope}` : ''}`);
           this.incrementSave(); // 📊 Incrementar save
           
