@@ -1,6 +1,7 @@
 export const dashboardNavigationGroups = [
   {
     id: "today",
+    icon: "today",
     section: "Hoje",
     label: "Ação imediata",
     href: "/dashboard",
@@ -12,6 +13,7 @@ export const dashboardNavigationGroups = [
   },
   {
     id: "operations",
+    icon: "operations",
     section: "Operação",
     label: "Pessoas e território",
     href: "/drivers",
@@ -24,6 +26,7 @@ export const dashboardNavigationGroups = [
   },
   {
     id: "finance",
+    icon: "finance",
     section: "Financeiro",
     label: "Receita e cobrança",
     href: "/subscriptions",
@@ -43,6 +46,7 @@ export const dashboardNavigationGroups = [
   },
   {
     id: "growth",
+    icon: "growth",
     section: "Crescimento",
     label: "Comunicação e benefícios",
     href: "/notifications",
@@ -61,6 +65,7 @@ export const dashboardNavigationGroups = [
   },
   {
     id: "system",
+    icon: "system",
     section: "Sistema",
     label: "Saúde e auditoria",
     href: "/observability",
