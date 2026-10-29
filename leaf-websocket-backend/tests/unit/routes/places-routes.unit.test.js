@@ -4,6 +4,7 @@ const express = require('express');
 const request = require('supertest');
 
 const mockSearchPlace = jest.fn();
+const mockSearchPlacesByPrefix = jest.fn(async () => []);
 const mockFetchAutocompletePredictions = jest.fn();
 const mockGetPlaceDetails = jest.fn();
 const mockFetchDirectionsRoute = jest.fn();
@@ -16,6 +17,7 @@ const mockGetReport = jest.fn();
 
 jest.mock('../../../services/places-cache-service', () => ({
   searchPlace: (...args) => mockSearchPlace(...args),
+  searchPlacesByPrefix: (...args) => mockSearchPlacesByPrefix(...args),
   fetchAutocompletePredictions: (...args) => mockFetchAutocompletePredictions(...args),
   getPlaceDetails: (...args) => mockGetPlaceDetails(...args),
   fetchDirectionsRoute: (...args) => mockFetchDirectionsRoute(...args),
@@ -108,6 +110,22 @@ describe('places routes', () => {
         skuKey: 'autocompleteLegacyPerRequest',
       }),
     );
+  });
+
+  it('serves autocomplete from the prefix cache before calling Google', async () => {
+    mockSearchPlace.mockResolvedValueOnce(null);
+    mockSearchPlacesByPrefix.mockResolvedValueOnce([
+      { place_id: 'via_parque', name: 'Via Parque Shopping', address: 'Av. Ayrton Senna, 3000', lat: -22.98, lng: -43.36 },
+    ]);
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/places/autocomplete')
+      .send({ query: 'Via Pa', location: { lat: -22.92, lng: -43.37 } });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({ source: 'cache_prefix', cached: true });
+    expect(response.body.predictions[0].place_id).toBe('via_parque');
+    expect(mockFetchAutocompletePredictions).not.toHaveBeenCalled();
   });
 
   it('returns cached autocomplete result without billing telemetry', async () => {

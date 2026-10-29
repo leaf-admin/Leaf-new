@@ -915,6 +915,40 @@ describe('places-cache-service directions steps', () => {
     expect(cacheKeys).not.toContain('place:shopping_leblon');
   });
 
+  it('finds a saved place by the beginning of its name without calling Google', async () => {
+    const placesCacheService = loadService();
+    placesCacheService.isInitialized = true;
+    const store = new Map();
+    const index = new Map();
+    mockRedisConnection.setex.mockImplementation(async (key, _ttl, value) => { store.set(key, value); return 'OK'; });
+    mockRedisConnection.get.mockImplementation(async (key) => store.get(key) || null);
+    mockRedisConnection.zadd = jest.fn(async (key, _score, member) => {
+      index.set(key, [...new Set([...(index.get(key) || []), member])].sort());
+      return 1;
+    });
+    mockRedisConnection.expire = jest.fn(async () => 1);
+    mockRedisConnection.zrangebylex = jest.fn(async (key, min) => {
+      const prefix = String(min).slice(1);
+      return (index.get(key) || []).filter((member) => member.startsWith(prefix));
+    });
+    const location = { lat: -22.9213, lng: -43.3722 };
+    global.fetch = jest.fn();
+
+    await placesCacheService.savePlace('Via Parque Shopping', {
+      place_id: 'via_parque', name: 'Via Parque Shopping', address: 'Av. Ayrton Senna, 3000', lat: -22.9839, lng: -43.3657,
+    }, { location });
+
+    const matches = await placesCacheService.searchPlacesByPrefix('Via Pa', location);
+    const none = await placesCacheService.searchPlacesByPrefix('Barra', location);
+
+    expect(matches.map((place) => place.place_id)).toEqual(['via_parque']);
+    expect(none).toEqual([]);
+    expect(global.fetch).not.toHaveBeenCalled();
+    delete mockRedisConnection.zadd;
+    delete mockRedisConnection.expire;
+    delete mockRedisConnection.zrangebylex;
+  });
+
   it('does not reuse a distant legacy query cache hit when search location is provided', async () => {
     const placesCacheService = loadService();
     placesCacheService.isInitialized = true;
