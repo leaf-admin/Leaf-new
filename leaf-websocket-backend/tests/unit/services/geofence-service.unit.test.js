@@ -116,6 +116,34 @@ describe('geofence-service', () => {
     expect(geofenceService.isPointInPolygon(boundary[1], boundary[0])).toBe(true);
   });
 
+  it('describes whether a driver going online is inside the operation area', () => {
+    const geofenceService = require('../../../services/geofence-service');
+
+    expect(geofenceService.describeDriverServiceArea(-22.91, -43.22)).toEqual(expect.objectContaining({ inside: true }));
+    expect(geofenceService.describeDriverServiceArea(-22.80, -43.30)).toEqual(expect.objectContaining({ inside: false }));
+    expect(geofenceService.describeDriverServiceArea('x', null)).toBeNull();
+
+    geofenceService.allowedRegion = null;
+    expect(geofenceService.describeDriverServiceArea(-22.91, -43.22)).toBeNull();
+  });
+
+  it('tells whether rides can start or end in an area the driver wants to avoid', () => {
+    const geofenceService = require('../../../services/geofence-service');
+
+    // Straddles the region edge: one vertex inside.
+    expect(geofenceService.describeAreaServiceability([
+      { lat: -22.90, lng: -43.30 },
+      { latitude: -22.90, longitude: -43.20 },
+    ])).toEqual({ pickupPossible: true, destinationPossible: true });
+    // Outside the region, inside the destination bounds.
+    expect(geofenceService.describeAreaServiceability([{ lat: -22.80, lng: -43.40 }]))
+      .toEqual({ pickupPossible: false, destinationPossible: true });
+    // Outside both.
+    expect(geofenceService.describeAreaServiceability([{ lat: -23.55, lng: -46.63 }]))
+      .toEqual({ pickupPossible: false, destinationPossible: false });
+    expect(geofenceService.describeAreaServiceability([])).toBeNull();
+  });
+
   it('blocks rides when pickup is outside the configured region', () => {
     const geofenceService = require('../../../services/geofence-service');
 

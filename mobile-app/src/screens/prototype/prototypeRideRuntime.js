@@ -1,4 +1,8 @@
 import { compactPersistedRideRecord } from "./persistedRideCompaction";
+import {
+  buildRideComfortFromPreferences,
+  getLastKnownMobilePreferences,
+} from "../../services/MobilePreferencesService";
 import { parseRideActionLink } from "../../services/rideActionLink";
 import { resolveDriverActionLocation } from "../../services/driverActionLocation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -738,6 +742,8 @@ const DEFAULT_RUNTIME_STATE = Object.freeze({
   driverOnlinePending: false,
   driverOnlineStartedAt: null,
   driverOnlineDaily: null,
+  // Server answer to "am I inside the operation area?" when going online (informative only).
+  driverServiceArea: null,
   driverOnlineMutationSource: "",
   driverOnlineVisualOnly: false,
   driverDestinationMode: DEFAULT_DRIVER_DESTINATION_MODE,
@@ -870,6 +876,13 @@ export function buildNoDriversFoundPaymentState(
 
 let runtimeState = { ...DEFAULT_RUNTIME_STATE };
 const runtimeDispatchedProfileRestoreKeys = new Set();
+
+export function normalizeDriverServiceArea(value) {
+  if (!value || typeof value !== "object" || typeof value.inside !== "boolean") {
+    return null;
+  }
+  return { inside: value.inside, regionName: value.regionName || null };
+}
 
 function normalizeDriverOnlineDailySnapshot(snapshot) {
   if (!snapshot || typeof snapshot !== "object") {
@@ -13009,6 +13022,12 @@ function attachSocketListeners() {
       ...(normalizedDriverOnlineDaily
         ? { driverOnlineDaily: normalizedDriverOnlineDaily }
         : {}),
+      // Only the online ack carries serviceArea; other status events keep the last answer.
+      ...(!nextOnline
+        ? { driverServiceArea: null }
+        : payload && Object.prototype.hasOwnProperty.call(payload, "serviceArea")
+          ? { driverServiceArea: normalizeDriverServiceArea(payload.serviceArea) }
+          : {}),
       driverOnlineMutationSource: nextOnline
         ? "socket_status_online"
         : isDailyOnlineLimitReached
@@ -15415,10 +15434,16 @@ async function requestPrototypeRide(profile, payload) {
     paymentGrossAmountInCentsCandidate > 0
       ? Math.round(paymentGrossAmountInCentsCandidate)
       : paymentAmountInCents;
-  const ridePreferences =
-    payload?.preferences && typeof payload.preferences === "object"
-      ? { ...payload.preferences }
-      : {};
+  const rideComfort = buildRideComfortFromPreferences(
+    getLastKnownMobilePreferences(requestProfile?.uid),
+  );
+  const ridePreferences = {
+    ...(payload?.preferences && typeof payload.preferences === "object"
+      ? payload.preferences
+      : {}),
+    // Temperature and sound the driver sees after accepting; never blocks the request.
+    ...(rideComfort ? { comfort: rideComfort } : {}),
+  };
   const canonicalBookingRoute = resolveCanonicalBookingRouteForRequest({
     payload,
     quoteLock: runtimeState.quoteLock,
@@ -18923,6 +18948,9 @@ async function enablePrototypeDriverOnline(profile, options = {}) {
         ),
         ...(normalizedDriverOnlineDaily
           ? { driverOnlineDaily: normalizedDriverOnlineDaily }
+          : {}),
+        ...(Object.prototype.hasOwnProperty.call(onlineAck, "serviceArea")
+          ? { driverServiceArea: normalizeDriverServiceArea(onlineAck.serviceArea) }
           : {}),
         driverOnlineMutationSource: "enable_online_remote_confirmed",
         lastError: "",

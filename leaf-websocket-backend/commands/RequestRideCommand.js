@@ -25,6 +25,7 @@ const traceContext = require('../utils/trace-context');
 const { metrics } = require('../utils/prometheus-metrics');
 const { validateAndEnsureTraceIdInCommand } = require('../utils/trace-validator');
 const geofenceService = require('../services/geofence-service');
+const { sanitizeRidePreferences } = require('../services/ride-comfort-preferences');
 const fareEstimationService = require('../services/fare-estimation-service');
 const PaymentService = require('../services/payment-service');
 const passengerDiscountBenefitService = require('../services/passenger-discount-benefit-service');
@@ -59,10 +60,8 @@ class RequestRideCommand extends Command {
             data.paymentData && typeof data.paymentData === 'object'
                 ? { ...data.paymentData }
                 : null;
-        this.preferences =
-            data.preferences && typeof data.preferences === 'object'
-                ? { ...data.preferences }
-                : {};
+        // O conforto (temperatura, som) é refeito no servidor; o resto segue como veio.
+        this.preferences = sanitizeRidePreferences(data.preferences);
         this.pricingContext = data.pricingContext || data.operational || null;
         // ✅ VALIDAÇÃO: Garantir traceId válido
         this.traceId = validateAndEnsureTraceIdInCommand(data, 'RequestRide');

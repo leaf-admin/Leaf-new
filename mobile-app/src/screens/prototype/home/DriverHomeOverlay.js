@@ -436,6 +436,7 @@ function DriverHomeOverlay({
   driverOnlinePending = false,
   driverOnlineStartedAt = null,
   driverOnlineDaily = null,
+  driverOutsideServiceArea = false,
   driverRealtimeAuthenticated = true,
   driverCanGoOnline = false,
   driverActivationResolved = false,
@@ -1001,7 +1002,15 @@ function DriverHomeOverlay({
       >
         <LeafGlassSurface style={styles.driverControlCard}>
           {/* Online and waiting: a moving line says the app is looking for rides. */}
-          {sliderStatus === "online" ? (
+          {/* Online outside the operation area: say so instead of "looking for rides". */}
+          {sliderStatus === "online" && driverOutsideServiceArea ? (
+            <View style={styles.driverOutsideAreaRow} testID="driver-home-outside-service-area" accessibilityRole="alert">
+              <Ionicons name="navigate-circle-outline" size={18} color={DRIVER_HOME_COLOR.warningText} />
+              <Text style={styles.driverOutsideAreaText}>
+                Você está fora da área de operação. As corridas começam só dentro dela.
+              </Text>
+            </View>
+          ) : sliderStatus === "online" ? (
             <View style={styles.driverSearchingRow} testID="driver-home-searching">
               <LeafSearchingLine color={DRIVER_HOME_COLOR.leaf} />
               <Text style={styles.driverSearchingText}>Procurando corridas perto de você</Text>
@@ -1435,6 +1444,20 @@ const styles = StyleSheet.create({
     lineHeight: 16,
     color: "#5F665C",
     textAlign: "center",
+  },
+  driverOutsideAreaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 8,
+    paddingTop: 4,
+    paddingBottom: 10,
+    gap: 8,
+  },
+  driverOutsideAreaText: {
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 16,
+    color: DRIVER_HOME_COLOR.warningText,
   },
   driverControlCard: {
     borderRadius: DRIVER_HOME_CARD_RADIUS,

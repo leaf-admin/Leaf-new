@@ -264,6 +264,39 @@ describe("DriverLiveRideOverlay", () => {
     expect(screen.getByLabelText("Cheguei ao embarque")).toBeTruthy();
   });
 
+  it("shows the passenger comfort on the way to pickup", () => {
+    const ride = {
+      bookingId: "booking_1",
+      pickupAddress: "1540 Mission St",
+      dropoffAddress: "1 Ferry Building",
+      passengerName: "Passageiro Leaf",
+      preferences: {
+        comfort: {
+          temperature: { value: "cool", label: "Ar mais fresco" },
+          sound: { value: "quiet", label: "Prefere silêncio" },
+        },
+      },
+    };
+    const props = {
+      paymentMethod: "pix",
+      markDriverArrived: jest.fn(),
+      startTripFlow: jest.fn(),
+      completeTripFlow: jest.fn(),
+    };
+    const accepted = render(
+      <DriverLiveRideOverlay {...props} driverActiveRide={{ ...ride, status: "accepted" }} bookingStatus="accepted" />,
+    );
+    expect(accepted.getByTestId("driver-live-trip-preferences")).toBeTruthy();
+    expect(accepted.getByText("Ar mais fresco")).toBeTruthy();
+    expect(accepted.getByText("Prefere silêncio")).toBeTruthy();
+    accepted.unmount();
+
+    const started = render(
+      <DriverLiveRideOverlay {...props} driverActiveRide={{ ...ride, status: "started" }} bookingStatus="started" />,
+    );
+    expect(started.queryByTestId("driver-live-trip-preferences")).toBeNull();
+  });
+
   it("steps the trip card through peek, compact and expanded heights", () => {
     const screen = render(
       <DriverLiveRideOverlay
