@@ -1,3 +1,4 @@
+const { buildRideComfort } = require('../services/ride-comfort-preferences');
 const {
     clearActiveTripForDriver,
     resolveActiveTripForDriver
@@ -228,6 +229,7 @@ async function buildActiveRideSnapshotForUser(redis, userId, userType) {
     );
     const terminal = isTerminalBookingStatus(status);
     const hasActiveRide = !terminal;
+    const rideComfort = buildRideComfort(parseJsonSafe(bookingData.preferences, {})?.comfort);
     const passengerName = bookingData.customerName ||
         bookingData.passengerName ||
         parseBookingParticipant(bookingData.passenger) ||
@@ -298,6 +300,8 @@ async function buildActiveRideSnapshotForUser(redis, userId, userType) {
         paymentStatus: bookingData.paymentStatus || bookingData.payment_status || null,
         recoveryMode: bookingData.recoveryMode || null,
         operationalContinuation: parseJsonSafe(bookingData.operationalContinuation, null),
+        // Só o conforto (temperatura, som) sai daqui: o motorista vê depois de aceitar.
+        ...(rideComfort ? { preferences: { comfort: rideComfort } } : {}),
         activeExtensionRequest: parseActiveExtensionRequest(bookingData.activeExtensionRequest),
         extensionPaymentStatus: bookingData.extensionPaymentStatus || null,
         extensionChargeId: bookingData.extensionChargeId || null,

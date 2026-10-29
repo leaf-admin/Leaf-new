@@ -9,8 +9,17 @@ export const DEFAULT_MOBILE_PREFERENCES = Object.freeze({
   notificationsEnabled: true,
   trafficLayerEnabled: true,
   voiceGuidanceEnabled: false,
+  // Passenger comfort the driver sees after accepting; 'any' means no preference.
+  rideTemperature: 'any',
+  rideSound: 'any',
+  rideComfortAsked: false,
   schemaVersion: 1,
 });
+
+export const RIDE_TEMPERATURE_CHOICES = Object.freeze(['cool', 'mild', 'any']);
+export const RIDE_SOUND_CHOICES = Object.freeze(['quiet', 'music', 'any']);
+const BOOLEAN_FIELDS = ['notificationsEnabled', 'trafficLayerEnabled', 'voiceGuidanceEnabled', 'rideComfortAsked'];
+const CHOICE_FIELDS = { rideTemperature: RIDE_TEMPERATURE_CHOICES, rideSound: RIDE_SOUND_CHOICES };
 
 async function request(endpoint, options = {}) {
   const response = await authService.authenticatedRequest(endpoint, options);
@@ -24,14 +33,32 @@ async function request(endpoint, options = {}) {
   return payload;
 }
 
+function pickSupported(value = {}) {
+  const picked = {};
+  BOOLEAN_FIELDS.forEach((key) => {
+    if (typeof value?.[key] === 'boolean') picked[key] = value[key];
+  });
+  Object.entries(CHOICE_FIELDS).forEach(([key, choices]) => {
+    if (choices.includes(value?.[key])) picked[key] = value[key];
+  });
+  return picked;
+}
+
 function normalizePreferences(value = {}) {
   return {
     ...DEFAULT_MOBILE_PREFERENCES,
-    ...(typeof value.notificationsEnabled === 'boolean' ? { notificationsEnabled: value.notificationsEnabled } : {}),
-    ...(typeof value.trafficLayerEnabled === 'boolean' ? { trafficLayerEnabled: value.trafficLayerEnabled } : {}),
-    ...(typeof value.voiceGuidanceEnabled === 'boolean' ? { voiceGuidanceEnabled: value.voiceGuidanceEnabled } : {}),
+    ...pickSupported(value),
     updatedAt: value.updatedAt || null,
   };
+}
+
+// What goes into the booking's preferences: the server rewrites labels and drops 'any'.
+export function buildRideComfortFromPreferences(preferences) {
+  if (!preferences) return null;
+  const temperature = RIDE_TEMPERATURE_CHOICES.includes(preferences.rideTemperature) ? preferences.rideTemperature : 'any';
+  const sound = RIDE_SOUND_CHOICES.includes(preferences.rideSound) ? preferences.rideSound : 'any';
+  if (temperature === 'any' && sound === 'any') return null;
+  return { temperature, sound };
 }
 
 async function requireOwner(uid) {
@@ -45,6 +72,12 @@ async function requireOwner(uid) {
 export function getCachedMobilePreferences(uid) {
   const entry = cache.get(uid);
   return entry && Date.now() - entry.fetchedAt < CACHE_TTL_MS ? entry.preferences : null;
+}
+
+// Last answer for this account regardless of age: comfort changes rarely and the
+// booking must not wait on the network for it.
+export function getLastKnownMobilePreferences(uid) {
+  return cache.get(uid)?.preferences || null;
 }
 
 function remember(uid, preferences) {
@@ -81,8 +114,7 @@ class MobilePreferencesService {
 
   async updatePreferences(patch, { uid } = {}) {
     const owner = await requireOwner(uid);
-    const supported = Object.fromEntries(['notificationsEnabled', 'trafficLayerEnabled', 'voiceGuidanceEnabled']
-      .filter(key => typeof patch?.[key] === 'boolean').map(key => [key, patch[key]]));
+    const supported = pickSupported(patch);
     if (!Object.keys(supported).length) throw new Error('Nenhuma preferência válida foi informada.');
     const payload = await request('/account/preferences', {
       method: 'PATCH',

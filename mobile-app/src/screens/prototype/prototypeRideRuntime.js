@@ -1,4 +1,8 @@
 import { compactPersistedRideRecord } from "./persistedRideCompaction";
+import {
+  buildRideComfortFromPreferences,
+  getLastKnownMobilePreferences,
+} from "../../services/MobilePreferencesService";
 import { parseRideActionLink } from "../../services/rideActionLink";
 import { resolveDriverActionLocation } from "../../services/driverActionLocation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -15415,10 +15419,16 @@ async function requestPrototypeRide(profile, payload) {
     paymentGrossAmountInCentsCandidate > 0
       ? Math.round(paymentGrossAmountInCentsCandidate)
       : paymentAmountInCents;
-  const ridePreferences =
-    payload?.preferences && typeof payload.preferences === "object"
-      ? { ...payload.preferences }
-      : {};
+  const rideComfort = buildRideComfortFromPreferences(
+    getLastKnownMobilePreferences(requestProfile?.uid),
+  );
+  const ridePreferences = {
+    ...(payload?.preferences && typeof payload.preferences === "object"
+      ? payload.preferences
+      : {}),
+    // Temperature and sound the driver sees after accepting; never blocks the request.
+    ...(rideComfort ? { comfort: rideComfort } : {}),
+  };
   const canonicalBookingRoute = resolveCanonicalBookingRouteForRequest({
     payload,
     quoteLock: runtimeState.quoteLock,
