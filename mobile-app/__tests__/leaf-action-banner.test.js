@@ -27,3 +27,11 @@ describe('LeafActionBanner', () => {
     expect(queryByTestId('leaf-action-banner-action')).toBeNull();
   });
 });
+
+describe('LeafActionBanner motion', () => {
+  it('builds its layout-animation easing with Reanimated, never React Native Easing', () => {
+    const source = require('fs').readFileSync(require('path').join(__dirname, '../src/components/design-system/LeafActionBanner.js'), 'utf8');
+    expect(source).toMatch(/ReanimatedEasing\.bezier\(\.\.\.LEAF_MOTION_BEZIER\)/);
+    expect(source).not.toMatch(/LEAF_MOTION_EASING/);
+  });
+});

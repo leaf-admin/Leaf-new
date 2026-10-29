@@ -1,9 +1,13 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import Reanimated, { FadeInUp, FadeOutUp, useReducedMotion } from 'react-native-reanimated';
+import Reanimated, { Easing as ReanimatedEasing, FadeInUp, FadeOutUp, useReducedMotion } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 import leafTypography from '../prototype/LeafTypography';
-import { LEAF_MOTION_DURATION, LEAF_MOTION_EASING } from './leafMotion';
+import { LEAF_MOTION_BEZIER, LEAF_MOTION_DURATION } from './leafMotion';
+
+// Layout animations run on the UI thread: the easing must be Reanimated's (a worklet).
+// React Native's Easing here crashed the release app when the banner appeared.
+const BANNER_EASING = ReanimatedEasing.bezier(...LEAF_MOTION_BEZIER);
 
 // Banner com ação (canvas de UI/UX, estudo 5.3, aprovado em 2026-10-29): sempre no topo,
 // sempre branco; o ícone muda de cor pelo tipo e a ação fica no próprio banner.
@@ -36,7 +40,7 @@ export default function LeafActionBanner({
   const reduceMotion = useReducedMotion();
   const palette = LEAF_BANNER_TONES[tone] || LEAF_BANNER_TONES.info;
   // Motion level 2: comes down calmly and leaves upward, no bounce.
-  const entering = reduceMotion ? undefined : FadeInUp.duration(LEAF_MOTION_DURATION.enter).easing(LEAF_MOTION_EASING);
+  const entering = reduceMotion ? undefined : FadeInUp.duration(LEAF_MOTION_DURATION.enter).easing(BANNER_EASING);
   const exiting = reduceMotion ? undefined : FadeOutUp.duration(LEAF_MOTION_DURATION.standard);
   const Body = onPress ? Pressable : View;
 
