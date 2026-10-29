@@ -1969,6 +1969,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     driverOnlinePending,
     driverOnlineStartedAt,
     driverOnlineDaily,
+    driverServiceArea,
     driverOnlineVisualOnly,
     driverCanGoOnline,
     driverActivationResolved,
@@ -5057,7 +5058,41 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   // brigava com a linha da rota. O trânsito da própria rota continua nas cores dela.
   const shouldShowTrafficLayer = false;
   const driverTripAssistNativeNavigation = driverTripAssist?.nativeNavigation || null;
-  const { uid: preferencesUid } = useMobilePreferences();
+  const {
+    uid: preferencesUid,
+    preferences: accountPreferences,
+    ready: accountPreferencesReady,
+  } = useMobilePreferences();
+  // First visit to the passenger home: ask once how they like to ride (AC, sound).
+  // The answer, or "Agora não", sets rideComfortAsked on the account.
+  const rideComfortPromptShownRef = useRef(false);
+  useEffect(() => {
+    if (
+      rideComfortPromptShownRef.current ||
+      // The role falls back to 'customer' while unknown: wait until it is known.
+      resolvedRole !== 'customer' ||
+      !(normalizeHomeRole(activeRole) || explicitProfileRole) ||
+      !accountPreferencesReady ||
+      accountPreferences?.rideComfortAsked !== false ||
+      !isScreenFocused ||
+      currentRouteName !== 'RobotaxiPrototype' ||
+      activeBooking
+    ) {
+      return;
+    }
+    rideComfortPromptShownRef.current = true;
+    navigation.navigate('LeafRidePreferences', { firstUse: true });
+  }, [
+    accountPreferences?.rideComfortAsked,
+    accountPreferencesReady,
+    activeBooking,
+    activeRole,
+    currentRouteName,
+    explicitProfileRole,
+    isScreenFocused,
+    navigation,
+    resolvedRole,
+  ]);
   useLeafVoiceGuidance({
     uid: preferencesUid,
     // This trip surface provides visual guidance only; the preferred external
@@ -10530,6 +10565,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
                 driverOnlinePending={driverOnlinePending}
                 driverOnlineStartedAt={driverOnlineStartedAt}
                 driverOnlineDaily={driverOnlineDaily}
+                driverOutsideServiceArea={driverOnline && driverServiceArea?.inside === false}
                 driverRealtimeAuthenticated={
                   isSocketAuthenticated || driverOnlineVisualOnly === true
                 }

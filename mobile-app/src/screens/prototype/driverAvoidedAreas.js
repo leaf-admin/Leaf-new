@@ -96,3 +96,13 @@ export function buildAvoidedAreasSummary(areas = []) {
   if (total === 0) return 'Nenhuma área marcada';
   return total === 1 ? '1 área marcada' : `${total} áreas marcadas`;
 }
+
+// The operation area already rules out some neighbourhoods; say so, so the driver
+// does not spend one of the four slots on a place with no rides.
+export function describeBairroServiceArea(bairro) {
+  const area = bairro?.serviceArea;
+  if (!area || area.pickupPossible !== false) return '';
+  return area.destinationPossible === false
+    ? `${bairro.name} fica fora da área de operação: nenhuma corrida passa por lá, não precisa evitar.`
+    : `${bairro.name} fica fora da área de operação: nenhuma corrida começa lá. Evitar tira só as que terminam lá.`;
+}

@@ -251,6 +251,52 @@ describe('auth-password routes', () => {
     });
   });
 
+  it('keeps the driver role when a driver sets the password from settings without userType', async () => {
+    const app = createApp();
+    mockRealtimeUsers.set('driver_1', { uid: 'driver_1', usertype: 'driver', hasPassword: false });
+    mockVerifyIdToken.mockResolvedValue({ uid: 'driver_1', phone_number: '+5521998991886' });
+
+    const setupResponse = await request(app)
+      .post('/api/auth/password/setup')
+      .set('Authorization', 'Bearer firebase-id-token')
+      .send({ phone: '+5521998991886', password: 'Leaf1234', confirmPassword: 'Leaf1234' });
+
+    expect(setupResponse.status).toBe(200);
+    expect(mockDocs.get(hashPhoneForTest('21998991886')).userType).toBe('driver');
+    expect(mockRealtimeUsers.get('driver_1').hasPassword).toBe(true);
+
+    const loginResponse = await request(app)
+      .post('/api/auth/password/login')
+      .send({ phone: '+5521998991886', password: 'Leaf1234' });
+    expect(loginResponse.body.userType).toBe('driver');
+  });
+
+  it('reports password status for the signed-in user', async () => {
+    const app = createApp();
+    mockVerifyIdToken.mockResolvedValue({ uid: 'driver_1', phone_number: '+5521998991886' });
+
+    const unauthenticated = await request(app).get('/api/auth/password/status');
+    expect(unauthenticated.status).toBe(401);
+
+    const missing = await request(app)
+      .get('/api/auth/password/status')
+      .set('Authorization', 'Bearer firebase-id-token');
+    expect(missing.status).toBe(200);
+    expect(missing.body).toEqual({ success: true, hasPassword: false, lockedUntil: null });
+
+    mockDocs.set(hashPhoneForTest('21998991886'), { uid: 'driver_1', passwordHash: 'hash' });
+    const configured = await request(app)
+      .get('/api/auth/password/status')
+      .set('Authorization', 'Bearer firebase-id-token');
+    expect(configured.body).toEqual({ success: true, hasPassword: true, lockedUntil: null });
+
+    mockDocs.set(hashPhoneForTest('21998991886'), { uid: 'someone_else', passwordHash: 'hash' });
+    const foreign = await request(app)
+      .get('/api/auth/password/status')
+      .set('Authorization', 'Bearer firebase-id-token');
+    expect(foreign.body.hasPassword).toBe(false);
+  });
+
   it('preserves driver role on password login when credential is driver', async () => {
     const app = createApp();
     mockVerifyIdToken.mockResolvedValue({

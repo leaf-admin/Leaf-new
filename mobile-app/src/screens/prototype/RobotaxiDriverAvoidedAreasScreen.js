@@ -33,6 +33,7 @@ import {
   canAddAvoidedBairro,
   describeAvoidedArea,
   describeAvoidedAreaLimit,
+  describeBairroServiceArea,
   resolveAvoidedAreaSize,
 } from './driverAvoidedAreas';
 
@@ -217,6 +218,7 @@ export default function RobotaxiDriverAvoidedAreasScreen({ navigation }) {
       return;
     }
     setCandidate(payload.bairro);
+    setMessage(describeBairroServiceArea(payload.bairro));
     const points = (payload.bairro.outline || []).flat();
     if (points.length) {
       mapRef.current?.fitToCoordinates?.(points, {

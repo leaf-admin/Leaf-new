@@ -6,6 +6,7 @@ const { logger } = require('../utils/logger');
 const { assertAccountWritable, saveAccountProfile, projectRealtimeProfile, runAccountDeletion } = require('../services/account-lifecycle-service');
 const { readPlaces, mutatePlaces, normalizePlace, validatePlaceId } = require('../services/account-saved-places');
 const redisPool = require('../utils/redis-pool');
+const { normalizeRideSound, normalizeRideTemperature } = require('../services/ride-comfort-preferences');
 const {
   buildVehicleOcrUpdates,
   normalizeVehicleOcrPayload,
@@ -212,13 +213,23 @@ const DEFAULT_APP_PREFERENCES = Object.freeze({
   notificationsEnabled: true,
   trafficLayerEnabled: true,
   voiceGuidanceEnabled: false,
+  rideTemperature: 'any',
+  rideSound: 'any',
+  rideComfortAsked: false,
   schemaVersion: 1
 });
 const APP_PREFERENCE_FIELDS = new Set([
   'notificationsEnabled',
   'trafficLayerEnabled',
-  'voiceGuidanceEnabled'
+  'voiceGuidanceEnabled',
+  // Set once the passenger answered (or skipped) the first-use comfort question.
+  'rideComfortAsked'
 ]);
+// Passenger comfort shown to the driver after accepting (services/ride-comfort-preferences).
+const APP_PREFERENCE_OPTION_FIELDS = Object.freeze({
+  rideTemperature: normalizeRideTemperature,
+  rideSound: normalizeRideSound
+});
 const ONLINE_DRIVER_STATUSES = new Set([
   'online',
   'available',
@@ -430,11 +441,17 @@ function validateVehicleInput(vehicle) {
 }
 
 function sanitizePreferencePatch(input = {}) {
-  return Object.fromEntries(
-    Object.entries(input || {}).filter(([key, value]) =>
-      APP_PREFERENCE_FIELDS.has(key) && typeof value === 'boolean'
-    )
-  );
+  const patch = {};
+  Object.entries(input || {}).forEach(([key, value]) => {
+    if (APP_PREFERENCE_FIELDS.has(key) && typeof value === 'boolean') {
+      patch[key] = value;
+      return;
+    }
+    const normalize = APP_PREFERENCE_OPTION_FIELDS[key];
+    const option = normalize ? normalize(value) : null;
+    if (option) patch[key] = option;
+  });
+  return patch;
 }
 
 async function readUserVehicles(userId) {

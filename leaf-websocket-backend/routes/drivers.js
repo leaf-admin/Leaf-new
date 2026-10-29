@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const redisPool = require('../utils/redis-pool');
 const driverLockManager = require('../services/driver-lock-manager');
+const geofenceService = require('../services/geofence-service');
 const { getPolicyForDriver } = require('../services/driver-destination-mode-service');
 const { validateAuthoritativeFinancialSnapshot } = require('../services/ride-financial-contract');
 const { requireFirebaseUser, requireFirebaseSelf } = require('../middleware/firebase-user-auth');
@@ -409,7 +410,11 @@ router.get('/api/drivers/me/avoided-areas', requireFirebaseUser, async (req, res
 // Qual bairro fica neste ponto do mapa (toque para selecionar o bairro inteiro).
 router.get('/api/drivers/me/avoided-areas/bairro', requireFirebaseUser, (req, res) => {
   const bairro = toBairroView(findBairroAt(req.query.lat, req.query.lng));
-  return res.json({ success: true, bairro });
+  // Avisa quando evitar o bairro não muda nada (ou só muda o destino): fora da área de operação.
+  const serviceArea = bairro
+    ? geofenceService.describeAreaServiceability([bairro.center, ...bairro.outline.flat()])
+    : null;
+  return res.json({ success: true, bairro: bairro ? { ...bairro, serviceArea } : null });
 });
 
 router.put('/api/drivers/me/avoided-areas', requireFirebaseUser, async (req, res) => {
