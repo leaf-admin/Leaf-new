@@ -20,6 +20,7 @@ import {
 import DatePicker from 'react-native-date-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { LeafObjectIcon } from '../components/prototype/LeafVisualElements';
+import LeafAnimatedAmount from '../components/design-system/LeafAnimatedAmount';
 import Svg, { Line, Rect, Text as SvgText } from 'react-native-svg';
 import { useSelector } from 'react-redux';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -1306,7 +1307,7 @@ export default function EarningsReportScreen({ navigation, route }) {
                   <Text style={styles.balanceLabel}>
                     {withdrawalsEnabled ? 'Disponível para saque' : 'Saldo do motorista'}
                   </Text>
-                  <Text style={styles.balanceValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>R$ {formatCurrency(saldoDisponivel)}</Text>
+                  <LeafAnimatedAmount style={styles.balanceValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7} label={`R$ ${formatCurrency(saldoDisponivel)}`} showDelta />
                   {earningsLoadFailed ? (
                     <Text style={styles.balanceLoadError} accessibilityRole="alert">
                       Não conseguimos atualizar seus ganhos agora. Os valores podem estar desatualizados.
