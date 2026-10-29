@@ -321,8 +321,15 @@ async function verifyResetOtp({ phoneDigits, verificationId, otp }) {
 router.post('/setup', requireFirebaseUser, async (req, res) => {
   try {
     const { phone, password, confirmPassword } = req.body || {};
+    // The stored profile wins: the in-app settings screen sends no userType, and a
+    // driver credential saved as 'customer' would log the driver in as a passenger.
+    const existingProfile = await getRealtimeUserByUid(req.firebaseUser.uid);
     const requestedUserType = normalizeUserType(
-      req.body?.userType || req.body?.usertype || req.firebaseUser?.userType,
+      existingProfile?.usertype ||
+        existingProfile?.userType ||
+        req.body?.userType ||
+        req.body?.usertype ||
+        req.firebaseUser?.userType,
       'customer'
     );
     const phoneDigits = normalizePhone(phone || req.firebaseUser.phone_number || req.firebaseUser.phoneNumber);
@@ -373,6 +380,29 @@ router.post('/setup', requireFirebaseUser, async (req, res) => {
     return res.status(200).json({ success: true });
   } catch (error) {
     logError(error, 'Erro ao definir senha do passageiro', { service: 'auth-password-routes' });
+    return res.status(500).json({ success: false, error: 'Erro interno do servidor' });
+  }
+});
+
+// Lets the app check, before a flow that needs it (withdrawal), whether the signed-in
+// user has an app password, and send them to create one instead of failing later.
+router.get('/status', requireFirebaseUser, async (req, res) => {
+  try {
+    const phoneDigits = normalizePhone(req.firebaseUser.phone_number || req.firebaseUser.phoneNumber);
+    if (!phoneDigits) {
+      return res.status(200).json({ success: true, hasPassword: false, reason: 'PHONE_UNAVAILABLE' });
+    }
+
+    const { data } = await getCredentialByPhone(phoneDigits);
+    const hasPassword = Boolean(data?.passwordHash) && (!data.uid || data.uid === req.firebaseUser.uid);
+    const lockedUntil = hasPassword ? lockoutUntilFromData(data) : null;
+    return res.status(200).json({
+      success: true,
+      hasPassword,
+      lockedUntil: lockedUntil && lockedUntil.getTime() > Date.now() ? lockedUntil.toISOString() : null
+    });
+  } catch (error) {
+    logError(error, 'Erro ao consultar status da senha do app', { service: 'auth-password-routes' });
     return res.status(500).json({ success: false, error: 'Erro interno do servidor' });
   }
 });

@@ -54,6 +54,20 @@ class UserAuthService {
     return response?.data || { success: false };
   }
 
+  // Whether the signed-in user already has an app password. `null` when the check
+  // failed, so callers can fall back to the server-side rule instead of blocking.
+  static async getPasswordStatus() {
+    try {
+      const response = await apiClient.get('/api/auth/password/status');
+      const data = response?.data || {};
+      if (!data.success) return null;
+      return { hasPassword: data.hasPassword === true, lockedUntil: data.lockedUntil || null };
+    } catch (error) {
+      Logger.warn('Não foi possível consultar a senha do app:', error?.message || error);
+      return null;
+    }
+  }
+
   static async postCustomOtpWithFallback(pathSuffix, payload) {
     const endpoints = [
       `/api/custom-otp/${pathSuffix}`,
