@@ -1969,6 +1969,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     driverOnlinePending,
     driverOnlineStartedAt,
     driverOnlineDaily,
+    driverServiceArea,
     driverOnlineVisualOnly,
     driverCanGoOnline,
     driverActivationResolved,
@@ -10530,6 +10531,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
                 driverOnlinePending={driverOnlinePending}
                 driverOnlineStartedAt={driverOnlineStartedAt}
                 driverOnlineDaily={driverOnlineDaily}
+                driverOutsideServiceArea={driverOnline && driverServiceArea?.inside === false}
                 driverRealtimeAuthenticated={
                   isSocketAuthenticated || driverOnlineVisualOnly === true
                 }

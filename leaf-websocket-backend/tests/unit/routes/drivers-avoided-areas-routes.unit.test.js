@@ -27,6 +27,9 @@ jest.mock('../../../utils/redis-pool', () => ({
 }));
 
 jest.mock('../../../services/driver-lock-manager', () => ({}));
+jest.mock('../../../services/geofence-service', () => ({
+  describeAreaServiceability: jest.fn(() => ({ pickupPossible: true, destinationPossible: true })),
+}));
 jest.mock('../../../services/payment-service', () => jest.fn().mockImplementation(() => ({})));
 jest.mock('../../../services/driver-destination-mode-service', () => ({
   getPolicyForDriver: jest.fn()
@@ -191,6 +194,20 @@ describe('driver avoided areas routes', () => {
     expect(stored.bairros).toEqual([lookup.body.bairro.id]);
     const hash = mockRedisState.hashes.get(`driver:${DRIVER_UID}`);
     expect(JSON.parse(hash.avoidedBairros)).toEqual([lookup.body.bairro.id]);
+  });
+
+  it('lookup tells whether rides can start or end in the neighbourhood', async () => {
+    const geofenceService = require('../../../services/geofence-service');
+    geofenceService.describeAreaServiceability.mockReturnValueOnce({ pickupPossible: false, destinationPossible: true });
+    const app = createApp();
+    const lookup = await request(app)
+      .get('/api/drivers/me/avoided-areas/bairro?lat=-22.9711&lng=-43.1822')
+      .set('Authorization', `Bearer firebase:${DRIVER_UID}`);
+
+    expect(lookup.body.bairro.serviceArea).toEqual({ pickupPossible: false, destinationPossible: true });
+    const [points] = geofenceService.describeAreaServiceability.mock.calls.at(-1);
+    expect(points[0]).toEqual(lookup.body.bairro.center);
+    expect(points.length).toBeGreaterThan(1);
   });
 
   it('PUT refuses an unknown neighbourhood and the lookup answers null outside Rio', async () => {
