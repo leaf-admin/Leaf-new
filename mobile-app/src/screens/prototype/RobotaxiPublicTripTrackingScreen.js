@@ -203,7 +203,7 @@ const styles = StyleSheet.create({
     gap: 18,
   },
   heroCard: {
-    borderRadius: 26,
+    borderRadius: 28,
     borderWidth: 1,
     borderColor: leafRideColors.line,
     backgroundColor: 'rgba(255,255,255,0.96)',
