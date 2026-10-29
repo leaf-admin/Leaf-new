@@ -15,6 +15,7 @@ import PrototypeDismissibleSheet from '../../components/prototype/PrototypeDismi
 import PrototypeMapLayer from '../../components/prototype/PrototypeMapLayer';
 import { resolveRegisteredVehicleColor } from '../../components/prototype/vehicleMarkerIdentity';
 import PrototypeConnectionStatusPill from '../../components/prototype/PrototypeConnectionStatusPill';
+import PassengerRideMomentBanner, { PASSENGER_ON_MY_WAY_MESSAGE } from './home/PassengerRideMomentBanner';
 import WooviPaymentModal from '../../components/payment/WooviPaymentModal';
 import SecurePaymentBadge from '../../components/payment/SecurePaymentBadge';
 import robotaxiPrototypeTokens from '../../components/design-system/robotaxiPrototypeTokens';
@@ -635,7 +636,8 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     riderProfile,
     endTripEarlyFlow,
     respondOperationalContinuationFlow,
-    terminalRideGuards
+    terminalRideGuards,
+    sendChatMessage
   } = usePrototypeRideRuntime();
   const insets = useSafeAreaInsets();
   const { height: windowHeight, width: windowWidth } = useWindowDimensions();
@@ -1471,6 +1473,12 @@ export default function RobotaxiTripScreen({ navigation, route }) {
   const handleOpenPassengerChat = useCallback(() => {
     navigation.navigate('RobotaxiPrototypeChat', passengerSupportContext);
   }, [navigation, passengerSupportContext]);
+  const handlePassengerOnMyWay = useCallback(async () => {
+    if (typeof sendChatMessage !== 'function') {
+      throw new Error('chat_unavailable');
+    }
+    await sendChatMessage(PASSENGER_ON_MY_WAY_MESSAGE, passengerSupportContext);
+  }, [passengerSupportContext, sendChatMessage]);
   // The ride was cancelled by the other side (driver or system) while the
   // passenger watched this screen. The runtime goes back to idle; without this
   // the card stayed up with empty driver data ("Placa não informada").
@@ -2531,6 +2539,18 @@ export default function RobotaxiTripScreen({ navigation, route }) {
           message={driverSignalIndicator?.message}
           testID="passenger-trip-driver-signal-pill"
         />
+        {!rideLocalSyncIndicator && !driverSignalIndicator ? (
+          <PassengerRideMomentBanner
+            bookingId={passengerSupportContext.bookingId}
+            status={normalizedStatus}
+            driverName={driverName === 'Motorista Leaf' ? '' : getFirstName(driverName, '')}
+            vehicleModel={vehicleModel}
+            vehiclePlate={vehiclePlate}
+            arrivalText={resolvedTripArrivalText}
+            top={insets.top + 8}
+            onOnMyWay={handlePassengerOnMyWay}
+          />
+        ) : null}
         <PrototypeDismissibleSheet
           onClose={handleDismiss}
           backdropDismissEnabled={false}
