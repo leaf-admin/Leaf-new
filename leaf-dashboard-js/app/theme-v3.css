@@ -209,3 +209,134 @@ button {
   .header h1 { font-size: 22px; }
   .kpi-value { font-size: 24px; }
 }
+
+/* ---------- Reconciliação: fluxo em faixa e lista + detalhe ---------- */
+.recon-flow-panel { margin-bottom: 16px; }
+.recon-flow {
+  list-style: none; margin: 0; padding: 0;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px;
+}
+.recon-flow-step {
+  position: relative; display: grid; gap: 4px; padding: 14px 16px;
+  border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface);
+}
+.recon-flow-step::before {
+  content: ""; position: absolute; top: 18px; right: 14px; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--dot-ok);
+}
+.recon-flow-step-warn { background: #fffaf0; border-color: #f3e2bd; }
+.recon-flow-step-warn::before { background: var(--dot-warn); }
+.recon-flow-label { font-size: 12.5px; color: var(--text-muted); padding-right: 16px; }
+.recon-flow-value { font-size: 18px; font-weight: 650; letter-spacing: -0.015em; font-variant-numeric: tabular-nums; }
+.recon-flow-detail { font-size: 12px; color: var(--text-muted); line-height: 1.35; }
+.recon-workspace {
+  display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 16px;
+  align-items: start; margin-bottom: 16px;
+}
+.recon-workspace .panel { min-width: 0; }
+.recon-workspace .table-shell .table { min-width: 0; table-layout: auto; }
+.recon-workspace td code {
+  display: inline-block; max-width: 220px; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; vertical-align: middle; font-size: 12px;
+}
+.recon-workspace .metric-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+.recon-workspace .metric-list .row {
+  display: grid; gap: 2px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-md);
+}
+.recon-workspace .metric-list .label { font-size: 12px; color: var(--text-muted); }
+.recon-workspace .metric-list .value { font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+@media (max-width: 1100px) {
+  .recon-workspace { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ---------- Ajustes gerais ---------- */
+th { white-space: nowrap; }
+.meta-badge, .status-pill, .badge,
+[class^="status-"], [class*=" status-"] { white-space: nowrap; }
+input[type="checkbox"], input[type="radio"] {
+  min-height: 0; width: 16px; height: 16px; padding: 0; margin: 0;
+  border-radius: 4px; box-shadow: none; accent-color: var(--accent);
+}
+
+/* ---------- Suporte: números numa faixa só e conversa dentro do card ---------- */
+.support-kpi-strip {
+  display: flex; gap: 0; overflow-x: auto; margin-bottom: 16px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-card);
+}
+.support-kpi-strip .card,
+.support-kpi-strip .kpi-card {
+  flex: 1 0 112px; min-height: 0; padding: 14px 16px; gap: 2px;
+  border: 0; border-right: 1px solid var(--line); border-radius: 0; box-shadow: none; background: transparent;
+}
+.support-kpi-strip .card:last-child { border-right: 0; }
+.support-kpi-strip h2 { font-size: 12px; white-space: nowrap; }
+.support-kpi-strip .kpi-value { font-size: 20px; }
+.support-kpi-strip .kpi-subtitle { font-size: 11.5px; white-space: nowrap; }
+.support-inbox-layout {
+  grid-template-columns: minmax(280px, 340px) minmax(0, 1fr) minmax(260px, 320px);
+  gap: 16px; height: calc(100vh - 280px); min-height: 560px; margin-bottom: 16px;
+}
+.support-inbox-panel, .support-conversation-panel, .support-context-panel { padding: 16px; overflow: hidden; }
+.support-conversation-panel { display: flex; flex-direction: column; gap: 12px; }
+.support-conversation-panel .support-messages {
+  flex: 1 1 auto; min-height: 0; max-height: none; align-content: start;
+  background: var(--bg-soft); border-color: var(--line);
+}
+.support-conversation-panel .orchestrator-summary .meta-badge {
+  white-space: normal; height: auto; min-height: 24px; padding: 3px 9px; max-width: 100%;
+}
+.support-composer { flex: none; display: grid; gap: 8px; }
+.support-composer .quick-reply-row { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; }
+.support-composer .quick-reply-row button {
+  flex: none; max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  background: var(--surface); color: var(--text); border: 1px solid var(--line-strong);
+  min-height: 30px; font-size: 12.5px; font-weight: 500; padding: 0 12px;
+}
+.support-inbox-panel { display: flex; flex-direction: column; gap: 12px; }
+.support-inbox-panel .support-list, .support-thread-list { flex: 1 1 auto; min-height: 0; overflow: auto; max-height: none; }
+.support-context-panel { overflow-y: auto; }
+@media (max-width: 1200px) {
+  .support-inbox-layout { grid-template-columns: minmax(260px, 320px) minmax(0, 1fr); height: auto; }
+  .support-context-panel { grid-column: 1 / -1; }
+}
+.support-kpi-strip .card, .support-kpi-strip .kpi-card { flex: 1 0 auto; min-width: 104px; }
+.support-thread-list { display: grid; gap: 8px; align-content: start; grid-auto-rows: max-content; }
+.support-inbox-panel > :not(.support-thread-list) { flex: none; }
+/* Wraps instead of scrolling: 1px gaps on the line color draw the dividers. */
+.support-kpi-strip {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+  gap: 1px; background: var(--line); overflow: hidden;
+}
+.support-kpi-strip .card, .support-kpi-strip .kpi-card { border-right: 0; background: var(--surface); min-width: 0; }
+.support-kpi-strip .kpi-subtitle { white-space: normal; }
+
+/* ---------- Visão geral: gráfico de tendência ---------- */
+.trend-card { padding: 20px 22px; margin-bottom: 20px; }
+.trend-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; }
+.trend-head h2 { font-size: 15px; font-weight: 600; margin: 0; }
+.trend-totals { display: flex; gap: 28px; margin: 0; }
+.trend-totals div { display: grid; gap: 2px; }
+.trend-totals dt { font-size: 12px; color: var(--text-muted); }
+.trend-totals dd { margin: 0; font-size: 20px; font-weight: 650; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.trend-plot { position: relative; }
+.trend-plot svg { display: block; width: 100%; height: auto; overflow: visible; }
+.trend-grid { stroke: var(--line); stroke-width: 1; }
+.trend-hover { fill: transparent; }
+.trend-hover-active { fill: var(--bg-soft); }
+.trend-bar-requests { fill: #e3ebdc; }
+.trend-bar-completed { fill: var(--accent); }
+.trend-line { fill: none; stroke: #9bbf3a; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.trend-dot { fill: #fff; stroke: #9bbf3a; stroke-width: 2; }
+.trend-axis { font-size: 11px; fill: var(--text-muted); }
+.trend-legend { display: flex; gap: 16px; margin-top: 8px; font-size: 12px; color: var(--text-muted); }
+.trend-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.trend-key { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+.trend-key-completed { background: var(--accent); }
+.trend-key-requests { background: #e3ebdc; }
+.trend-key-gmv { background: #9bbf3a; border-radius: 50%; }
+.trend-tooltip {
+  position: absolute; top: 4px; right: 4px; display: grid; gap: 2px; padding: 8px 12px;
+  background: var(--text); color: #fff; border-radius: 10px; font-size: 12px; box-shadow: var(--shadow-pop);
+}
+.trend-tooltip strong { font-size: 12.5px; }

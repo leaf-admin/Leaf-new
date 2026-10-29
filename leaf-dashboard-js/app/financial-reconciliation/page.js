@@ -297,24 +297,27 @@ export default function FinancialReconciliationPage() {
           </div>
         </Panel>
 
-        <section className="grid">
-          <Panel
-            title="Fluxo do dinheiro"
-            subtitle="Pagamento antecipado, holding, split, ledger, saldo e saque em uma leitura única."
-          >
-            <div className="metric-list">
-              {moneyFlowChecklist.map((item) => (
-                <div className="row" key={item.label}>
-                  <div className="label">
-                    <span className={item.status === "ok" ? "status-ok" : "status-warn"}>{item.label}</span>
-                    <small>{item.detail}</small>
-                  </div>
-                  <div className="value">{item.value}</div>
-                </div>
-              ))}
-            </div>
-          </Panel>
+        <Panel
+          title="Fluxo do dinheiro"
+          subtitle="Pagamento antecipado, holding, split, ledger, saldo e saque em uma leitura única."
+          className="panel-span-full recon-flow-panel"
+        >
+          {/* One step per stage, left to right, in the order the money moves. */}
+          <ol className="recon-flow">
+            {moneyFlowChecklist.map((item) => (
+              <li
+                key={item.label}
+                className={item.status === "ok" ? "recon-flow-step recon-flow-step-ok" : "recon-flow-step recon-flow-step-warn"}
+              >
+                <span className="recon-flow-label">{item.label}</span>
+                <strong className="recon-flow-value">{item.value}</strong>
+                <small className="recon-flow-detail">{item.detail}</small>
+              </li>
+            ))}
+          </ol>
+        </Panel>
 
+        <section className="recon-workspace">
           <Panel title="Relatórios" subtitle="Últimos resultados gravados pelo ledger">
             {loading ? <LoadingState message="Carregando relatórios financeiros..." /> : null}
             {!loading && reports.length === 0 ? <EmptyState message="Nenhuma divergência financeira encontrada para os filtros atuais." /> : null}

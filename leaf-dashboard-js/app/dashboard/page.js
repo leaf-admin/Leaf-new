@@ -6,6 +6,7 @@ import ProtectedRoute from "@/src/components/ProtectedRoute";
 import AppNav from "@/src/components/AppNav";
 import { leafAPI } from "@/src/services/api";
 import Panel from "@/src/components/ui/Panel";
+import RidesTrendChart from "@/src/components/ui/RidesTrendChart";
 import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
 
 const DASHBOARD_REFRESH_MS = 60000;
@@ -534,6 +535,19 @@ export default function DashboardPage() {
     };
   }, []);
 
+  // Daily series for the chart: its own request, so a slow series never delays the numbers.
+  const [series, setSeries] = useState(null);
+  const [seriesLoading, setSeriesLoading] = useState(true);
+  const [seriesError, setSeriesError] = useState("");
+  useEffect(() => {
+    let mounted = true;
+    leafAPI.getRidesSeries(14)
+      .then((payload) => { if (mounted) setSeries(payload); })
+      .catch(() => { if (mounted) setSeriesError("Série diária indisponível agora."); })
+      .finally(() => { if (mounted) setSeriesLoading(false); });
+    return () => { mounted = false; };
+  }, []);
+
   const attentionItems = useMemo(() => buildAttentionItems(snapshot), [snapshot]);
   const todoItems = useMemo(() => buildTodoItems(snapshot, attentionItems), [snapshot, attentionItems]);
   const metrics = snapshot?.dailyMetrics || {};
@@ -580,6 +594,8 @@ export default function DashboardPage() {
             value={brlFromCents(metrics.grossRevenueCents)}
           />
         </section>
+
+        <RidesTrendChart days={series?.days || []} loading={seriesLoading} error={seriesError} />
 
         <section className="home-todo card" aria-label="Precisa de você">
           <div className="home-todo-head">

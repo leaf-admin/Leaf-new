@@ -76,6 +76,42 @@ describe('modern-metrics-service rounding', () => {
     expect(result.averageValue).toBe(83.22);
   });
 
+  test('getRidesDailySeries groups rides per São Paulo day, oldest first', async () => {
+    const ride = (id, createdAt, status, finalPrice) => ({
+      id,
+      data: () => ({ status, createdAt: new Date(createdAt), finalPrice, authoritativeSnapshot: true, financialSnapshotSource: 'backend_final' }),
+    });
+    const firestoreMock = {
+      collection: jest.fn(() => ({
+        where: jest.fn(() => ({
+          where: jest.fn(() => ({
+            limit: jest.fn().mockReturnThis(),
+            get: jest.fn().mockResolvedValue({
+              docs: [
+                ride('a', '2026-10-27T13:00:00Z', 'COMPLETED', 20.5),
+                // 01:30 UTC on the 28th is still the 27th in São Paulo.
+                ride('b', '2026-10-28T01:30:00Z', 'CANCELLED', 15),
+                ride('c', '2026-10-28T15:00:00Z', 'COMPLETED', 30.25),
+                ride('d', '2026-10-28T16:00:00Z', 'SEARCHING', 0),
+              ],
+            }),
+          })),
+        })),
+      })),
+    };
+    jest.doMock('../../../firebase-config', () => ({ getFirestore: () => firestoreMock }));
+
+    const service = require('../../../services/modern-metrics-service');
+    const result = await service.getRidesDailySeries({ days: 3, now: new Date('2026-10-28T18:00:00Z') });
+
+    expect(result.days).toEqual([
+      { date: '2026-10-26', requests: 0, completed: 0, cancelled: 0, gmv: 0 },
+      { date: '2026-10-27', requests: 2, completed: 1, cancelled: 1, gmv: 20.5 },
+      { date: '2026-10-28', requests: 2, completed: 1, cancelled: 0, gmv: 30.25 },
+    ]);
+    expect(result.startDate).toBe('2026-10-26T03:00:00.000Z');
+  });
+
   test('getFinancialRidesStats rounds totalValue to two decimals', async () => {
     const firestoreMock = {
       collection: jest.fn(() => ({

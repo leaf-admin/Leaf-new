@@ -565,6 +565,19 @@ function fixtureForApiPath(apiPath, method) {
       totalCustomers: 8,
     });
   }
+  if (apiPath.startsWith("/metrics/rides/series")) {
+    const counts = [3, 5, 4, 6, 8, 7, 9, 6, 10, 12, 9, 11, 14, 7];
+    return json({
+      days: counts.map((requests, index) => ({
+        date: `2026-10-${String(15 + index).padStart(2, "0")}`,
+        requests,
+        completed: Math.max(0, requests - 2),
+        cancelled: 1,
+        gmv: Math.max(0, requests - 2) * 31.4,
+      })),
+      timeZone: "America/Sao_Paulo",
+    });
+  }
   if (apiPath.startsWith("/metrics/rides/daily")) {
     return json({
       totalToday: 1,
@@ -813,6 +826,22 @@ async function assertVisibleHeading(page, routeConfig) {
     throw new Error(`${routeConfig.path} rendered an application error`);
   }
   log(`${routeConfig.path} ok`);
+  await captureScreenshot(page, routeConfig.path);
+}
+
+// Optional: LEAF_SMOKE_SCREENSHOT_DIR=<dir> saves one full-page PNG per route
+// (mocked data) to review layout changes.
+async function captureScreenshot(page, routePath) {
+  const dir = process.env.LEAF_SMOKE_SCREENSHOT_DIR;
+  if (!dir) return;
+  const fs = require("fs");
+  const path = require("path");
+  fs.mkdirSync(dir, { recursive: true });
+  await page.waitForTimeout(800);
+  // page-shell scrolls by itself; let it grow so fullPage captures everything.
+  await page.addStyleTag({ content: ".page-shell{max-height:none!important;overflow:visible!important}" });
+  const name = String(routePath).replace(/^\//, "").replace(/[^a-z0-9]+/gi, "-") || "root";
+  await page.screenshot({ path: path.join(dir, `${name}.png`), fullPage: true });
 }
 
 async function assertDriverReviewContract(page) {
@@ -833,6 +862,7 @@ async function assertFinancialReconciliationContract(page) {
   await page.locator("h1", { hasText: "Reconciliação financeira" }).waitFor({ timeout: 15000 });
   await page.locator("body", { hasText: "ride-financial-smoke-1" }).waitFor({ timeout: 15000 });
   await page.locator(".metric-list .row", { hasText: "Bruto passageiro" }).waitFor({ timeout: 15000 });
+  await captureScreenshot(page, "/financial-reconciliation-detail");
   await page.locator(".metric-list .row", { hasText: "R$ 27,50" }).first().waitFor({ timeout: 15000 });
   await page.locator(".metric-list .row", { hasText: "Líquido motorista" }).waitFor({ timeout: 15000 });
   await page.locator(".metric-list .row", { hasText: "R$ 26,01" }).waitFor({ timeout: 15000 });
@@ -956,6 +986,7 @@ async function main() {
     const context = await browser.newContext({
       baseURL,
       httpCredentials: { username: basicUser, password: basicPassword },
+      viewport: { width: 1440, height: 900 },
     });
     await context.addInitScript((user) => {
       window.sessionStorage.setItem("leaf_admin_access_token", "smoke-access-token");
