@@ -1,7 +1,8 @@
 import leafTypography from '../../components/prototype/LeafTypography';
 import React, { useCallback, useState } from 'react';
 import { useIsFocused } from '@react-navigation/native';
-import { ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
+import LeafTouchable from '../../components/design-system/LeafTouchable';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSelector } from 'react-redux';
 import * as Clipboard from 'expo-clipboard';
@@ -51,9 +52,9 @@ export default function LeafMemberCardScreen({ navigation }) {
     <View style={[styles.page, { paddingTop: insets.top + 12 }]} testID="leaf-member-card-screen">
       <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
       <View style={styles.header}>
-        <TouchableOpacity onPress={back} style={styles.back} accessibilityRole="button" accessibilityLabel="Voltar" testID="leaf-member-card-back">
+        <LeafTouchable onPress={back} style={styles.back} accessibilityRole="button" accessibilityLabel="Voltar" testID="leaf-member-card-back">
           <Feather name="arrow-left" size={20} color="#222222" />
-        </TouchableOpacity>
+        </LeafTouchable>
         <Text style={styles.title} accessibilityRole="header">Cartão de membro</Text>
       </View>
       <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 32 }]} showsVerticalScrollIndicator={false}>

@@ -2,14 +2,14 @@ import leafTypography from '../../prototype/LeafTypography';
 import React, { useRef, useState } from 'react';
 import {
     View,
-    TouchableOpacity,
     Alert as NativeAlert,
     StyleSheet,
     Text,
     TextInput,
     Keyboard,
-    Platform
+    Platform,
 } from 'react-native';
+import LeafTouchable from '../../design-system/LeafTouchable';
 import auth from '@react-native-firebase/auth';
 import { Ionicons } from '@expo/vector-icons';
 import {
@@ -556,7 +556,7 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
                             <Text style={styles.hiddenText}>
                                 Informe seu celular para confirmar sua conta com segurança.
                             </Text>
-                            <TouchableOpacity
+                            <LeafTouchable
                                 activeOpacity={0.82}
                                 onPress={handlePasswordFallbackPressed}
                                 disabled={loading || checking || phoneNumber.length < 10}
@@ -567,7 +567,7 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
                                 accessibilityHint="Entrar com a senha deste celular."
                             >
                                 <Text style={styles.passwordFallbackText}>Já tenho senha</Text>
-                            </TouchableOpacity>
+                            </LeafTouchable>
                         </>
                     ) : null}
                 </View>
@@ -641,7 +641,7 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
                                     accessibilityLabel={forgotPasswordMode ? 'Nova senha' : 'Senha'}
                                     style={styles.passwordInput}
                                 />
-                                <TouchableOpacity
+                                <LeafTouchable
                                     style={styles.passwordEyeButton}
                                     onPress={() => {
                                         if (forgotPasswordMode) {
@@ -663,7 +663,7 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
                                         size={20}
                                         color={color.textMuted}
                                     />
-                                </TouchableOpacity>
+                                </LeafTouchable>
                             </View>
 
                             {forgotPasswordMode ? (
@@ -699,7 +699,7 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
                                             accessibilityLabel="Confirmar nova senha"
                                             style={styles.passwordInput}
                                         />
-                                        <TouchableOpacity
+                                        <LeafTouchable
                                             style={styles.passwordEyeButton}
                                             onPress={() => setShowConfirmNewPassword((prev) => !prev)}
                                             disabled={loading}
@@ -715,9 +715,9 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
                                                 size={20}
                                                 color={color.textMuted}
                                             />
-                                        </TouchableOpacity>
+                                        </LeafTouchable>
                                     </View>
-                                    <TouchableOpacity
+                                    <LeafTouchable
                                         activeOpacity={0.82}
                                         onPress={() => handleForgotPasswordPressed(`+55${normalizePhoneInputValue(phoneNumber)}`)}
                                         disabled={loading}
@@ -726,17 +726,17 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
                                         accessibilityLabel="Reenviar código"
                                     >
                                         <Text style={styles.inlineLinkText}>Reenviar código</Text>
-                                    </TouchableOpacity>
+                                    </LeafTouchable>
                                 </>
                             ) : (
-                                <TouchableOpacity
+                                <LeafTouchable
                                     activeOpacity={0.82}
                                     onPress={() => handleForgotPasswordPressed(`+55${normalizePhoneInputValue(phoneNumber)}`)}
                                     disabled={loading}
                                     style={styles.inlineLinkButton}
                                 >
                                     <Text style={styles.inlineLinkText}>Esqueci minha senha</Text>
-                                </TouchableOpacity>
+                                </LeafTouchable>
                             )}
 
                             {passwordError ? <Text style={styles.passwordErrorText}>{passwordError}</Text> : null}

@@ -10,10 +10,10 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  TouchableOpacity,
   View,
   useWindowDimensions,
 } from 'react-native';
+import LeafTouchable from '../../components/design-system/LeafTouchable';
 import { Ionicons } from '@expo/vector-icons';
 import { LeafObjectIcon } from '../../components/prototype/LeafVisualElements';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -94,7 +94,7 @@ function resolveTicketReturnRoute(context = {}) {
 
 function TicketTypeRow({ item, active, onPress, expanded = null }) {
   return (
-    <TouchableOpacity
+    <LeafTouchable
       activeOpacity={0.78}
       onPress={onPress}
       style={[styles.typeRow, active && styles.typeRowActive]}
@@ -112,7 +112,7 @@ function TicketTypeRow({ item, active, onPress, expanded = null }) {
         <Text style={styles.typeSubtitle}>{item.subtitle}</Text>
       </View>
       <Ionicons name={expanded !== null ? (expanded ? 'chevron-up' : 'chevron-down') : active ? 'checkmark-circle' : 'ellipse-outline'} size={18} color={expanded !== null ? leafRideColors.muted : active ? leafRideColors.leaf : leafRideColors.muted} />
-    </TouchableOpacity>
+    </LeafTouchable>
   );
 }
 

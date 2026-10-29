@@ -1,5 +1,6 @@
 import React from 'react';
-import { ActivityIndicator, Dimensions, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, Dimensions, Platform, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
+import LeafTouchable from '../../../components/design-system/LeafTouchable';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -51,9 +52,9 @@ export default function LeafPassengerSearch({ kind, pickupLabel, query, results,
     style={[styles.surface, { paddingTop: insets.top + 16, paddingBottom: keyboardOverlap || insets.bottom }]}>
     <View style={styles.heading}>
       <Text style={styles.title} accessibilityRole="header">{pickup ? 'Seu embarque' : 'Viajar'}</Text>
-      <TouchableOpacity onPress={onClose} style={styles.close} accessibilityRole="button" accessibilityLabel={`Fechar busca de ${pickup ? 'partida' : 'destino'}`} testID={`${prefix}-search-close`}>
+      <LeafTouchable onPress={onClose} style={styles.close} accessibilityRole="button" accessibilityLabel={`Fechar busca de ${pickup ? 'partida' : 'destino'}`} testID={`${prefix}-search-close`}>
         <Ionicons name="close" size={22} color="#222222" />
-      </TouchableOpacity>
+      </LeafTouchable>
     </View>
     <View style={styles.fieldShadow}>
       <View style={styles.field} testID={`${prefix}-input`} accessible={false}>
@@ -64,9 +65,9 @@ export default function LeafPassengerSearch({ kind, pickupLabel, query, results,
           autoCapitalize="none" blurOnSubmit={false} returnKeyType="search" submitBehavior="submit"
           style={styles.input} placeholder={pickup ? 'Endereço de partida' : 'Para onde?'} placeholderTextColor="#9A9A9A"
           testID={`${prefix}-search-input`} accessibilityLabel={pickup ? 'Buscar partida' : 'Buscar destino'} />
-        {!pickup ? <TouchableOpacity onPress={onVoice} style={styles.voice} accessibilityRole="button" accessibilityLabel="Ditar destino por voz" testID="passenger-home-destination-mic">
+        {!pickup ? <LeafTouchable onPress={onVoice} style={styles.voice} accessibilityRole="button" accessibilityLabel="Ditar destino por voz" testID="passenger-home-destination-mic">
           <Ionicons name="mic-outline" size={20} color="#6A6A6A" />
-        </TouchableOpacity> : null}
+        </LeafTouchable> : null}
       </View>
     </View>
     <Animated.View style={styles.body} entering={reduceMotion ? undefined : listEnter}>
@@ -74,17 +75,17 @@ export default function LeafPassengerSearch({ kind, pickupLabel, query, results,
       <ScrollView style={styles.results} contentContainerStyle={styles.resultsContent} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" showsVerticalScrollIndicator={false} testID={`${prefix}-dropdown`}>
         {showingRecents ? <Text style={styles.sectionTitle} accessibilityRole="header" testID="passenger-home-destination-recents-heading">Destinos recentes</Text> : null}
         {showSearching ? <View style={styles.feedback}><ActivityIndicator color="#1A330E" /><Text style={styles.support}>Buscando…</Text></View> : results.map(({ item, display, distance }, index) =>
-          <TouchableOpacity key={item.id || index} onPress={() => onSelect?.(item)} style={styles.row} activeOpacity={0.84}
+          <LeafTouchable key={item.id || index} onPress={() => onSelect?.(item)} style={styles.row} activeOpacity={0.84}
             testID={`${prefix}-result-${index}`} accessibilityRole="button" accessibilityLabel={`${showingRecents ? 'Destino recente' : `Resultado de ${pickup ? 'partida' : 'destino'} ${index + 1}`}: ${display.title}`} accessibilityHint={display.address}>
             <LeafObjectIcon name={showingRecents ? 'activity' : 'places'} size={36} />
             <View style={styles.copy}><View style={styles.resultTitleRow}><Text numberOfLines={1} style={styles.resultTitle}>{display.title}</Text>
               {distance ? <Text style={styles.distance}>{distance}</Text> : null}</View>
               {display.address ? <Text numberOfLines={2} style={styles.support}>{display.address}</Text> : null}</View>
             <Ionicons name="arrow-up-outline" size={16} color="#6A6A6A" style={{ transform: [{ rotate: '-45deg' }] }} />
-          </TouchableOpacity>)}
-        {pickup && onMap ? <TouchableOpacity onPress={onMap} style={styles.row} accessibilityRole="button" accessibilityLabel="Ajustar partida no mapa" testID="passenger-home-pickup-map-option">
+          </LeafTouchable>)}
+        {pickup && onMap ? <LeafTouchable onPress={onMap} style={styles.row} accessibilityRole="button" accessibilityLabel="Ajustar partida no mapa" testID="passenger-home-pickup-map-option">
           <LeafObjectIcon name="places" size={36} /><Text style={styles.resultTitle}>Ajustar no mapa</Text>
-        </TouchableOpacity> : null}
+        </LeafTouchable> : null}
         {!showSearching && !results.length && (trimmedQuery || !pickup) ? <View style={styles.empty}>
           {trimmedQuery.length >= 3 ? <>
             <Text style={styles.resultTitle}>Nenhum lugar encontrado</Text>

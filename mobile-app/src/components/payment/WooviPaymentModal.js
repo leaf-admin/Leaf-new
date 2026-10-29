@@ -7,14 +7,14 @@ import {
     Text,
     StyleSheet,
     Modal,
-    TouchableOpacity,
     Alert,
     ActivityIndicator,
     Dimensions,
     Image,
     Linking,
-    ScrollView
+    ScrollView,
 } from 'react-native';
+import LeafTouchable from '../design-system/LeafTouchable';
 import * as Clipboard from 'expo-clipboard';
 import { Icon } from 'react-native-elements';
 import auth from '@react-native-firebase/auth';
@@ -1736,7 +1736,7 @@ export default function WooviPaymentModal({
                         ) : null}
 
                         <View style={styles.errorActions}>
-                            <TouchableOpacity
+                            <LeafTouchable
                                 style={[styles.retryButton, { backgroundColor: '#252525' }]}
                                 onPress={generatePayment}
                                 activeOpacity={0.8}
@@ -1744,8 +1744,8 @@ export default function WooviPaymentModal({
                                 <Text style={styles.retryButtonText}>
                                     Tentar novamente
                                 </Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
+                            </LeafTouchable>
+                            <LeafTouchable
                                 style={styles.dismissButton}
                                 onPress={() => closeWithoutConfirmation({
                                     reason: 'generation_failed',
@@ -1758,7 +1758,7 @@ export default function WooviPaymentModal({
                                 <Text style={[styles.dismissButtonText, { color: color.text.secondary }]}>
                                     Fechar
                                 </Text>
-                            </TouchableOpacity>
+                            </LeafTouchable>
                         </View>
                     </View>
                 );
@@ -1962,7 +1962,7 @@ export default function WooviPaymentModal({
                     robotaxiLifecycleCard && styles.robotaxiActionButtons,
                 ]}>
                     {hasQrText ? (
-                        <TouchableOpacity
+                        <LeafTouchable
                             style={[
                                 styles.primaryAction,
                                 robotaxiLifecycleCard && styles.robotaxiAction,
@@ -1976,11 +1976,11 @@ export default function WooviPaymentModal({
                                 styles.primaryActionText,
                                 robotaxiLifecycleCard && styles.robotaxiActionText,
                             ]}>Copiar código</Text>
-                        </TouchableOpacity>
+                        </LeafTouchable>
                     ) : null}
                     {robotaxiLifecycleCard ? (
                         <>
-                            <TouchableOpacity
+                            <LeafTouchable
                                 style={[styles.secondaryAction, styles.robotaxiAction]}
                                 onPress={() => setBankActionVisible((visible) => !visible)}
                                 activeOpacity={0.88}
@@ -1991,9 +1991,9 @@ export default function WooviPaymentModal({
                                 <Text style={[styles.secondaryActionText, styles.robotaxiActionText]}>
                                     {bankActionVisible ? 'Ocultar opções' : 'Mais opções'}
                                 </Text>
-                            </TouchableOpacity>
+                            </LeafTouchable>
                             {bankActionVisible ? (
-                                <TouchableOpacity
+                                <LeafTouchable
                                     style={[styles.secondaryAction, styles.robotaxiAction]}
                                     onPress={openPaymentLink}
                                     activeOpacity={0.88}
@@ -2003,11 +2003,11 @@ export default function WooviPaymentModal({
                                     <Text style={[styles.secondaryActionText, styles.robotaxiActionText]}>
                                         Abrir banco
                                     </Text>
-                                </TouchableOpacity>
+                                </LeafTouchable>
                             ) : null}
                         </>
                     ) : (
-                        <TouchableOpacity
+                        <LeafTouchable
                             style={styles.secondaryAction}
                             onPress={openPaymentLink}
                             activeOpacity={0.88}
@@ -2015,7 +2015,7 @@ export default function WooviPaymentModal({
                             accessibilityLabel="Abrir banco"
                         >
                             <Text style={styles.secondaryActionText}>Abrir banco</Text>
-                        </TouchableOpacity>
+                        </LeafTouchable>
                     )}
                 </View>
 
@@ -2068,7 +2068,7 @@ export default function WooviPaymentModal({
                                 {qaPaymentProgressLabel}
                             </Text>
                         ) : null}
-                        <TouchableOpacity
+                        <LeafTouchable
                             style={styles.closeButton}
                             onPress={handleCancel}
                             activeOpacity={0.7}
@@ -2077,7 +2077,7 @@ export default function WooviPaymentModal({
                             accessibilityLabel="Fechar pagamento"
                         >
                             <Icon name="close" type="material" color={color.text.secondary} size={22} />
-                        </TouchableOpacity>
+                        </LeafTouchable>
                     </View>
 
                     <ScrollView style={{ flexShrink: 1 }} contentContainerStyle={{ paddingBottom: 8 }} bounces={false} showsVerticalScrollIndicator={false}>

@@ -6,9 +6,9 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  TouchableOpacity,
-  View
+  View,
 } from 'react-native';
+import LeafTouchable from '../../design-system/LeafTouchable';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import ContinueButton from '../common/ContinueButton';
@@ -336,7 +336,7 @@ const DocumentStep = ({ onSubmitted, onBack, initialData = {}, progressMeta }) =
         {title}
         {optional ? <Text style={styles.optionalTag}> (opcional)</Text> : null}
       </Text>
-      <TouchableOpacity
+      <LeafTouchable
         activeOpacity={0.88}
         style={[styles.uploadButton, result?.success && styles.uploadButtonDone, error && styles.inputError]}
         onPress={onPress}
@@ -354,7 +354,7 @@ const DocumentStep = ({ onSubmitted, onBack, initialData = {}, progressMeta }) =
           {loading ? <ReadingBar /> : null}
         </View>
         {loading ? null : <Ionicons name={result?.success ? 'refresh' : 'chevron-forward'} size={18} color={color.textMuted} />}
-      </TouchableOpacity>
+      </LeafTouchable>
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
     </View>
   );
@@ -444,7 +444,7 @@ const DocumentStep = ({ onSubmitted, onBack, initialData = {}, progressMeta }) =
 
               <View style={[styles.fieldContainer, styles.identityField]}>
                 <Text style={styles.label}>Gênero</Text>
-                <TouchableOpacity
+                <LeafTouchable
                   activeOpacity={0.84}
                   accessibilityRole="button"
                   accessibilityLabel="Selecionar gênero"
@@ -473,7 +473,7 @@ const DocumentStep = ({ onSubmitted, onBack, initialData = {}, progressMeta }) =
                     size={16}
                     color={color.textMuted}
                   />
-                </TouchableOpacity>
+                </LeafTouchable>
                 {errors.gender ? <Text style={styles.errorText}>{errors.gender}</Text> : null}
               </View>
 
@@ -486,7 +486,7 @@ const DocumentStep = ({ onSubmitted, onBack, initialData = {}, progressMeta }) =
                   ].map((option, index, options) => {
                     const selected = documentData.gender === option.value;
                     return (
-                      <TouchableOpacity
+                      <LeafTouchable
                         key={option.value}
                         activeOpacity={0.84}
                         accessibilityRole="button"
@@ -505,7 +505,7 @@ const DocumentStep = ({ onSubmitted, onBack, initialData = {}, progressMeta }) =
                           {option.label}
                         </Text>
                         {selected ? <Ionicons name="checkmark" size={18} color={color.accent} /> : null}
-                      </TouchableOpacity>
+                      </LeafTouchable>
                     );
                   })}
                 </View>

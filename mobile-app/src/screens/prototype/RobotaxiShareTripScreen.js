@@ -8,10 +8,10 @@ import {
   StatusBar,
   StyleSheet,
   Text,
-  TouchableOpacity,
   View,
   useWindowDimensions,
 } from 'react-native';
+import LeafTouchable from '../../components/design-system/LeafTouchable';
 import * as Clipboard from 'expo-clipboard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import PrototypeDismissibleSheet from '../../components/prototype/PrototypeDismissibleSheet';

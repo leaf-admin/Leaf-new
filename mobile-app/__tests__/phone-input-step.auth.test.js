@@ -495,7 +495,7 @@ describe('PhoneInputStep', () => {
     fireEvent.press(getByTestId('auth-continue-btn'));
 
     await waitFor(() => {
-      expect(getByTestId('auth-password-fallback-btn').props.disabled).toBeFalsy();
+      expect(getByTestId('auth-password-fallback-btn').props.accessibilityState?.disabled).toBeFalsy();
     });
 
     fireEvent.press(getByTestId('auth-password-fallback-btn'));
@@ -539,7 +539,7 @@ describe('PhoneInputStep', () => {
 
     fireEvent.changeText(getByTestId('auth-phone-input'), '21102938475');
     await waitFor(() => {
-      expect(getByTestId('auth-password-fallback-btn').props.disabled).toBeFalsy();
+      expect(getByTestId('auth-password-fallback-btn').props.accessibilityState?.disabled).toBeFalsy();
     });
 
     fireEvent.press(getByTestId('auth-password-fallback-btn'));

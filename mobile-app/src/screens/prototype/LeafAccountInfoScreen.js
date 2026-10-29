@@ -1,5 +1,6 @@
 import React from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import LeafTouchable from '../../components/design-system/LeafTouchable';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useIsFocused } from '@react-navigation/native';
@@ -25,9 +26,9 @@ export default function LeafAccountInfoScreen({ navigation, route }) {
   const back = () => navigation.canGoBack() ? navigation.goBack() : navigation.navigate('RobotaxiPrototypeMenu');
   return <View style={[styles.page, { paddingTop: insets.top + 20, paddingBottom: insets.bottom }]} testID={`leaf-account-${payment ? 'payment' : 'achievements'}`}>
     <View style={styles.header}>
-      <TouchableOpacity onPress={back} style={styles.back} accessibilityRole="button" accessibilityLabel="Voltar">
+      <LeafTouchable onPress={back} style={styles.back} accessibilityRole="button" accessibilityLabel="Voltar">
         <Ionicons name="arrow-back" size={20} color="#222222" />
-      </TouchableOpacity><Text style={styles.title} accessibilityRole="header">{title}</Text>
+      </LeafTouchable><Text style={styles.title} accessibilityRole="header">{title}</Text>
     </View>
     <ScrollView contentContainerStyle={styles.content}>
       <View style={styles.notice}>

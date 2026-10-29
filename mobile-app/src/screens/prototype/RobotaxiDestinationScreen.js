@@ -21,11 +21,11 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  TouchableOpacity,
   UIManager,
   View,
   useWindowDimensions,
 } from "react-native";
+import LeafTouchable from "../../components/design-system/LeafTouchable";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, { Easing, FadeIn } from "react-native-reanimated";
 import { useSelector } from "react-redux";
@@ -4075,7 +4075,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
       const open = preferenceDropdownKey === type;
       return (
         <View style={styles.preferenceSelectorWrap}>
-          <TouchableOpacity
+          <LeafTouchable
             activeOpacity={0.88}
             onPress={() => setPreferenceDropdownKey(open ? null : type)}
             style={[
@@ -4096,14 +4096,14 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
               size={20}
               color={leafRideColors.text}
             />
-          </TouchableOpacity>
+          </LeafTouchable>
 
           {open ? (
             <View style={styles.preferenceDropdownList}>
               {options.map((item) => {
                 const selected = item.id === selectedOption.id;
                 return (
-                  <TouchableOpacity
+                  <LeafTouchable
                     key={item.id}
                     activeOpacity={0.88}
                     onPress={() => {
@@ -4138,7 +4138,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                         color={leafRideColors.leaf}
                       />
                     ) : null}
-                  </TouchableOpacity>
+                  </LeafTouchable>
                 );
               })}
             </View>
@@ -4508,7 +4508,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
               accessibilityLabel="Confirmar ponto de embarque"
             >
               <View style={styles.pickupFloatingMainRow}>
-                <TouchableOpacity
+                <LeafTouchable
                   activeOpacity={0.84}
                   onPress={handleBackToSearch}
                   style={styles.pickupFloatingBackButton}
@@ -4516,7 +4516,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                   accessibilityLabel="Voltar para buscar destino"
                 >
                   <Ionicons name="chevron-back" size={19} color={leafRideColors.text} />
-                </TouchableOpacity>
+                </LeafTouchable>
 
                 <View style={styles.pickupFloatingCopy}>
                   <Text style={styles.pickupFloatingEyebrow}>
@@ -4570,7 +4570,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
               ) : null}
 
               <View style={styles.pickupFloatingActions}>
-                <TouchableOpacity
+                <LeafTouchable
                   activeOpacity={0.86}
                   onPress={handleUseCurrentPickup}
                   style={styles.pickupFloatingSecondaryButton}
@@ -4580,8 +4580,8 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                   <Text style={styles.pickupFloatingSecondaryButtonText}>
                     Atual
                   </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
+                </LeafTouchable>
+                <LeafTouchable
                   activeOpacity={0.88}
                   disabled={
                     checkingAvailability ||
@@ -4616,7 +4616,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                         ? "Indisponível"
                         : "Confirmar"}
                   </Text>
-                </TouchableOpacity>
+                </LeafTouchable>
               </View>
             </Animated.View>
           </View>
@@ -4650,7 +4650,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                     Busque um endereço ou escolha um destino recente.
                   </Text>
                 </View>
-                <TouchableOpacity
+                <LeafTouchable
                   activeOpacity={0.82}
                   onPress={handleDismiss}
                   style={styles.searchCloseButton}
@@ -4658,7 +4658,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                   accessibilityLabel="Fechar busca de destino"
                 >
                   <Ionicons name="close" size={17} color={leafRideColors.text} />
-                </TouchableOpacity>
+                </LeafTouchable>
               </View>
 
               <View style={styles.searchInputShell}>
@@ -4679,7 +4679,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                   testID="passenger-destination-search-input"
                   accessibilityLabel="Digite o destino da viagem"
                 />
-                <TouchableOpacity
+                <LeafTouchable
                   activeOpacity={0.86}
                   onPress={handleToggleVoiceSearch}
                   disabled={voiceStarting}
@@ -4692,7 +4692,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                     size={18}
                     color={voiceListening ? leafRideColors.leaf : leafRideColors.secondary}
                   />
-                </TouchableOpacity>
+                </LeafTouchable>
               </View>
 
               {voiceListening || voiceError ? (
@@ -4709,7 +4709,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                 keyboardShouldPersistTaps="always"
                 renderItem={({ item, index }) => {
                   return (
-                    <TouchableOpacity
+                    <LeafTouchable
                       style={styles.destinationRow}
                       activeOpacity={0.88}
                       onPress={() => handleSelectDestination(item)}
@@ -4739,7 +4739,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                       <Text style={styles.destinationEta}>
                         {index === 0 && !query.trim() ? "Rec." : item.eta}
                       </Text>
-                    </TouchableOpacity>
+                    </LeafTouchable>
                   );
                 }}
                 ListEmptyComponent={
@@ -4818,7 +4818,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                       Arraste o mapa para mudar o ponto de embarque.
                     </Text>
                   </View>
-                  <TouchableOpacity
+                  <LeafTouchable
                     activeOpacity={0.86}
                     onPress={() => {
                       setPickupCoordinate(
@@ -4832,7 +4832,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                     accessibilityLabel="Usar localização atual"
                   >
                     <Text style={styles.pickupResetButtonText}>Atual</Text>
-                  </TouchableOpacity>
+                  </LeafTouchable>
                 </View>
 
                 <View style={styles.comfortIndicator}>
@@ -4853,7 +4853,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                     {TEMPERATURE_OPTIONS.map((item) => {
                       const selected = item.id === selectedTemperatureOption.id;
                       return (
-                        <TouchableOpacity
+                        <LeafTouchable
                           key={item.id}
                           activeOpacity={0.86}
                           onPress={() => setTemperaturePreference(item.id)}
@@ -4872,7 +4872,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                           >
                             {item.label}
                           </Text>
-                        </TouchableOpacity>
+                        </LeafTouchable>
                       );
                     })}
                   </View>
@@ -4884,7 +4884,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                     {SOUND_OPTIONS.map((item) => {
                       const selected = item.id === selectedSoundOption.id;
                       return (
-                        <TouchableOpacity
+                        <LeafTouchable
                           key={item.id}
                           activeOpacity={0.86}
                           onPress={() => setSoundPreference(item.id)}
@@ -4903,14 +4903,14 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                           >
                             {item.label}
                           </Text>
-                        </TouchableOpacity>
+                        </LeafTouchable>
                       );
                     })}
                   </View>
                 </View>
 
                 {leafDelasFeatureEnabled ? (
-                  <TouchableOpacity
+                  <LeafTouchable
                     activeOpacity={0.86}
                     style={styles.leafDelasRow}
                     onPress={() => setLeafDelasEnabled((current) => !current)}
@@ -4938,7 +4938,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                         ]}
                       />
                     </View>
-                  </TouchableOpacity>
+                  </LeafTouchable>
                 ) : null}
 
                 {selectedDynamicNotice ? (
@@ -5061,7 +5061,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                 <View style={styles.categoryHandle} />
                 <View style={styles.categoryTopRow}>
                   <Text style={styles.categoryEyebrow}>Escolha a categoria</Text>
-                  <TouchableOpacity
+                  <LeafTouchable
                     activeOpacity={0.84}
                     onPress={handleDismiss}
                     style={styles.categoryCloseButton}
@@ -5069,14 +5069,14 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                     accessibilityLabel="Fechar categorias"
                   >
                     <Ionicons name="close" size={15} color={leafRideColors.text} />
-                  </TouchableOpacity>
+                  </LeafTouchable>
                 </View>
 
                 <View style={styles.categoryTabs}>
                   {categoryOptions.map((plan) => {
                     const selected = plan.id === selectedPlan;
                     return (
-                      <TouchableOpacity
+                      <LeafTouchable
                         key={plan.id}
                         activeOpacity={plan.unavailable ? 1 : 0.82}
                         onPress={() => handleSelectCategory(plan)}
@@ -5099,7 +5099,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                             accessibilityLabel={`Valor da corrida ${plan.priceLabel}`}>{plan.priceLabel}</Text>
                           <Text style={styles.categorySelectedSubtitle}>{plan.pickupEtaLabel}</Text>
                         </View>
-                      </TouchableOpacity>
+                      </LeafTouchable>
                     );
                   })}
                 </View>
@@ -5164,7 +5164,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                     </Text>
                   </View>
                   {leafDelasFeatureEnabled ? (
-                    <TouchableOpacity
+                    <LeafTouchable
                       activeOpacity={0.84}
                       onPress={() => setLeafDelasEnabled((current) => !current)}
                       style={[
@@ -5184,7 +5184,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                       >
                         {leafDelasEnabled ? "Leaf Delas ativa" : "Leaf Delas"}
                       </Text>
-                    </TouchableOpacity>
+                    </LeafTouchable>
                   ) : null}
                 </View>
 
@@ -5561,7 +5561,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                 />
               </View>
 
-              <TouchableOpacity
+              <LeafTouchable
                 activeOpacity={0.9}
                 onPress={handleConfirmPreferencesNow}
                 style={styles.preferenceModalConfirmButton}
@@ -5571,7 +5571,7 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                 <Text style={styles.preferenceModalConfirmButtonText}>
                   Continuar
                 </Text>
-              </TouchableOpacity>
+              </LeafTouchable>
             </Animated.View>
           </View>
         ) : null}

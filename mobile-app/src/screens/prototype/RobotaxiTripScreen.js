@@ -4,7 +4,8 @@ import useRideCardTransition from '../../components/design-system/useRideCardTra
 import useRideStepHaptics from '../../hooks/useRideStepHaptics';
 import { shortTripAddressLabel } from './tripAddressPresentation';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Animated, StatusBar, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, Alert, Animated, StatusBar, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import LeafTouchable from '../../components/design-system/LeafTouchable';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import Reanimated, { FadeInDown } from 'react-native-reanimated';
@@ -2584,7 +2585,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
             ) : (
               <>
             {shouldUseCompactTripCard && !passengerTripSheetExpansionLocked ? (
-              <TouchableOpacity
+              <LeafTouchable
                 activeOpacity={0.82}
                 onPress={() => setIsTripExpanded(false)}
                 style={styles.collapseControl}
@@ -2593,7 +2594,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
               >
                 <Ionicons name="chevron-down-outline" size={16} color={color.text.secondary} />
                 <Text style={styles.collapseControlText}>Voltar ao resumo</Text>
-              </TouchableOpacity>
+              </LeafTouchable>
             ) : null}
 
             {renderPassengerCardStateHeader()}
@@ -2726,7 +2727,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
                 </Text>
                 {extensionStatus === 'pending_payment' && Number(rideExtension?.diffFare) > 0 ? (
                   <>
-                    <TouchableOpacity
+                    <LeafTouchable
                       style={styles.extensionPayAction}
                       activeOpacity={0.86}
                       onPress={() => setIsExtensionPaymentVisible(true)}
@@ -2735,7 +2736,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
                       <Text style={styles.extensionPayActionText}>
                         Pagar complemento de {formatCurrency(rideExtension?.diffFare)}
                       </Text>
-                    </TouchableOpacity>
+                    </LeafTouchable>
                     {Number(rideExtension?.extensionOperationalCost) > 0 ? (
                       <Text style={styles.extensionCostDetail}>
                         Inclui novo Pix e recotação de rota: {formatCurrency(rideExtension?.extensionOperationalCost)}
@@ -2767,7 +2768,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
                   </Text>
                 </View>
                 <View style={styles.actionsRow}>
-                  <TouchableOpacity
+                  <LeafTouchable
                     style={styles.secondaryAction}
                     activeOpacity={0.86}
                     onPress={handleContinueWithOtherDriver}
@@ -2783,9 +2784,9 @@ export default function RobotaxiTripScreen({ navigation, route }) {
                     <Text style={styles.secondaryActionText}>
                       {isBusy ? 'Processando...' : 'Continuar com outro'}
                     </Text>
-                  </TouchableOpacity>
+                  </LeafTouchable>
 
-                  <TouchableOpacity
+                  <LeafTouchable
                     style={[styles.secondaryAction, styles.warningAction]}
                     activeOpacity={0.86}
                     onPress={handleEndAfterInterruption}
@@ -2801,7 +2802,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
                     <Text style={[styles.secondaryActionText, styles.warningActionText]}>
                       {isBusy ? 'Processando...' : 'Encerrar aqui'}
                     </Text>
-                  </TouchableOpacity>
+                  </LeafTouchable>
                 </View>
               </View>
             ) : null}

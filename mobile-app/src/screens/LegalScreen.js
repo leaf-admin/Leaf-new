@@ -6,13 +6,13 @@ import {
   Text,
   StyleSheet,
   ScrollView,
-  TouchableOpacity,
   StatusBar,
   ActivityIndicator,
   Linking,
   Alert,
-  FlatList
+  FlatList,
 } from 'react-native';
+import LeafTouchable from '../components/design-system/LeafTouchable';
 import { Icon } from 'react-native-elements';
 import { Ionicons } from '@expo/vector-icons';
 import { useSelector } from 'react-redux';
@@ -268,12 +268,12 @@ const LegalScreen = ({ navigation, route }) => {
           <Text style={styles.licenseDescription}>
             Framework JavaScript para desenvolvimento de aplicações móveis
           </Text>
-          <TouchableOpacity
+          <LeafTouchable
             style={styles.licenseLink}
             onPress={() => handleLinkPress('https://github.com/facebook/react-native/blob/main/LICENSE', 'Licença React Native')}
           >
             <Text style={styles.linkText}>Ver Licença Completa</Text>
-          </TouchableOpacity>
+          </LeafTouchable>
         </View>
         
         <View style={styles.licenseItem}>
@@ -282,12 +282,12 @@ const LegalScreen = ({ navigation, route }) => {
           <Text style={styles.licenseDescription}>
             Plataforma de desenvolvimento de aplicações móveis e web
           </Text>
-          <TouchableOpacity
+          <LeafTouchable
             style={styles.licenseLink}
             onPress={() => handleLinkPress('https://firebase.google.com/terms', 'Termos Firebase')}
           >
             <Text style={styles.linkText}>Ver Termos de Serviço</Text>
-          </TouchableOpacity>
+          </LeafTouchable>
         </View>
         
         <View style={styles.licenseItem}>
@@ -296,12 +296,12 @@ const LegalScreen = ({ navigation, route }) => {
           <Text style={styles.licenseDescription}>
             Processador de pagamentos PIX
           </Text>
-          <TouchableOpacity
+          <LeafTouchable
             style={styles.licenseLink}
             onPress={() => handleLinkPress('https://woovi.com/terms', 'Termos Woovi')}
           >
             <Text style={styles.linkText}>Ver Termos de Serviço</Text>
-          </TouchableOpacity>
+          </LeafTouchable>
         </View>
         
         <View style={styles.licenseItem}>
@@ -310,12 +310,12 @@ const LegalScreen = ({ navigation, route }) => {
           <Text style={styles.licenseDescription}>
             Biblioteca de componentes UI para React Native
           </Text>
-          <TouchableOpacity
+          <LeafTouchable
             style={styles.licenseLink}
             onPress={() => handleLinkPress('https://github.com/react-native-elements/react-native-elements/blob/master/LICENSE', 'Licença RNE')}
           >
             <Text style={styles.linkText}>Ver Licença Completa</Text>
-          </TouchableOpacity>
+          </LeafTouchable>
         </View>
       </View>
     </View>
@@ -331,13 +331,13 @@ const LegalScreen = ({ navigation, route }) => {
           O transporte por aplicativo está sujeito às normas federais, estaduais e municipais
           aplicáveis. Os procedimentos e requisitos locais podem variar conforme o município.
         </Text>
-        <TouchableOpacity
+        <LeafTouchable
           style={styles.licenseLink}
           accessibilityRole="link"
           onPress={() => handleLinkPress(AppConfig.terms_of_service_url, 'os Termos de Uso públicos')}
         >
           <Text style={styles.linkText}>Consultar Termos de Uso públicos</Text>
-        </TouchableOpacity>
+        </LeafTouchable>
       </View>
     </View>
   );
@@ -367,7 +367,7 @@ const LegalScreen = ({ navigation, route }) => {
         showsHorizontalScrollIndicator={false}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => (
-          <TouchableOpacity
+          <LeafTouchable
             style={[
               styles.sectionTab,
               selectedSection === item.id && styles.activeSectionTab
@@ -390,7 +390,7 @@ const LegalScreen = ({ navigation, route }) => {
             ]}>
               {item.label}
             </Text>
-          </TouchableOpacity>
+          </LeafTouchable>
         )}
         contentContainerStyle={styles.sectionsList}
       />
@@ -415,7 +415,7 @@ const LegalScreen = ({ navigation, route }) => {
           <Text style={styles.headerTitle}>Informações legais</Text>
           <Text style={styles.headerSubtitle}>Termos, privacidade e licenças em um só lugar.</Text>
         </View>
-        <TouchableOpacity
+        <LeafTouchable
           style={styles.closeButton}
           onPress={handleBack}
           accessibilityRole="button"
@@ -423,7 +423,7 @@ const LegalScreen = ({ navigation, route }) => {
           testID="legal-close-button"
         >
           <Ionicons name="close" color={color.text.primary} size={18} />
-        </TouchableOpacity>
+        </LeafTouchable>
       </View>
       
       {renderSections()}

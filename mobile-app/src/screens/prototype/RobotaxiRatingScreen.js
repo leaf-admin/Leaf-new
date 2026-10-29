@@ -11,10 +11,10 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  TouchableOpacity,
   View,
   useWindowDimensions,
 } from "react-native";
+import LeafTouchable from "../../components/design-system/LeafTouchable";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StackActions } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
@@ -471,7 +471,7 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
               {[1, 2, 3, 4, 5].map((value) => {
                 const active = value <= rating;
                 return (
-                  <TouchableOpacity
+                  <LeafTouchable
                     key={value}
                     testID={`rating-star-${value}`}
                     onPress={() => {
@@ -489,7 +489,7 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
                       size={30}
                       color={active ? color.accent.primary : color.border.strong}
                     />
-                  </TouchableOpacity>
+                  </LeafTouchable>
                 );
               })}
             </View>
@@ -498,7 +498,7 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
               {quickTags.map((tag) => {
                 const active = selectedTags.includes(tag);
                 return (
-                  <TouchableOpacity
+                  <LeafTouchable
                     key={tag}
                     style={[styles.tagChip, active && styles.tagChipActive]}
                     activeOpacity={0.86}
@@ -513,7 +513,7 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
                     >
                       {tag}
                     </Text>
-                  </TouchableOpacity>
+                  </LeafTouchable>
                 );
               })}
             </View>
@@ -547,7 +547,7 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
                   accessibilityRole="radiogroup"
                   accessibilityLabel="O ar-condicionado permaneceu ligado durante toda a corrida?"
                 >
-                  <TouchableOpacity
+                  <LeafTouchable
                     activeOpacity={0.86}
                     style={[
                       styles.airConditioningButton,
@@ -569,8 +569,8 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
                     >
                       Sim
                     </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
+                  </LeafTouchable>
+                  <LeafTouchable
                     activeOpacity={0.86}
                     style={[
                       styles.airConditioningButton,
@@ -592,7 +592,7 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
                     >
                       Não
                     </Text>
-                  </TouchableOpacity>
+                  </LeafTouchable>
                 </View>
               </View>
             ) : null}

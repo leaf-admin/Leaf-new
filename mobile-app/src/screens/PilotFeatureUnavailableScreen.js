@@ -1,6 +1,7 @@
 import leafTypography from '../components/prototype/LeafTypography';
 import React, { useMemo } from 'react';
-import { StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { StatusBar, StyleSheet, Text, View } from 'react-native';
+import LeafTouchable from '../components/design-system/LeafTouchable';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { leafButtonMetrics } from '../components/prototype/LeafRideUI';
@@ -51,9 +52,9 @@ export default function PilotFeatureUnavailableScreen({ navigation, route }) {
         </View>
         <Text style={styles.title}>{title}</Text>
         <Text style={styles.message}>{message}</Text>
-        <TouchableOpacity style={styles.button} activeOpacity={0.88} onPress={handleClose}>
+        <LeafTouchable style={styles.button} activeOpacity={0.88} onPress={handleClose}>
           <Text style={styles.buttonText}>{buttonLabel}</Text>
-        </TouchableOpacity>
+        </LeafTouchable>
       </View>
     </View>
   );

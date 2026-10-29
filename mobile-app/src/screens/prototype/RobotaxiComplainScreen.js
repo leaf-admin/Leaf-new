@@ -11,10 +11,10 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  TouchableOpacity,
   View,
   useWindowDimensions,
 } from 'react-native';
+import LeafTouchable from '../../components/design-system/LeafTouchable';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
@@ -232,7 +232,7 @@ export default function RobotaxiComplainScreen({ navigation, route }) {
                   {ISSUE_TYPES.map(item => {
                     const active = item.id === selectedTypeId;
                     return (
-                      <TouchableOpacity
+                      <LeafTouchable
                         key={item.id}
                         activeOpacity={0.86}
                         style={[styles.typeChip, active && styles.typeChipActive]}
@@ -240,7 +240,7 @@ export default function RobotaxiComplainScreen({ navigation, route }) {
                       >
                         <LeafObjectIcon symbol={item.icon} size={32} />
                         <Text style={styles.typeChipText}>{item.label}</Text>
-                      </TouchableOpacity>
+                      </LeafTouchable>
                     );
                   })}
                 </View>

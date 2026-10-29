@@ -9,10 +9,10 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  TouchableOpacity,
   View,
   useWindowDimensions,
 } from 'react-native';
+import LeafTouchable from '../../components/design-system/LeafTouchable';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import PrototypeDismissibleSheet from '../../components/prototype/PrototypeDismissibleSheet';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
@@ -268,7 +268,7 @@ export default function RobotaxiVehiclesScreen({ navigation, route }) {
                     testID="robotaxi-vehicle-submit-button"
                     accessibilityLabel={mode === 'edit' ? 'Salvar e reenviar veículo' : 'Cadastrar veículo'}
                   />
-                  <TouchableOpacity onPress={cancelForm} style={styles.secondaryAction}><Text style={styles.secondaryActionText}>Cancelar</Text></TouchableOpacity>
+                  <LeafTouchable onPress={cancelForm} style={styles.secondaryAction}><Text style={styles.secondaryActionText}>Cancelar</Text></LeafTouchable>
                 </PrototypeMenuSection>
               ) : (
                 <>
@@ -279,19 +279,19 @@ export default function RobotaxiVehiclesScreen({ navigation, route }) {
                     const status = formatVehicleStatus(vehicle.status);
                     return (
                       <View key={vehicle.id} style={styles.vehicleCard}>
-                        <TouchableOpacity style={styles.vehicleHeader} onPress={() => setExpandedId(expanded ? '' : vehicle.id)} testID={`robotaxi-vehicle-${vehicle.id}`}>
+                        <LeafTouchable style={styles.vehicleHeader} onPress={() => setExpandedId(expanded ? '' : vehicle.id)} testID={`robotaxi-vehicle-${vehicle.id}`}>
                           <LeafObjectIcon name="vehicle" size={48} />
                           <View style={styles.vehicleCopy}>
                             <Text style={styles.vehicleModel}>{formatVehicleDisplayText([vehicle.brand, vehicle.model].filter(Boolean).join(' ')) || 'Veículo'}</Text>
                             <Text style={styles.vehiclePlate}>{vehicle.plate || 'Placa pendente'} · {[vehicle.color && formatVehicleDisplayText(vehicle.color, { maxWords: 2 }), vehicle.year].filter(Boolean).join(' · ') || 'Ano pendente'}</Text>
                           </View>
                           <LeafPill label={vehicle.isActive ? 'Selecionado' : status} tone={vehicle.isActive || status === 'Aprovado' ? 'leaf' : 'warning'} />
-                        </TouchableOpacity>
+                        </LeafTouchable>
                         {expanded ? (
                           <View style={styles.expandedActions}>
                             {!vehicle.isActive && vehicle.approved ? <LeafButton label={busy ? 'Selecionando...' : 'Selecionar veículo'} tone="primary" disabled={busy} onPress={() => handleSelectVehicle(vehicle.id)} testID="robotaxi-vehicle-select-button" accessibilityLabel="Selecionar veículo" /> : null}
-                            <TouchableOpacity disabled={busy} onPress={() => handleEditVehicle(vehicle)} style={styles.secondaryAction}><Text style={styles.secondaryActionText}>Editar dados</Text></TouchableOpacity>
-                            <TouchableOpacity disabled={busy} onPress={() => handleRemoveVehicle(vehicle)} style={styles.secondaryAction}><Text style={styles.removeActionText}>Remover do perfil</Text></TouchableOpacity>
+                            <LeafTouchable disabled={busy} onPress={() => handleEditVehicle(vehicle)} style={styles.secondaryAction}><Text style={styles.secondaryActionText}>Editar dados</Text></LeafTouchable>
+                            <LeafTouchable disabled={busy} onPress={() => handleRemoveVehicle(vehicle)} style={styles.secondaryAction}><Text style={styles.removeActionText}>Remover do perfil</Text></LeafTouchable>
                           </View>
                         ) : null}
                       </View>
