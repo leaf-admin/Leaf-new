@@ -4,9 +4,9 @@ import {
   Text,
   StyleSheet,
   Modal,
-  TouchableOpacity,
   Platform,
 } from 'react-native';
+import LeafTouchable from './design-system/LeafTouchable';
 import { Ionicons } from '@expo/vector-icons';
 
 /**
@@ -137,7 +137,7 @@ const PermissionExplanationModal = ({
           <Text style={styles.text}>{info.text}</Text>
 
           <View style={styles.buttonsContainer}>
-            <TouchableOpacity
+            <LeafTouchable
               style={styles.cancelButton}
               onPress={onClose}
               activeOpacity={0.7}
@@ -146,9 +146,9 @@ const PermissionExplanationModal = ({
               testID="permission-explanation-cancel-button"
             >
               <Text style={styles.cancelButtonText}>{info.cancelButton}</Text>
-            </TouchableOpacity>
+            </LeafTouchable>
             
-            <TouchableOpacity
+            <LeafTouchable
               style={styles.acceptButton}
               onPress={onAccept}
               activeOpacity={0.8}
@@ -157,7 +157,7 @@ const PermissionExplanationModal = ({
               testID="permission-explanation-accept-button"
             >
               <Text style={styles.acceptButtonText}>{info.acceptButton}</Text>
-            </TouchableOpacity>
+            </LeafTouchable>
           </View>
         </View>
       </View>

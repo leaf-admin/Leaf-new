@@ -1,6 +1,7 @@
 import leafTypography from '../../components/prototype/LeafTypography';
 import React, { useCallback, useEffect, useState } from 'react';
-import { AppState, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { AppState, Platform, StyleSheet, Text, View } from 'react-native';
+import LeafTouchable from '../../components/design-system/LeafTouchable';
 import { Ionicons } from '@expo/vector-icons';
 import { ONB } from '../../components/onboarding/onboardingKit';
 import {
@@ -70,7 +71,7 @@ export default function DriverAppSetupSection() {
     <View style={styles.section} testID="driver-app-setup">
       <Text style={styles.heading}>Prepare o app</Text>
       {rows.map((row) => (
-        <TouchableOpacity
+        <LeafTouchable
           key={row.key}
           activeOpacity={0.78}
           disabled={!row.onPress}
@@ -92,7 +93,7 @@ export default function DriverAppSetupSection() {
               <Text style={[styles.pillText, row.done && styles.pillTextSoft]}>{row.actionLabel}</Text>
             </View>
           ) : null}
-        </TouchableOpacity>
+        </LeafTouchable>
       ))}
     </View>
   );

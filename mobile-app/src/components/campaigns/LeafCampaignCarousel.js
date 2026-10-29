@@ -8,9 +8,9 @@ import {
   Platform,
   StyleSheet,
   Text,
-  TouchableOpacity,
   View,
 } from "react-native";
+import LeafTouchable from "../design-system/LeafTouchable";
 import {
   loadCachedEligibleCampaigns,
   recordCampaignEvent,
@@ -318,7 +318,7 @@ function LeafCampaignCarousel({
       ]}
       testID={testID}
     >
-      <TouchableOpacity
+      <LeafTouchable
         activeOpacity={0.9}
         onPress={handlePress}
         style={[styles.card, { height, borderRadius, backgroundColor }]}
@@ -346,7 +346,7 @@ function LeafCampaignCarousel({
         ) : (
           cardContent
         )}
-      </TouchableOpacity>
+      </LeafTouchable>
     </Animated.View>
   );
 }

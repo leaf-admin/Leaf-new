@@ -7,10 +7,10 @@ import {
   StatusBar,
   StyleSheet,
   Text,
-  TouchableOpacity,
   View,
   useWindowDimensions,
 } from "react-native";
+import LeafTouchable from "../../components/design-system/LeafTouchable";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { showLeafChoiceSheet } from "../../components/design-system/LeafChoiceSheet";
 import { Ionicons } from "@expo/vector-icons";
@@ -1330,7 +1330,7 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
               const routeParts = buildReceiptHistoryRouteParts(item);
 
               return (
-                <TouchableOpacity
+                <LeafTouchable
                   key={item.id}
                   activeOpacity={0.88}
                   onPress={() => setSelectedId(item.id)}
@@ -1382,7 +1382,7 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                       </Text>
                     </View>
                   </View>
-                </TouchableOpacity>
+                </LeafTouchable>
               );
             })}
           </View>
@@ -1444,7 +1444,7 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
           { paddingBottom: Math.max(insets.bottom, 10) },
         ]}
       >
-        <TouchableOpacity
+        <LeafTouchable
           style={[
             styles.passengerPrimaryAction,
             (passengerRatingSubmitted || !canPassengerRateDriver) &&
@@ -1474,9 +1474,9 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
           <Text style={styles.passengerPrimaryActionText}>
             {passengerRateButtonLabel}
           </Text>
-        </TouchableOpacity>
+        </LeafTouchable>
 
-        <TouchableOpacity
+        <LeafTouchable
           style={styles.passengerSecondaryAction}
           activeOpacity={0.86}
           accessible
@@ -1506,7 +1506,7 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
           <Text style={styles.secondaryActionText}>
             Reportar problema
           </Text>
-        </TouchableOpacity>
+        </LeafTouchable>
       </View>
     ) : null;
 
@@ -1773,7 +1773,7 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
           const driverRecentValueLabel =
             driverRecentNet !== null ? formatCurrency(driverRecentNet) : "--";
           return (
-            <TouchableOpacity
+            <LeafTouchable
               key={item.id}
               style={styles.receiptCleanRecentRow}
               activeOpacity={0.84}
@@ -1784,7 +1784,7 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                 <Text style={styles.receiptCleanRowSubtitle} numberOfLines={1}>{routeParts.pickup}</Text>
               </View>
               <Text style={styles.receiptCleanValueAmount}>{driverRecentValueLabel}</Text>
-            </TouchableOpacity>
+            </LeafTouchable>
           );
         })}
       </View>
@@ -1803,10 +1803,10 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
       >
         <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
         <View style={[styles.receiptPageHeader, { paddingTop: insets.top + 20 }]}>
-          <TouchableOpacity style={styles.receiptPageBack} activeOpacity={0.76} onPress={handleDismiss}
+          <LeafTouchable style={styles.receiptPageBack} activeOpacity={0.76} onPress={handleDismiss}
             testID={closeButtonTestId} accessibilityRole="button" accessibilityLabel="Voltar ao mapa" accessibilityHint="Fecha o recibo e retorna ao mapa.">
             <Ionicons name="arrow-back" size={20} color="#222222" />
-          </TouchableOpacity><Text style={styles.receiptPageContext}>Sua viagem</Text>
+          </LeafTouchable><Text style={styles.receiptPageContext}>Sua viagem</Text>
         </View>
 
         <ScrollView
@@ -2048,7 +2048,7 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
 
             <View style={styles.receiptCleanActions}>
               {!isDriverView ? (
-                <TouchableOpacity
+                <LeafTouchable
                   style={styles.receiptCleanMoreOptionsButton}
                   activeOpacity={0.86}
                   accessible
@@ -2061,10 +2061,10 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                   <Text style={styles.receiptCleanMoreOptionsText}>
                     {receiptOptionsVisible ? "Ocultar opções" : "Mais opções"}
                   </Text>
-                </TouchableOpacity>
+                </LeafTouchable>
               ) : null}
 
-              <TouchableOpacity
+              <LeafTouchable
                 style={[
                   styles.receiptCleanPrimaryButton,
                   isDriverView && styles.receiptCleanPrimaryButtonFull,
@@ -2081,11 +2081,11 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                 onAccessibilityTap={isDriverView ? openDriverReceiptRating : openPassengerReceiptRating}
               >
                 <Text style={styles.receiptCleanPrimaryButtonText}>{ratingButtonLabel}</Text>
-              </TouchableOpacity>
+              </LeafTouchable>
             </View>
 
             {!isDriverView && receiptOptionsVisible ? (
-              <TouchableOpacity
+              <LeafTouchable
                 style={styles.receiptCleanSecondaryButton}
                 activeOpacity={0.86}
                 accessible
@@ -2105,7 +2105,7 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                 }
               >
                 <Text style={styles.receiptCleanSecondaryButtonText}>Reportar problema</Text>
-              </TouchableOpacity>
+              </LeafTouchable>
             ) : null}
             {selected?.id ? <View style={styles.receiptReference}>
               <Text style={styles.receiptCleanRowSubtitle}>Referência</Text><Text selectable numberOfLines={1} ellipsizeMode="middle" accessibilityLabel={`Referência da corrida ${selected.id}`} style={styles.receiptReferenceValue}>{selected.id}</Text>
@@ -2340,7 +2340,7 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                         </View>
 
                         {Number.isFinite(finalTotalFees) ? (
-                          <TouchableOpacity
+                          <LeafTouchable
                             activeOpacity={0.78}
                             onPress={() =>
                               setShowFeeBreakdown((previous) => !previous)
@@ -2394,7 +2394,7 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                                 {driverSummaryAsideSecondaryValue}
                               </Text>
                             </View>
-                          </TouchableOpacity>
+                          </LeafTouchable>
                         ) : (
                           <View
                             style={[

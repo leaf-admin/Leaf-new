@@ -1,6 +1,7 @@
 import leafTypography from '../../components/prototype/LeafTypography';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, AppState, Linking, Platform, ScrollView, StatusBar, StyleSheet, Switch, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, Alert, AppState, Linking, Platform, ScrollView, StatusBar, StyleSheet, Switch, Text, View, useWindowDimensions } from 'react-native';
+import LeafTouchable from '../../components/design-system/LeafTouchable';
 import * as Application from 'expo-application';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSelector } from 'react-redux';
@@ -69,7 +70,7 @@ function SettingRow({
   divider = false,
 }) {
   const informational = !onValueChange && !onPress;
-  const Container = onValueChange || informational ? View : TouchableOpacity;
+  const Container = onValueChange || informational ? View : LeafTouchable;
   return (
     <Container
       style={styles.settingRow}
@@ -430,7 +431,7 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
             ]}
           >
             <View style={styles.headerRow}>
-              <TouchableOpacity
+              <LeafTouchable
                 style={styles.closeButton}
                 onPress={handleDismiss}
                 activeOpacity={0.78}
@@ -438,7 +439,7 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
                 accessibilityLabel="Voltar"
               >
                 <Feather name="arrow-left" size={20} color={SETTINGS_COLOR.text} />
-              </TouchableOpacity>
+              </LeafTouchable>
               <View style={styles.headerCopy}>
                 <Text style={styles.screenTitle}>Configurações</Text>
               </View>
@@ -454,7 +455,7 @@ export default function RobotaxiSettingsScreen({ navigation, route }) {
               showsVerticalScrollIndicator={false}
               contentContainerStyle={styles.rowsContent}
             >
-              {error ? <TouchableOpacity testID="robotaxi-settings-retry" style={styles.feedback} onPress={() => refresh({ forceRefresh: true })}><Text style={styles.settingSubtitle}>Configurações não atualizadas · Tentar novamente</Text></TouchableOpacity> : null}
+              {error ? <LeafTouchable testID="robotaxi-settings-retry" style={styles.feedback} onPress={() => refresh({ forceRefresh: true })}><Text style={styles.settingSubtitle}>Configurações não atualizadas · Tentar novamente</Text></LeafTouchable> : null}
               {SETTINGS_SECTIONS.filter(section => visibleSettingRows.some(row => row.section === section.key)).map((section, sectionIndex) => {
                 const rows = visibleSettingRows.filter(row => row.section === section.key);
                 return <View key={section.key} testID={`robotaxi-settings-section-${section.key}`}>

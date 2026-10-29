@@ -6,9 +6,9 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TouchableOpacity,
   View,
 } from 'react-native';
+import LeafTouchable from '../../components/design-system/LeafTouchable';
 import MapView, { Circle, Polygon, PROVIDER_GOOGLE } from 'react-native-maps';
 import * as Location from 'expo-location';
 import * as Haptics from 'expo-haptics';
@@ -369,7 +369,7 @@ export default function RobotaxiDriverAvoidedAreasScreen({ navigation }) {
       ) : null}
 
       <View style={[styles.header, { top: insets.top + 12 }]}>
-        <TouchableOpacity
+        <LeafTouchable
           style={styles.back}
           accessibilityRole="button"
           accessibilityLabel="Voltar"
@@ -377,7 +377,7 @@ export default function RobotaxiDriverAvoidedAreasScreen({ navigation }) {
           onPress={() => navigation.goBack()}
         >
           <Ionicons name="arrow-back" size={22} color={color.text.primary} />
-        </TouchableOpacity>
+        </LeafTouchable>
         <View style={styles.headerPill}>
           <Text style={styles.headerPillText} numberOfLines={1}>
             {loading ? 'Carregando…' : buildAvoidedAreasCounter(areas, limits)}
@@ -398,7 +398,7 @@ export default function RobotaxiDriverAvoidedAreasScreen({ navigation }) {
           ].map((option) => {
             const selected = option.key === mode;
             return (
-              <TouchableOpacity
+              <LeafTouchable
                 key={option.key}
                 activeOpacity={0.86}
                 style={[styles.mode, selected && styles.modeSelected]}
@@ -408,7 +408,7 @@ export default function RobotaxiDriverAvoidedAreasScreen({ navigation }) {
                 testID={`driver-avoided-areas-mode-${option.key}`}
               >
                 <Text style={[styles.modeLabel, selected && styles.modeLabelSelected]}>{option.label}</Text>
-              </TouchableOpacity>
+              </LeafTouchable>
             );
           })}
         </View>
@@ -446,7 +446,7 @@ export default function RobotaxiDriverAvoidedAreasScreen({ navigation }) {
               {AVOIDED_AREA_SIZES.map((size) => {
                 const selected = size.ringSize === ringSize;
                 return (
-                  <TouchableOpacity
+                  <LeafTouchable
                     key={size.ringSize}
                     activeOpacity={0.86}
                     style={[styles.size, selected && styles.sizeSelected]}
@@ -460,7 +460,7 @@ export default function RobotaxiDriverAvoidedAreasScreen({ navigation }) {
                     <Text style={[styles.sizeDetail, selected && styles.sizeDetailSelected]} numberOfLines={1}>
                       {size.detail}
                     </Text>
-                  </TouchableOpacity>
+                  </LeafTouchable>
                 );
               })}
             </View>
@@ -492,7 +492,7 @@ export default function RobotaxiDriverAvoidedAreasScreen({ navigation }) {
           >
             {areas.map((area) => (
               <View key={area.id} style={styles.row}>
-                <TouchableOpacity
+                <LeafTouchable
                   style={styles.rowMain}
                   activeOpacity={0.8}
                   onPress={() => handleFocusArea(area)}
@@ -506,8 +506,8 @@ export default function RobotaxiDriverAvoidedAreasScreen({ navigation }) {
                       {describeAvoidedArea(area)}
                     </Text>
                   </View>
-                </TouchableOpacity>
-                <TouchableOpacity
+                </LeafTouchable>
+                <LeafTouchable
                   style={styles.rowRemove}
                   onPress={() => handleRemove(area)}
                   disabled={busy}
@@ -516,7 +516,7 @@ export default function RobotaxiDriverAvoidedAreasScreen({ navigation }) {
                   testID={`driver-avoided-areas-remove-${area.id}`}
                 >
                   <Ionicons name="close" size={18} color={color.text.secondary} />
-                </TouchableOpacity>
+                </LeafTouchable>
               </View>
             ))}
           </ScrollView>

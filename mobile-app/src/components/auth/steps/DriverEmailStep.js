@@ -1,6 +1,7 @@
 import leafTypography from '../../prototype/LeafTypography';
 import React, { useMemo, useState } from 'react';
-import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, Text, TextInput, View } from 'react-native';
+import LeafTouchable from '../../design-system/LeafTouchable';
 import ContinueButton from '../common/ContinueButton';
 import onboardingTheme from '../common/onboardingTheme';
 import EditorialOnboardingScreen from '../common/EditorialOnboardingLayout';
@@ -49,7 +50,7 @@ const DriverEmailStep = ({ onSubmitted, onBack, initialData = {}, progressMeta, 
             testID="driver-email-continue-btn"
             accessibilityLabel={isSubmitting ? 'Finalizando cadastro' : 'Finalizar cadastro'}
           />
-          <TouchableOpacity
+          <LeafTouchable
             style={[styles.skipButton, isSubmitting && styles.skipButtonDisabled]}
             onPress={() => handleSubmit(true)}
             activeOpacity={0.86}
@@ -61,7 +62,7 @@ const DriverEmailStep = ({ onSubmitted, onBack, initialData = {}, progressMeta, 
             testID="driver-email-skip-btn"
           >
             <Text style={styles.skipLabel}>Preencher depois</Text>
-          </TouchableOpacity>
+          </LeafTouchable>
         </View>
       )}
     >

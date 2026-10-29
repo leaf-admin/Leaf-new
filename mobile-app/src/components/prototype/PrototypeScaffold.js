@@ -1,7 +1,8 @@
 import leafTypography from './LeafTypography';
 import React from 'react';
 import { useIsFocused } from '@react-navigation/native';
-import { Animated, Easing, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
+import LeafTouchable from '../design-system/LeafTouchable';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import LeafLineIcon from '../design-system/LeafLineIcon';

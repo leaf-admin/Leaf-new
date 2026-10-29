@@ -1,7 +1,8 @@
 import leafTypography from '../../components/prototype/LeafTypography';
 import React, { useCallback, useMemo, useState } from 'react';
 import { useIsFocused } from '@react-navigation/native';
-import { Alert, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { Alert, ScrollView, StatusBar, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import LeafTouchable from '../../components/design-system/LeafTouchable';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSelector } from 'react-redux';
 import * as Application from 'expo-application';
@@ -158,7 +159,7 @@ export default function RobotaxiMenuScreen({ navigation, route }) {
             bodyStyle={styles.body}
           >
             <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-              <TouchableOpacity style={styles.profileHeader} activeOpacity={0.7} onPress={() => navigation.navigate('LeafMemberCard')}
+              <LeafTouchable style={styles.profileHeader} activeOpacity={0.7} onPress={() => navigation.navigate('LeafMemberCard')}
                 accessibilityRole="button" accessibilityLabel={profileName || 'Sua conta'} accessibilityHint="Abre o cartão de membro" testID="leaf-account-card">
                 <View style={styles.avatar}><Text style={styles.avatarText}>{metrics.initials}</Text></View>
                 <View style={styles.profileCopy}>
@@ -169,8 +170,8 @@ export default function RobotaxiMenuScreen({ navigation, route }) {
                   </Text>
                 </View>
                 <Feather name="chevron-right" size={18} color="#B3B3B3" />
-              </TouchableOpacity>
-              {accountSummary.error ? <TouchableOpacity accessibilityRole="button" onPress={() => accountSummary.refresh({ forceRefresh: true })} style={{ paddingBottom: 14 }} testID="leaf-account-summary-retry"><Text style={{ ...leafTypography.regular, fontSize: 12, color: '#6A6A6A' }}>Não foi possível atualizar todos os dados. Tentar novamente.</Text></TouchableOpacity> : null}
+              </LeafTouchable>
+              {accountSummary.error ? <LeafTouchable accessibilityRole="button" onPress={() => accountSummary.refresh({ forceRefresh: true })} style={{ paddingBottom: 14 }} testID="leaf-account-summary-retry"><Text style={{ ...leafTypography.regular, fontSize: 12, color: '#6A6A6A' }}>Não foi possível atualizar todos os dados. Tentar novamente.</Text></LeafTouchable> : null}
               {groups.map(group => (
                 <PrototypeMenuGroup key={group.key} title={group.title} style={styles.group} testID={`leaf-account-group-${group.key}`}>
                   {group.items.map(item => (
@@ -183,9 +184,9 @@ export default function RobotaxiMenuScreen({ navigation, route }) {
                   ))}
                 </PrototypeMenuGroup>
               ))}
-              <TouchableOpacity onPress={promptLogout} style={styles.logout} accessibilityRole="button" accessibilityLabel="Sair da conta" testID="leaf-account-logout">
+              <LeafTouchable onPress={promptLogout} style={styles.logout} accessibilityRole="button" accessibilityLabel="Sair da conta" testID="leaf-account-logout">
                 <Text style={styles.logoutText}>Sair da conta</Text>
-              </TouchableOpacity>
+              </LeafTouchable>
               {appVersion ? <Text style={styles.version}>Leaf {appVersion}</Text> : null}
             </ScrollView>
           </PrototypeMenuSurface>

@@ -1,7 +1,8 @@
 import leafTypography from '../../prototype/LeafTypography';
 import Logger from '../../../utils/Logger';
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { View, TextInput, TouchableOpacity, StyleSheet, Alert as NativeAlert, Text, Platform } from 'react-native';
+import { View, TextInput, StyleSheet, Alert as NativeAlert, Text, Platform } from 'react-native';
+import LeafTouchable from '../../design-system/LeafTouchable';
 import auth from '@react-native-firebase/auth';
 import ContinueButton from '../common/ContinueButton';
 import EditorialOnboardingScreen from '../common/EditorialOnboardingLayout';
@@ -410,7 +411,7 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack, progressMeta }
                 />
                 <View style={styles.resendContainer}>
                     {canResend ? (
-                        <TouchableOpacity
+                        <LeafTouchable
                             onPress={handleResendCode}
                             disabled={loading}
                             style={styles.footerLink}
@@ -421,14 +422,14 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack, progressMeta }
                             accessibilityHint="Solicita um novo código de verificação."
                         >
                             <Text style={styles.resendLink}>Reenviar código</Text>
-                        </TouchableOpacity>
+                        </LeafTouchable>
                     ) : (
                         <Text style={styles.resendTimer}>Novo código em 00:{String(timer).padStart(2, '0')}</Text>
                     )}
-                    <TouchableOpacity onPress={onBack} disabled={loading} style={styles.footerLink}
+                    <LeafTouchable onPress={onBack} disabled={loading} style={styles.footerLink}
                         accessibilityRole="button" accessibilityLabel="Alterar número" testID="auth-otp-change-number-btn">
                         <Text style={styles.resendLink}>Alterar número</Text>
-                    </TouchableOpacity>
+                    </LeafTouchable>
                 </View>
                 </View>
             )}

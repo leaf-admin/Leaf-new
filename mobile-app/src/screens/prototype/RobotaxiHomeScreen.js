@@ -3,7 +3,8 @@ import LeafBootSplash from '../../components/design-system/LeafBootSplash';
 import LeafSplashReveal from '../../components/design-system/LeafSplashReveal';
 import { projectMapPoint } from './home/projectMapPoint';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, AppState, Keyboard, Linking, Modal, Platform, StatusBar, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, Alert, AppState, Keyboard, Linking, Modal, Platform, StatusBar, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import LeafTouchable from '../../components/design-system/LeafTouchable';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useIsFocused, useNavigationState } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -10286,7 +10287,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
 
             <View pointerEvents="box-none" style={styles.homePickupPickerLayer}>
               <View style={[styles.homePickupFloatingCard, { top: insets.top + 14 }]}>
-                <TouchableOpacity
+                <LeafTouchable
                   activeOpacity={0.84}
                   onPress={handleCancelHomePickupPicker}
                   style={styles.homePickupBackButton}
@@ -10294,7 +10295,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
                   accessibilityLabel="Cancelar alteração de partida"
                 >
                   <Ionicons name="chevron-back" size={20} color="#222222" />
-                </TouchableOpacity>
+                </LeafTouchable>
                 <View style={styles.homePickupFloatingCopy}>
                   <Text style={styles.homePickupEyebrow}>Partida</Text>
                   <Text style={styles.homePickupFloatingTitle} numberOfLines={1}>
@@ -10324,7 +10325,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
                   O pin marca onde o motorista deve encontrar você.
                 </Text>
                 <View style={styles.homePickupPickerActions}>
-                  <TouchableOpacity
+                  <LeafTouchable
                     activeOpacity={0.86}
                     onPress={handleUseCurrentHomePickup}
                     style={styles.homePickupSecondaryButton}
@@ -10332,8 +10333,8 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
                     accessibilityLabel="Usar minha localização atual"
                   >
                     <Text style={styles.homePickupSecondaryButtonText}>Atual</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
+                  </LeafTouchable>
+                  <LeafTouchable
                     activeOpacity={0.88}
                     onPress={handleConfirmHomePickup}
                     // Wait for the reverse geocode; confirming mid-lookup stored
@@ -10345,7 +10346,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
                     accessibilityState={{ disabled: homePickupAddress === 'Localizando endereço...' }}
                   >
                     <Text style={styles.homePickupPrimaryButtonText}>Confirmar</Text>
-                  </TouchableOpacity>
+                  </LeafTouchable>
                 </View>
               </View>
             </View>
@@ -10649,12 +10650,12 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
               <Text style={styles.driverKycReasonText}>
                 {driverKycPendingReason || 'Não foi possível preparar a validação agora. Tente novamente em alguns minutos.'}
               </Text>
-              <TouchableOpacity
+              <LeafTouchable
                 style={styles.driverKycUnavailableButton}
                 onPress={handleDriverKycModalCancel}
               >
                 <Text style={styles.driverKycUnavailableButtonText}>Fechar</Text>
-              </TouchableOpacity>
+              </LeafTouchable>
             </View>
           )}
         </Modal>

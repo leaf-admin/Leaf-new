@@ -1,6 +1,7 @@
 import leafTypography from '../../components/prototype/LeafTypography';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, Alert, ScrollView, StatusBar, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import LeafTouchable from '../../components/design-system/LeafTouchable';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
@@ -788,7 +789,7 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
             ]}
           >
             <View style={styles.activationHeaderRow}>
-              <TouchableOpacity
+              <LeafTouchable
                 style={styles.activationCloseButton}
                 onPress={handleDismiss}
                 activeOpacity={0.78}
@@ -796,7 +797,7 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
                 accessibilityLabel="Fechar ativação"
               >
                 <Ionicons name="arrow-back" size={20} color={ACTIVATION_COLOR.text} />
-              </TouchableOpacity>
+              </LeafTouchable>
               <View style={styles.activationHeaderCopy}>
                 <Text style={styles.activationTitle}>Seu cadastro</Text>
                 <Text style={styles.activationSubtitle}>
@@ -829,7 +830,7 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
                 const isBusy = busyFieldKey === row.stateKey;
                 const isDisabled = isBusy || row.isReadonly || row.stageBlocked;
                 return (
-                  <TouchableOpacity
+                  <LeafTouchable
                     key={`${row.stageKey}:${row.field.key}`}
                     activeOpacity={0.78}
                     disabled={isDisabled}
@@ -867,7 +868,7 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
                     ) : node.filled ? null : (
                       <Text style={[styles.activationRowAction, { color: node.tone }]}>{row.actionLabel}</Text>
                     )}
-                  </TouchableOpacity>
+                  </LeafTouchable>
                 );
               })}
 
@@ -880,7 +881,7 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
               <DriverAppSetupSection />
             </ScrollView>
 
-            <TouchableOpacity
+            <LeafTouchable
               testID="driver-activation-continue-button"
               activeOpacity={0.88}
               style={styles.activationButton}
@@ -889,7 +890,7 @@ export default function RobotaxiDriverActivationScreen({ navigation, route }) {
               accessibilityLabel={activationCtaLabel}
             >
               <Text style={styles.activationButtonText}>{activationCtaLabel}</Text>
-            </TouchableOpacity>
+            </LeafTouchable>
           </View>
         </PrototypeDismissibleSheet>
       </View>

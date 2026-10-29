@@ -12,9 +12,9 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  TouchableOpacity,
   View,
 } from "react-native";
+import LeafTouchable from "../../../components/design-system/LeafTouchable";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import Reanimated, { FadeInDown, FadeOutUp } from "react-native-reanimated";
@@ -881,7 +881,7 @@ function DriverHomeOverlay({
     <>
       {/* Earnings pill: the map stays the main view; tap to expand the summary. */}
       <View pointerEvents="box-none" style={[styles.driverEarningsPillLayer, { top: safeTop + 18 }]}>
-        <TouchableOpacity
+        <LeafTouchable
           activeOpacity={0.88}
           onPress={() => setEarningsExpanded(current => !current)}
           style={styles.driverEarningsPill}
@@ -896,7 +896,7 @@ function DriverHomeOverlay({
           {/* Safety signal stays visible without expanding the panel. */}
           {onlineLimitHintVisible ? <Ionicons name="time-outline" size={16} color={DRIVER_HOME_COLOR.warningText} accessibilityLabel="Próximo ao limite de horas online" /> : null}
           <Ionicons name={earningsExpanded ? "chevron-up" : "chevron-down"} size={16} color="#6A6A6A" />
-        </TouchableOpacity>
+        </LeafTouchable>
       </View>
 
       {earningsExpanded ? (
@@ -980,7 +980,7 @@ function DriverHomeOverlay({
             </View>
           </View>
 
-          <TouchableOpacity
+          <LeafTouchable
             activeOpacity={0.86}
             onPress={() => { setEarningsExpanded(false); (onOpenEarnings || handleOpenGoalModal)(); }}
             style={styles.driverEarningsPanelLink}
@@ -989,7 +989,7 @@ function DriverHomeOverlay({
           >
             <Text style={styles.driverEarningsPanelLinkText}>Ver relatório de ganhos</Text>
             <Ionicons name="chevron-forward" size={14} color={DRIVER_HOME_COLOR.leaf} />
-          </TouchableOpacity>
+          </LeafTouchable>
         </Reanimated.View>
       ) : null}
 
@@ -1017,7 +1017,7 @@ function DriverHomeOverlay({
             </View>
           ) : null}
           <View style={styles.driverBottomActions}>
-            <TouchableOpacity
+            <LeafTouchable
               activeOpacity={0.88}
               onPress={handleSliderPress}
               disabled={hasDriverWorkInProgress}
@@ -1138,8 +1138,8 @@ function DriverHomeOverlay({
                   }
                 />
               </Animated.View>
-            </TouchableOpacity>
-            <TouchableOpacity
+            </LeafTouchable>
+            <LeafTouchable
               activeOpacity={0.88}
               onPress={handleOpenGoalModal}
               testID="driver-home-preferences-button"
@@ -1152,7 +1152,7 @@ function DriverHomeOverlay({
                 size={20}
                 color={DRIVER_HOME_COLOR.leaf}
               />
-            </TouchableOpacity>
+            </LeafTouchable>
           </View>
         </LeafGlassSurface>
       </View>
@@ -1175,7 +1175,7 @@ function DriverHomeOverlay({
               style={styles.modalInput}
               placeholderTextColor="rgba(33,41,53,0.45)"
             />
-            <TouchableOpacity
+            <LeafTouchable
               activeOpacity={0.84}
               style={styles.destinationModeRow}
               onPress={() => setDestinationModeEnabled((current) => !current)}
@@ -1202,7 +1202,7 @@ function DriverHomeOverlay({
                   ]}
                 />
               </View>
-            </TouchableOpacity>
+            </LeafTouchable>
             <TextInput
               value={destinationInput}
               onChangeText={setDestinationInput}
@@ -1221,7 +1221,7 @@ function DriverHomeOverlay({
               </Text>
             ) : null}
             {typeof onOpenAvoidedAreas === "function" ? (
-              <TouchableOpacity
+              <LeafTouchable
                 activeOpacity={0.84}
                 style={styles.destinationModeRow}
                 onPress={() => {
@@ -1243,18 +1243,18 @@ function DriverHomeOverlay({
                   size={18}
                   color={DRIVER_HOME_COLOR.secondary}
                 />
-              </TouchableOpacity>
+              </LeafTouchable>
             ) : null}
             <View style={styles.modalActions}>
-              <TouchableOpacity
+              <LeafTouchable
                 activeOpacity={0.86}
                 style={styles.modalGhostButton}
                 onPress={() => setGoalModalVisible(false)}
                 disabled={savingPreferences}
               >
                 <Text style={styles.modalGhostButtonText}>Cancelar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
+              </LeafTouchable>
+              <LeafTouchable
                 activeOpacity={0.86}
                 style={styles.modalPrimaryButton}
                 onPress={handleSavePreferences}
@@ -1264,7 +1264,7 @@ function DriverHomeOverlay({
                 <Text style={styles.modalPrimaryButtonText}>
                   {savingPreferences ? "Salvando..." : "Salvar"}
                 </Text>
-              </TouchableOpacity>
+              </LeafTouchable>
             </View>
           </View>
         </View>
@@ -1348,21 +1348,21 @@ function DriverHomeOverlay({
             </View>
 
             <View style={styles.modalActions}>
-              <TouchableOpacity
+              <LeafTouchable
                 activeOpacity={0.86}
                 style={styles.modalGhostButton}
                 onPress={handleOpenEarningsFromSummary}
               >
                 <Text style={styles.modalGhostButtonText}>Ver ganhos</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
+              </LeafTouchable>
+              <LeafTouchable
                 activeOpacity={0.86}
                 style={styles.modalPrimaryButton}
                 onPress={handleCloseDaySummary}
                 testID="driver-day-summary-close"
               >
                 <Text style={styles.modalPrimaryButtonText}>Fechar</Text>
-              </TouchableOpacity>
+              </LeafTouchable>
             </View>
           </View>
         </View>

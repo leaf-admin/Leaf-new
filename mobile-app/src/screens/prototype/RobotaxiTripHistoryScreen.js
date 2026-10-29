@@ -1,6 +1,7 @@
 import leafTypography from '../../components/prototype/LeafTypography';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, ScrollView, StatusBar, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import LeafTouchable from '../../components/design-system/LeafTouchable';
 import { useIsFocused } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LeafRootTabs } from '../../components/prototype/PrototypeScaffold';
@@ -160,7 +161,7 @@ function HistoryRow({ item, isDriverRole = false, last = false, onPress }) {
   const statusLabel = completed ? 'Concluída' : ['CANCELLED', 'CANCELED'].includes(status) ? 'Cancelada' : 'Registro da viagem';
 
   return (
-    <TouchableOpacity
+    <LeafTouchable
       activeOpacity={0.82}
       onPress={onPress}
       style={[styles.tripRow, last && styles.tripRowLast]}
@@ -180,7 +181,7 @@ function HistoryRow({ item, isDriverRole = false, last = false, onPress }) {
         {counterpartyLabel ? <Text style={styles.tripDetail} numberOfLines={1}>{counterpartyTitle}: {counterpartyLabel}</Text> : null}
       </View>
       <Ionicons name="chevron-forward" size={13} color="#6A6A6A" />
-    </TouchableOpacity>
+    </LeafTouchable>
   );
 }
 
@@ -405,7 +406,7 @@ export default function RobotaxiTripHistoryScreen({ navigation, route }) {
                 {HISTORY_DATE_FILTERS.map((filter) => {
                   const active = filter.key === dateFilterKey;
                   return (
-                    <TouchableOpacity
+                    <LeafTouchable
                       key={filter.key}
                       onPress={() => setDateFilterKey(filter.key)}
                       style={[styles.dateFilterChip, active && styles.dateFilterChipActive]}
@@ -417,7 +418,7 @@ export default function RobotaxiTripHistoryScreen({ navigation, route }) {
                       <Text style={[styles.dateFilterChipText, active && styles.dateFilterChipTextActive]}>
                         {filter.label}
                       </Text>
-                    </TouchableOpacity>
+                    </LeafTouchable>
                   );
                 })}
               </View>
@@ -465,10 +466,10 @@ export default function RobotaxiTripHistoryScreen({ navigation, route }) {
                 ) : history.length > 0 ? (
                   <>
                   {historyError ? (
-                    <TouchableOpacity style={styles.refreshStatus} accessibilityRole="button" onPress={() => loadHistory({ forceRefresh: true })} testID="robotaxi-history-refresh-error">
+                    <LeafTouchable style={styles.refreshStatus} accessibilityRole="button" onPress={() => loadHistory({ forceRefresh: true })} testID="robotaxi-history-refresh-error">
                       <Ionicons name="refresh" size={16} color="#6A6A6A" />
                       <Text style={[styles.tripDetail, { flex: 1 }]}>Não foi possível atualizar. Toque para tentar novamente.</Text>
-                    </TouchableOpacity>
+                    </LeafTouchable>
                   ) : null}
                   {history.map((item, index) => (
                     <HistoryRow

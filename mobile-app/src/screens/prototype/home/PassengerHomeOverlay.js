@@ -13,10 +13,10 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  TouchableOpacity,
   View,
   useWindowDimensions,
 } from "react-native";
+import LeafTouchable from "../../../components/design-system/LeafTouchable";
 import { useReducedMotion } from "react-native-reanimated";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
@@ -1045,7 +1045,7 @@ function PassengerHomeOverlay({
                     ) : null}
                   </View>
                   <View style={styles.categoryTripSummaryDivider} />
-                  <TouchableOpacity
+                  <LeafTouchable
                     activeOpacity={0.82}
                     style={styles.categoryTripSummaryField}
                     onPress={onDestinationPress}
@@ -1057,7 +1057,7 @@ function PassengerHomeOverlay({
                     <Text style={styles.categoryRouteSummaryValue} numberOfLines={1}>
                       {destinationLabel}
                     </Text>
-                  </TouchableOpacity>
+                  </LeafTouchable>
                 </View>
               </View>
             ) : (
@@ -1068,7 +1068,7 @@ function PassengerHomeOverlay({
                 ]}
               >
               {shouldShowPickupField ? (
-                <TouchableOpacity
+                <LeafTouchable
                   activeOpacity={pickupSearchActive ? 1 : 0.88}
                   style={styles.pickupInput}
                   onPress={pickupSearchActive ? undefined : onPickupPress}
@@ -1098,7 +1098,7 @@ function PassengerHomeOverlay({
                         testID="passenger-home-pickup-search-input"
                         accessibilityLabel="Buscar partida"
                       />
-                      <TouchableOpacity
+                      <LeafTouchable
                         activeOpacity={0.84}
                         onPress={() => submitPickupSearch()}
                         style={styles.inlineSearchSubmitButton}
@@ -1107,8 +1107,8 @@ function PassengerHomeOverlay({
                         accessibilityLabel="Buscar partida digitada"
                       >
                         <Ionicons name="search" size={16} color={LEAF_GREEN} />
-                      </TouchableOpacity>
-                      <TouchableOpacity
+                      </LeafTouchable>
+                      <LeafTouchable
                         activeOpacity={0.84}
                         onPress={onPickupSearchClose}
                         style={styles.inlineSearchCloseButton}
@@ -1117,7 +1117,7 @@ function PassengerHomeOverlay({
                         accessibilityLabel="Fechar busca de partida"
                       >
                         <Ionicons name="close" size={17} color={TEXT_PRIMARY} />
-                      </TouchableOpacity>
+                      </LeafTouchable>
                     </View>
 	                  ) : (
 	                    <Text style={styles.pickupText} numberOfLines={1}>
@@ -1128,13 +1128,13 @@ function PassengerHomeOverlay({
                   {pickupAddress ? (
                     <Text style={styles.hiddenPickupAddress}>{pickupAddress}</Text>
                   ) : null}
-                </TouchableOpacity>
+                </LeafTouchable>
               ) : null}
 
               {shouldShowBothFields ? <View style={styles.divider} /> : null}
 
               {shouldShowDestinationField ? (
-                <TouchableOpacity
+                <LeafTouchable
                   activeOpacity={destinationSearchActive ? 1 : 0.88}
                   style={styles.destinationInput}
                   onPress={destinationSearchActive ? undefined : onDestinationPress}
@@ -1190,7 +1190,7 @@ function PassengerHomeOverlay({
 	                  </View>
 	                  {destinationSearchActive ? (
 	                    <View style={styles.destinationSearchActions}>
-	                      <TouchableOpacity
+	                      <LeafTouchable
                         activeOpacity={0.84}
                         onPress={onDestinationSearchClose}
                         style={styles.destinationSearchCloseButton}
@@ -1199,17 +1199,17 @@ function PassengerHomeOverlay({
                         accessibilityLabel="Fechar busca de destino"
                       >
                         <Ionicons name="close" size={17} color={TEXT_PRIMARY} />
-                      </TouchableOpacity>
+                      </LeafTouchable>
                     </View>
 	                  ) : null}
-                </TouchableOpacity>
+                </LeafTouchable>
               ) : null}
               </View>
             )}
           </View>
 
           {shouldShowDestinationField ? (
-            <TouchableOpacity
+            <LeafTouchable
               activeOpacity={0.86}
               onPress={onMicrophonePress}
               style={styles.hiddenMicButton}
@@ -1245,7 +1245,7 @@ function PassengerHomeOverlay({
                     );
 
                     return (
-                      <TouchableOpacity
+                      <LeafTouchable
                         key={item?.id || `${item?.name || activeSearchKind}-${index}`}
                         activeOpacity={0.86}
                         onPress={() => (
@@ -1293,11 +1293,11 @@ function PassengerHomeOverlay({
                             </Text>
                           ) : null}
                         </View>
-                      </TouchableOpacity>
+                      </LeafTouchable>
                     );
                   })}
                   {shouldShowPickupMapRow ? (
-                    <TouchableOpacity
+                    <LeafTouchable
                       activeOpacity={0.86}
                       onPress={onPickupMapPress}
                       style={styles.destinationResultRow}
@@ -1315,7 +1315,7 @@ function PassengerHomeOverlay({
                           Ajustar no mapa
                         </Text>
                       </View>
-                    </TouchableOpacity>
+                    </LeafTouchable>
                   ) : null}
                 </>
               ) : null}
@@ -1358,7 +1358,7 @@ function PassengerHomeOverlay({
               {visibleCategoryOptions.map(category => {
                 const selected = category.id === selectedCategoryId;
                 const categoryFareSignal = resolveFareSignal(category?.fareBreakdown?.pricingPayload || category?.pricingPayload || null);
-                return <TouchableOpacity key={category.id} onPress={() => {
+                return <LeafTouchable key={category.id} onPress={() => {
                     if (!selected) Haptics.selectionAsync().catch(() => {});
                     onCategorySelect?.(category.id);
                   }} activeOpacity={0.82}
@@ -1382,7 +1382,7 @@ function PassengerHomeOverlay({
                       <Text style={styles.leafCategoryPrice}>{category.priceLabel || '—'}</Text>
                     </View>
                     <Text style={styles.leafCategoryDetail} numberOfLines={1}>{formatCategoryArrivalFootnote(category)}</Text></View>
-                </TouchableOpacity>;
+                </LeafTouchable>;
               })}
               {/* Why the selected fare is above normal. The row chips already show the
                   percentage, so the line only appears when there is a reason to tell. */}
@@ -1393,11 +1393,11 @@ function PassengerHomeOverlay({
               ) : null}
               {/* Always rendered (muted until a breakdown exists) so the CTA does
                   not jump when the backend quote arrives. */}
-              <TouchableOpacity onPress={() => setFareBreakdownVisible(current => !current)} disabled={!canShowFareBreakdown}
+              <LeafTouchable onPress={() => setFareBreakdownVisible(current => !current)} disabled={!canShowFareBreakdown}
                 style={[styles.leafCategoryBreakdown, !canShowFareBreakdown && styles.leafCategoryBreakdownMuted]} testID="passenger-home-fare-breakdown-trigger" accessibilityRole="button"
                 accessibilityLabel="Ver composição do valor da corrida" accessibilityState={{ expanded: fareBreakdownVisible, disabled: !canShowFareBreakdown }}>
                 <Text style={styles.leafCategoryDetail}>Composição do valor</Text><Ionicons name="chevron-forward" size={12} color="#6A6A6A" />
-              </TouchableOpacity>
+              </LeafTouchable>
             </View>
           )}
 
@@ -1411,10 +1411,10 @@ function PassengerHomeOverlay({
                 <Text style={styles.fareBreakdownTitle} accessibilityRole="header">
                   Composição do valor · {String(selectedCategory?.label || selectedCategory?.id || '').replace(/^Leaf\s*/i, '').toUpperCase()}
                 </Text>
-                <TouchableOpacity onPress={() => setFareBreakdownVisible(false)} style={styles.fareBreakdownClose}
+                <LeafTouchable onPress={() => setFareBreakdownVisible(false)} style={styles.fareBreakdownClose}
                   testID="passenger-home-fare-breakdown-close" accessibilityRole="button" accessibilityLabel="Fechar composição do valor">
                   <Ionicons name="close" size={18} color={TEXT_PRIMARY} />
-                </TouchableOpacity>
+                </LeafTouchable>
               </View>
               {fareBreakdownRows.map((row, index) => (
                 <View
@@ -1427,7 +1427,7 @@ function PassengerHomeOverlay({
                         {row.label}
                       </Text>
                       {isPickupAdjustmentRow(row) ? (
-                        <TouchableOpacity
+                        <LeafTouchable
                           activeOpacity={0.78}
                           onPress={() => setPickupAdjustmentInfoVisible(true)}
                           style={styles.fareBreakdownInfoButton}
@@ -1436,7 +1436,7 @@ function PassengerHomeOverlay({
                           accessibilityLabel="Explicar adicional de embarque"
                         >
                           <Text style={styles.fareBreakdownInfoText}>i</Text>
-                        </TouchableOpacity>
+                        </LeafTouchable>
                       ) : null}
                     </View>
                     {row.detail ? (
@@ -1468,7 +1468,7 @@ function PassengerHomeOverlay({
           <Text style={styles.categoryPaymentNote} testID="passenger-home-category-payment-note">
             Você paga por Pix ao confirmar. Se nenhum motorista aceitar, o valor volta automaticamente.
           </Text>
-          <TouchableOpacity
+          <LeafTouchable
             activeOpacity={categoryConfirmDisabled ? 1 : 0.88}
             disabled={categoryConfirmDisabled}
             onPress={onCategoryConfirm}
@@ -1485,14 +1485,14 @@ function PassengerHomeOverlay({
             }
           >
             <Text style={styles.categoryConfirmText}>{categoryConfirmLabel}</Text>
-          </TouchableOpacity>
+          </LeafTouchable>
           <Modal
             visible={pickupAdjustmentInfoVisible}
             transparent
             animationType="fade"
             onRequestClose={() => setPickupAdjustmentInfoVisible(false)}
           >
-            <TouchableOpacity
+            <LeafTouchable
               activeOpacity={1}
               style={styles.pickupAdjustmentModalBackdrop}
               onPress={() => setPickupAdjustmentInfoVisible(false)}
@@ -1507,7 +1507,7 @@ function PassengerHomeOverlay({
                   Adicional de embarque refere-se ao valor pago ao motorista parceiro para deslocamento até o seu local de partida.
                 </Text>
               </View>
-            </TouchableOpacity>
+            </LeafTouchable>
           </Modal>
           </View>
         </View>
