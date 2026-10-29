@@ -408,6 +408,9 @@ const NAV_CAMERA_MIN_HEADING_DEG = 12;
 const NAV_OVERVIEW_REFIT_METERS = 120;
 const NAV_OVERVIEW_REFIT_MS = 20000;
 const NAV_OVERVIEW_ANIMATION_MS = 600;
+// Height of the navigation banner below the safe area, measured on the Android QA
+// phone (about 220 pt): the overview keeps the route start out from under it.
+const NAV_OVERVIEW_BANNER_CLEARANCE = 236;
 
 function isFollowRegionClose(previous, next) {
   if (!previous || !next) return false;
@@ -7058,7 +7061,13 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     const routeAhead = navigationRoute.length > 1
       ? navigationRoute.slice(routeAheadStartIndex(navigationRoute, activeDriverNavigationCoordinate) + 1)
       : (isFiniteCoordinate(navigationTarget) ? [navigationTarget] : []);
-    const overviewCoordinates = [activeDriverNavigationCoordinate, ...routeAhead];
+    // On the way to the pickup the job is the whole ride: add the route drawn on the map
+    // (the trip ahead), so a driver already close to the passenger still sees where it goes.
+    const overviewCoordinates = [
+      activeDriverNavigationCoordinate,
+      ...routeAhead,
+      ...(driverTripAssistStatus === 'accepted' ? presentedRouteCoordinates.filter(isFiniteCoordinate) : []),
+    ];
     if (overviewCoordinates.length < 2) {
       return;
     }
@@ -7074,7 +7083,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     const overviewOcclusion = {
       ...routeViewportOcclusion,
       top: showLeafNativeNavigation
-        ? Math.max(Number(routeViewportOcclusion.top) || 0, insets.top + NAVIGATION_BANNER_CLEARANCE)
+        ? Math.max(Number(routeViewportOcclusion.top) || 0, insets.top + NAV_OVERVIEW_BANNER_CLEARANCE)
         : Number(routeViewportOcclusion.top) || 0,
     };
     const overviewRegion = buildRouteViewportRegion({
@@ -7117,6 +7126,8 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     activeRoute?.destination,
     driverTripAssistNativeNavigation?.routeCoordinates,
     driverTripAssistNativeNavigation?.targetCoordinate,
+    driverTripAssistStatus,
+    presentedRouteCoordinates,
     homeMapInteractiveReady,
     isSearchingMode,
     leafNativeNavigationKey,
@@ -7329,9 +7340,9 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     }
     // At the pickup the whole trip to the destination is what matters next:
     // frame car plus route, like the quote does (Izaak, 2026-10-29).
-    const tripRoute = Array.isArray(activeRoute?.coordinates)
-      ? activeRoute.coordinates.filter(isFiniteCoordinate)
-      : [];
+    // The route drawn at the pickup is the trip ahead (pickup to destination).
+    const tripRoute = (presentedRouteCoordinates.length > 1 ? presentedRouteCoordinates : activeRoute?.coordinates || [])
+      .filter(isFiniteCoordinate);
     if (tripRoute.length > 1) {
       driverWaitingCameraKeyRef.current = bookingKey;
       focusRoute({ ...activeRoute, coordinates: [coordinate, ...tripRoute] }, true);
@@ -7358,6 +7369,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   }, [
     activeBookingId,
     activeRoute,
+    presentedRouteCoordinates,
     focusRoute,
     activeDriverNavigationCoordinate,
     driverLiveRideHeightMeasured,
