@@ -8,6 +8,7 @@ import Panel from "@/src/components/ui/Panel";
 import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
 import { TechnicalDetails } from "@/src/components/ui/DataViews";
 import ExternalInsightsPanels from "@/src/components/observability/ExternalInsightsPanels";
+import GoogleCostPanel from "@/src/components/observability/GoogleCostPanel";
 
 const grafanaBase = process.env.NEXT_PUBLIC_GRAFANA_URL || "";
 const POLL_INTERVAL_MS = Math.max(
@@ -683,6 +684,8 @@ export default function ObservabilityPage() {
                 ]}
               />
             </Panel>
+
+            <GoogleCostPanel />
 
             <ExternalInsightsPanels />
 

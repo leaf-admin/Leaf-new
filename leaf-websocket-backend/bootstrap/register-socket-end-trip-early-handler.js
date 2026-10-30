@@ -68,6 +68,10 @@ function registerSocketEndTripEarlyHandler({
 
         const redis = redisPool.getConnection();
         const bookingSnapshot = await redis.hgetall(`booking:${bookingId}`);
+        // Denominador do custo Google por corrida (monitor de custo).
+        await require('../services/google-usage-cost-service')
+          .recordRideCompletionForCost(redis, bookingId)
+          .catch(() => {});
         const paymentService = new PaymentService();
         const fareBreakdown = paymentService.calculateFareBreakdownFromReais(
           Number(finalFare || 0),

@@ -455,6 +455,11 @@ function registerSocketCompleteTripHandler({
                     });
                 }
 
+                // Denominador do custo Google por corrida (monitor de custo).
+                await require('../services/google-usage-cost-service')
+                    .recordRideCompletionForCost(redis, resultBookingId || bookingId)
+                    .catch(() => {});
+
                 // ✅ REFATORAÇÃO: Publicar evento no EventBus (listeners vão processar notificações)
                 if (event) {
                     // ✅ FASE 1.3: Criar span para Event publish

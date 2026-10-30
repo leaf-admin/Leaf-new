@@ -182,6 +182,20 @@ router.get('/ride-cost-telemetry', async (req, res) => {
   }
 });
 
+// Custo real das APIs Google (contado pelo próprio Google, gravado pelo monitor de custo).
+router.get('/google-cost', async (req, res) => {
+  try {
+    const redisPool = require('../utils/redis-pool');
+    await redisPool.ensureConnection();
+    const snapshot = await require('../services/google-usage-cost-service')
+      .getCostSnapshot(redisPool.getConnection());
+    return res.json({ success: true, ...snapshot });
+  } catch (error) {
+    logError(error, { service: 'ops-routes', operation: 'googleCost' });
+    return res.status(500).json({ success: false, error: 'Erro ao ler o custo Google' });
+  }
+});
+
 router.get('/ride-cost-telemetry/summary', async (req, res) => {
   try {
     const summary = await rideCostAlertService.collectRecentCostSummary();
