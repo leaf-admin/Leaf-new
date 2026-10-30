@@ -211,7 +211,7 @@ async function readWindow(redis, { hours, nowMs = Date.now(), prices } = {}) {
   const startMs = endMs - hours * HOUR_MS;
   const keys = hours <= 6
     ? Array.from({ length: hours * 60 }, (_, index) => minuteKey(startMs + index * MINUTE_MS))
-    : Array.from({ length: hours }, (_, index) => hourKey(startMs + index * HOUR_MS));
+    : Array.from({ length: hours }, (_, index) => hourKey(Math.floor(endMs / HOUR_MS) * HOUR_MS - index * HOUR_MS));
   const counts = await sumMinuteHashes(redis, keys);
   const rides = Number(await redis.zcount(RIDES_KEY, startMs, nowMs)) || 0;
   const usd = costUsd(counts, prices);
