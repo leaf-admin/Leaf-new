@@ -5,10 +5,14 @@ jest.mock('../../../utils/redis-pool', () => ({
 
 // users/{id} is read from native Firestore, served from the same path fixtures.
 let mockDataByPath = {};
+let mockReadError = null;
 jest.mock('../../../firebase-config', () => ({
   getRealtimeDB: jest.fn(),
   getFirestore: jest.fn(() => require('../../helpers/rtdb-tree-firestore').createTreeFirestore({
-    read: path => (mockDataByPath[path] === undefined ? null : JSON.parse(JSON.stringify(mockDataByPath[path]))),
+    read: (path) => {
+      if (mockReadError) throw mockReadError;
+      return mockDataByPath[path] === undefined ? null : JSON.parse(JSON.stringify(mockDataByPath[path]));
+    },
     write() {}
   }))
 }));
@@ -295,6 +299,27 @@ describe('driver-eligibility-service', () => {
         vehicleIdentitySource: 'runtime_fallback'
       })
     );
+  });
+
+  it('reports a failed Firebase read as unavailable and caches nothing', async () => {
+    mockReadError = new Error('deadline exceeded');
+    try {
+      firebaseConfig.getRealtimeDB.mockReturnValue(createRealtimeDB({}));
+      jest.spyOn(driverEligibilityService, '_resolveActivationGate').mockResolvedValue({ canGoOnline: true });
+
+      const profile = await driverEligibilityService.resolveDriverProfile('driver_slow', { carType: 'Leaf Plus' });
+      expect(profile).toEqual(expect.objectContaining({ lookupUnavailable: true, driverApproved: false }));
+
+      const eligibility = await driverEligibilityService.isDriverEligibleForRide('driver_slow', null, {
+        carType: 'Leaf Plus'
+      }, { profileTimeoutMs: 2000 });
+
+      expect(eligibility.code).toBe('DRIVER_PROFILE_UNAVAILABLE');
+      expect(eligibility.eligible).toBe(false);
+      expect(redis.hset).not.toHaveBeenCalledWith('driver_eligibility_profile:driver_slow', expect.anything());
+    } finally {
+      mockReadError = null;
+    }
   });
 
   it('treats legacy cache entries without explicit approval flags as blocked', async () => {
