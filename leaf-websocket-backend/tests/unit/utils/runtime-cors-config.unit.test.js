@@ -12,6 +12,16 @@ describe('runtime-cors-config', () => {
     expect(config.allowedOrigins).toContain('http://localhost:3000');
   });
 
+  it('allows the headers and methods the dashboard sends', () => {
+    const { corsOptions } = buildRuntimeCorsConfig({ env: { NODE_ENV: 'production' } });
+
+    // A resposta do WhatsApp no suporte manda Idempotency-Key; sem ele no preflight o navegador barra o POST.
+    expect(corsOptions.allowedHeaders).toEqual(expect.arrayContaining([
+      'Idempotency-Key', 'X-Idempotency-Key', 'X-Leaf-Support-Scope', 'X-Leaf-KYC-Scope'
+    ]));
+    expect(corsOptions.methods).toContain('PATCH');
+  });
+
   it('disables local origins by default in production', () => {
     const config = buildRuntimeCorsConfig({
       env: {
