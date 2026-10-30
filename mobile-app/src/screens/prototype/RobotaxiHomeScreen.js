@@ -119,6 +119,7 @@ import {
   resolveTripTollAmount,
 } from './tripFinancialSummary';
 import {
+  HOME_EARNINGS_WINDOW_DAYS,
   selectDriverTodayEarnings,
   useDriverEarningsReport,
 } from './driverEarningsReport';
@@ -5776,6 +5777,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     driverId: isDriverRole ? profile?.uid || profileUid || '' : '',
     enabled: Boolean(isDriverRole && isScreenFocused && !driverActiveRide),
     refreshKey: String(lastReceipt?.id || lastReceipt?.completedAt || ''),
+    windowDays: HOME_EARNINGS_WINDOW_DAYS,
   });
   const driverTodayFallbackRef = useRef(null);
   const driverTodaySummary = useMemo(() => {
