@@ -29,6 +29,7 @@ import { formatBrazilPhone } from '../../onboarding/onboardingSteps';
 import { toUserFriendlyError, toUserFriendlyMessage } from '../../../utils/friendlyErrorMessages';
 import { getReviewAccountInfo } from '../../../config/reviewAccounts';
 import { leafButtonMetrics } from '../../prototype/LeafRideUI';
+import { shouldFallbackToSmsAfterWhatsAppFailure } from '../otpDelivery';
 
 const { color, radius, spacing } = onboardingTheme;
 
@@ -487,10 +488,10 @@ const PhoneInputStep = ({ onVerificationSent, onPasswordLoginSuccess, progressMe
                     return;
                 } catch (whatsappError) {
                     Logger.error('❌ Falha no envio OTP via WhatsApp:', whatsappError);
-                    if (!enableCustomOtpFallback) {
+                    if (!enableCustomOtpFallback && !shouldFallbackToSmsAfterWhatsAppFailure(whatsappError)) {
                         throw whatsappError;
                     }
-                    Logger.warn('⚠️ Aplicando fallback legado de SMS somente no ambiente controlado.');
+                    Logger.warn('⚠️ WhatsApp indisponível; enviando o código por SMS.');
                 }
             }
 

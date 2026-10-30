@@ -15,6 +15,7 @@ import apiClient from '../../../services/httpClient';
 import onboardingTheme from '../common/onboardingTheme';
 import { toUserFriendlyMessage } from '../../../utils/friendlyErrorMessages';
 import { leafButtonMetrics } from '../../prototype/LeafRideUI';
+import { shouldFallbackToSmsAfterWhatsAppFailure } from '../otpDelivery';
 
 const QA_FIXED_OTP_BY_PHONE = new Map([
     ['+5521102938475', '992111'],
@@ -272,24 +273,26 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack, progressMeta }
             // ✅ Mensagens de erro específicas e humanas
             let errorMessage = 'Código inválido. Verifique e tente novamente.';
 
-            if (error.message) {
-                if (error.message.includes('invalid') || error.message.includes('inválido')) {
+            // The Leaf backend answers in Portuguese (invalid, expired, too many attempts).
+            const rawMessage = error?.response?.data?.error || error.message;
+            if (rawMessage) {
+                if (rawMessage.includes('invalid') || rawMessage.includes('inválido')) {
                     errorMessage = `Código inválido. Verifique o código recebido pelo ${otpChannelLabel} e tente novamente.`;
-                } else if (error.message.includes('expired') || error.message.includes('expirado')) {
+                } else if (rawMessage.includes('expired') || rawMessage.includes('expirado')) {
                     errorMessage = 'Código expirado. Solicite um novo código.';
                 } else if (
-                    error.message.includes('already used') ||
-                    error.message.includes('already been used') ||
-                    error.message.includes('code used') ||
-                    error.message.includes('reutilizado')
+                    rawMessage.includes('already used') ||
+                    rawMessage.includes('already been used') ||
+                    rawMessage.includes('code used') ||
+                    rawMessage.includes('reutilizado')
                 ) {
                     errorMessage = 'Esse código já foi utilizado. Solicite um novo código.';
-                } else if (error.message.includes('network') || error.message.includes('rede')) {
+                } else if (rawMessage.includes('network') || rawMessage.includes('rede')) {
                     errorMessage = 'Erro de conexão. Verifique sua internet e tente novamente.';
-                } else if (error.message.includes('timeout')) {
+                } else if (rawMessage.includes('timeout')) {
                     errorMessage = 'Tempo de espera esgotado. Tente novamente.';
                 } else {
-                    errorMessage = error.message;
+                    errorMessage = rawMessage;
                 }
             }
 
@@ -357,16 +360,25 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack, progressMeta }
         try {
             let newConfirmation;
             if (currentConfirmation && currentConfirmation.isCustomOtp) {
-                const response = await requestOtpWithFallback(phoneNumber);
-                if (response.data && response.data.success) {
-                    newConfirmation = {
-                        verificationId: response.data.verificationId,
-                        isCustomOtp: true,
-                        channel: response.data.channel || 'whatsapp',
-                        expiresIn: response.data.expiresIn || 300
-                    };
-                } else {
-                    throw new Error('Falha ao reenviar código.');
+                try {
+                    const response = await requestOtpWithFallback(phoneNumber);
+                    if (response.data && response.data.success) {
+                        newConfirmation = {
+                            verificationId: response.data.verificationId,
+                            isCustomOtp: true,
+                            channel: response.data.channel || 'whatsapp',
+                            expiresIn: response.data.expiresIn || 300
+                        };
+                    } else {
+                        throw new Error('Falha ao reenviar código.');
+                    }
+                } catch (whatsappError) {
+                    if (!shouldFallbackToSmsAfterWhatsAppFailure(whatsappError)) throw whatsappError;
+                    Logger.warn('⚠️ WhatsApp indisponível no reenvio; enviando o código por SMS.');
+                    newConfirmation = Object.assign(
+                        await auth().signInWithPhoneNumber(phoneNumber, true),
+                        { channel: 'sms', isCustomOtp: false }
+                    );
                 }
             } else {
                 newConfirmation = await auth().signInWithPhoneNumber(phoneNumber, true);
@@ -376,7 +388,7 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack, progressMeta }
             setTimer(30);
             setCanResend(false);
             setOtp(['', '', '', '', '', '']);
-            Alert.alert('Código enviado', `Enviamos um novo código pelo ${otpChannelLabel}.`);
+            Alert.alert('Código enviado', `Enviamos um novo código pelo ${newConfirmation?.isCustomOtp && newConfirmation?.channel !== 'sms' ? 'WhatsApp' : 'SMS'}.`);
         } catch (error) {
             Logger.error('Erro ao reenviar código:', error);
             Alert.alert('Erro', 'Não foi possível reenviar o código. Tente novamente.');

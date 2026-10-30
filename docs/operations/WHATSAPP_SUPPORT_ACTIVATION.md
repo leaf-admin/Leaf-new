@@ -7,8 +7,8 @@ Código preparado na branch `codex/whatsapp-support-panel-main`, desligado por p
 Não houve deploy, configuração de segredos de produção, publicação de índices,
 envio real pela API ou exclusão da conta do aplicativo nesta implementação.
 
-O canal de login OTP permanece independente e não foi ativado. Sem templates,
-disparos, anexos de saída, download de mídia ou novo worker. Mensagens de mídia
+O OTP de login por WhatsApp está descrito na seção própria abaixo. No suporte não há
+templates, disparos, anexos de saída, download de mídia ou novo worker. Mensagens de mídia
 recebidas aparecem com aviso explícito de formato ainda não suportado.
 
 ## Evidência da Meta e decisão humana
@@ -119,8 +119,33 @@ fictícios nem alterar essas políticas para fazer o validador passar.
   Voltar ao celular exige cancelar o registro na API e seguir o procedimento Meta;
   o histórico perdido não é restaurado pela integração.
 
-Fora do escopo: regras financeiras, corridas, OTP, KYC, bots automáticos, campanhas,
+Fora do escopo: regras financeiras, corridas, KYC, bots automáticos, campanhas,
 templates pagos, novos serviços externos e alterações paralelas no RTDB.
+
+## OTP de cadastro e login por WhatsApp (30/10/2026)
+
+Usa a rota existente `/api/custom-otp` e o `whatsapp-otp-service` (template de
+autenticação da Meta com botão de copiar código). Não há fluxo paralelo.
+
+- Backend é a fonte da verdade: código de 6 dígitos com `crypto.randomInt`,
+  guardado só como HMAC (`AUTH_OTP_HMAC_KEY`, 32+ bytes) em Redis, validade de
+  5 minutos, uso único e no máximo 5 tentativas erradas por código.
+- Limites de envio (protegem o custo do template): 1 pedido a cada 30 s por
+  telefone, 5 por hora por telefone e 20 por hora por IP. Falha da Meta libera
+  o intervalo de 30 s e devolve 502 `WHATSAPP_OTP_DELIVERY_FAILED`.
+- Produção só aceita o OTP custom com `AUTH_OTP_PROVIDER=whatsapp`, provedor
+  completo e HMAC dedicada; caso contrário segue 503, como antes. Os bypasses de
+  teste/review não mudaram.
+- App (passageiro e motorista usam o mesmo `PhoneInputStep`/`OTPStep`): liga com
+  `EXPO_PUBLIC_ENABLE_WHATSAPP_OTP=true` (OTA). Se o backend responder 502/503/504
+  ou não responder, o app envia por SMS do Firebase. Limite (429) não cai para SMS.
+- Variáveis: `config/whatsapp-otp.env.example`. O número pode ser o mesmo do
+  suporte (`WHATSAPP_SUPPORT_PHONE_NUMBER_ID`), mas os nomes das variáveis são separados.
+
+Ativação, cada passo com aprovação de Izaak: aprovar o template na Meta;
+provisionar as variáveis no runtime de Santiago; deploy do backend; smoke com um
+número autorizado (sem digitar OTP em celular de QA por agente); só então a OTA
+com a flag do app.
 
 ## Fontes oficiais consultadas
 
