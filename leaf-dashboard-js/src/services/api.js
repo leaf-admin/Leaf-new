@@ -405,6 +405,10 @@ class LeafApiService {
     return this.request(`/ops/external-insights${forceRefresh ? "?forceRefresh=true" : ""}`);
   }
 
+  async getGoogleCost() {
+    return this.request("/ops/google-cost");
+  }
+
   async getOpsAlerts(hours = 1) {
     return this.request(`/ops/alerts?hours=${encodeURIComponent(hours)}`);
   }

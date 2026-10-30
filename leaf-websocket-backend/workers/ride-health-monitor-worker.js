@@ -6,6 +6,8 @@ const { metrics } = require('../utils/prometheus-metrics');
 const { backfillRideHealthIndex, evaluateRideOperationsAlerts } = require('../services/ride-health-monitor');
 const RedisLeaderLease = require('../utils/redis-leader-lease');
 const { buildWorkerConsumerName } = require('./worker-consumer-identity');
+const googleUsageCostService = require('../services/google-usage-cost-service');
+const alertService = require('../services/alert-service');
 
 const DEFAULT_INTERVAL_MS = Number.parseInt(process.env.RIDE_HEALTH_MONITOR_INTERVAL_MS || '60000', 10);
 
@@ -36,6 +38,24 @@ function getWorkerConfig(env = process.env, argv = process.argv.slice(2)) {
 
 let intervalHandle = null;
 let cycleInFlight = false;
+let lastGoogleCostRunAt = 0;
+
+// Custo Google pelos contadores do próprio Google, no mesmo líder deste worker.
+async function maybeRunGoogleCostCycle(redis, env = process.env, nowMs = Date.now()) {
+  if (String(env.ENABLE_GOOGLE_COST_MONITOR || 'true') === 'false') return null;
+  const intervalMs = Math.max(60000, Number.parseInt(env.GOOGLE_COST_MONITOR_INTERVAL_MS || '120000', 10) || 120000);
+  if (nowMs - lastGoogleCostRunAt < intervalMs) return null;
+  lastGoogleCostRunAt = nowMs;
+  try {
+    return await googleUsageCostService.runGoogleCostCycle(redis, { alertClient: alertService, nowMs });
+  } catch (error) {
+    logStructured('warn', 'Ciclo de custo Google falhou', {
+      service: 'ride-health-monitor-worker',
+      error: error.message
+    });
+    return null;
+  }
+}
 
 async function runRideHealthMonitorCycle(reason = 'interval') {
   if (cycleInFlight) {
@@ -94,6 +114,8 @@ async function runRideHealthMonitorCycle(reason = 'interval') {
       const result = await evaluateRideOperationsAlerts(redis, {
         nowIso: new Date().toISOString()
       });
+
+      await maybeRunGoogleCostCycle(redis);
 
       logStructured('info', 'Ciclo de ride health concluído', {
         service: 'ride-health-monitor-worker',

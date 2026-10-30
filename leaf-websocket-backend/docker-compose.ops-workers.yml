@@ -234,8 +234,19 @@ services:
       - BOT_EVENTS_ENABLED=${BOT_EVENTS_ENABLED:-false}
       - BOT_EVENTS_OPERACAO_URL=${BOT_EVENTS_OPERACAO_URL:-}
       - BOT_EVENTS_OPERACAO_SECRET=${BOT_EVENTS_OPERACAO_SECRET:-}
+      # Custo Google pelos contadores do Cloud Monitoring (a conta precisa de roles/monitoring.viewer).
+      - FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID:?FIREBASE_PROJECT_ID must be set}
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/firebase-credentials.json
+      - ENABLE_GOOGLE_COST_MONITOR=${ENABLE_GOOGLE_COST_MONITOR:-true}
+      - GOOGLE_COST_MONITOR_INTERVAL_MS=${GOOGLE_COST_MONITOR_INTERVAL_MS:-120000}
+      - GOOGLE_COST_IDLE_ROUTES_PER_HOUR=${GOOGLE_COST_IDLE_ROUTES_PER_HOUR:-30}
+      - GOOGLE_COST_HOURLY_USD_CRITICAL=${GOOGLE_COST_HOURLY_USD_CRITICAL:-2}
+      - GOOGLE_COST_PER_RIDE_USD_WARNING=${GOOGLE_COST_PER_RIDE_USD_WARNING:-0.06}
+      - GOOGLE_COST_ROUTES_PER_RIDE_WARNING=${GOOGLE_COST_ROUTES_PER_RIDE_WARNING:-3}
+      - GOOGLE_COST_FIRESTORE_READS_PER_HOUR_WARNING=${GOOGLE_COST_FIRESTORE_READS_PER_HOUR_WARNING:-50000}
     volumes:
       - ./logs:/app/logs
+      - ./firebase-credentials.json:/app/firebase-credentials.json:ro
     depends_on:
       redis:
         condition: service_healthy
