@@ -226,7 +226,10 @@ const DRIVER_DESTINATION_MODE_DURATION_MINUTES = Math.max(
     10,
   ) || 90,
 );
-const DRIVER_ACTIVATION_REMOTE_SYNC_INTERVAL_MS = 12000;
+// Rede de segurança: o evento de documento no socket e a volta ao foreground já
+// sincronizam. A 12 s, cada motorista com o app aberto lia ~6 documentos do
+// Firestore a cada 12 s, para sempre.
+const DRIVER_ACTIVATION_REMOTE_SYNC_INTERVAL_MS = 60000;
 const DRIVER_ACTIVATION_SYNC_MIN_GAP_MS = 6000;
 const DESTINATION_SEARCH_MIN_QUERY_LENGTH = 3;
 const DESTINATION_SEARCH_SESSION_IDLE_MS = 45000;
@@ -17666,6 +17669,10 @@ function startDriverActivationRemoteSync(profile) {
   }
 
   runtimeActivationRemoteSyncTimer = setInterval(() => {
+    // Já aprovado: o backend barra online e dispatch se algo mudar; não precisa sondar.
+    if (runtimeState.driverCanGoOnline === true) {
+      return;
+    }
     syncDriverActivationWithProfile(profile, { source: "timer" }).catch(
       (error) => {
         Logger.warn(
