@@ -94,6 +94,17 @@ describe('google usage cost', () => {
     expect(window.costPerRideUsd).toBeCloseTo(0.025, 6);
   });
 
+  it('includes the current hour in day and week windows', async () => {
+    const redis = createRedis();
+    await redis.hset(service.hourKey(NOW), { 'firestore|read': 500 });
+    await redis.hset(service.hourKey(NOW - 23 * 3600000), { 'firestore|read': 100 });
+    await redis.hset(service.hourKey(NOW - 24 * 3600000), { 'firestore|read': 999 });
+
+    const day = await service.readWindow(redis, { hours: 24, nowMs: NOW });
+
+    expect(day.counts['firestore|read']).toBe(600);
+  });
+
   it('alerts on paid routes without rides and on more routes per ride than the plan', () => {
     const routes = (count) => ({ 'routes.googleapis.com|google.maps.routing.v2.Routes.ComputeRoutes': count });
     const idle = service.evaluateCostAlerts({
