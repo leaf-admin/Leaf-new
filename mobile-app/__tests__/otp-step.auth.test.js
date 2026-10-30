@@ -1,6 +1,6 @@
 import React from 'react';
 import { Alert } from 'react-native';
-import { fireEvent, render, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 
 import OTPStep, { assertVerifiedOtpIdentity } from '../src/components/auth/steps/OTPStep';
 import { saveStepData } from '../src/utils/secureOnboardingStorage';
@@ -129,6 +129,63 @@ describe('OTPStep', () => {
         undefined,
       );
     });
+  });
+
+  test('shows the backend message when the WhatsApp code is locked after too many attempts', async () => {
+    const apiClient = require('../src/services/httpClient');
+    apiClient.post.mockRejectedValueOnce({
+      message: 'Request failed with status code 429',
+      response: { status: 429, data: { code: 'OTP_TOO_MANY_ATTEMPTS', error: 'Muitas tentativas. Peça um novo código.' } },
+    });
+
+    const { getByTestId } = render(
+      <OTPStep
+        phoneNumber="+5521998991886"
+        confirmation={{ isCustomOtp: true, channel: 'whatsapp', verificationId: 'vid_x' }}
+        onVerified={jest.fn()}
+        onBack={jest.fn()}
+      />,
+    );
+
+    await fillOtp(getByTestId, '123456');
+
+    await waitFor(() => {
+      expect(Alert.alert).toHaveBeenCalledWith(
+        'Código não confirmado',
+        'Muitas tentativas. Peça um novo código.',
+        undefined,
+        undefined,
+      );
+    });
+  });
+
+  test('resends by SMS when WhatsApp delivery is unavailable', async () => {
+    jest.useFakeTimers();
+    try {
+      const apiClient = require('../src/services/httpClient');
+      apiClient.post.mockRejectedValueOnce({ response: { status: 502, data: { code: 'WHATSAPP_OTP_DELIVERY_FAILED' } } });
+      mockSignInWithPhoneNumber.mockResolvedValueOnce({ confirm: jest.fn() });
+
+      const { getByTestId } = render(
+        <OTPStep
+          phoneNumber="+5521998991886"
+          confirmation={{ isCustomOtp: true, channel: 'whatsapp', verificationId: 'vid_x' }}
+          onVerified={jest.fn()}
+          onBack={jest.fn()}
+        />,
+      );
+      for (let second = 0; second < 31; second += 1) {
+        await act(async () => { jest.advanceTimersByTime(1000); });
+      }
+      fireEvent.press(getByTestId('auth-otp-resend-btn'));
+
+      await waitFor(() => {
+        expect(mockSignInWithPhoneNumber).toHaveBeenCalledWith('+5521998991886', true);
+        expect(Alert.alert).toHaveBeenCalledWith('Código enviado', 'Enviamos um novo código pelo SMS.', undefined, undefined);
+      });
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   test('distributes an autofilled OTP received in the first input', async () => {

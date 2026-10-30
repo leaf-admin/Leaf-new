@@ -347,6 +347,52 @@ describe('PhoneInputStep', () => {
     });
   });
 
+  test('falls back to Firebase SMS when the backend cannot deliver the WhatsApp code', async () => {
+    const onVerificationSent = jest.fn();
+    const apiClient = require('../src/services/httpClient');
+    const runtimeAccessPolicy = require('../src/config/runtimeAccessPolicy');
+    runtimeAccessPolicy.isWhatsAppOtpEnabled.mockReturnValue(true);
+    apiClient.post.mockRejectedValueOnce({
+      response: { status: 503, data: { code: 'OTP_PROVIDER_NOT_CONFIGURED' } },
+    });
+
+    const { getByTestId } = render(
+      <PhoneInputStep onSwitchToRegister={jest.fn()} onVerificationSent={onVerificationSent} />,
+    );
+    fireEvent.changeText(getByTestId('auth-phone-input'), '21998991886');
+    fireEvent.press(getByTestId('auth-continue-btn'));
+
+    await waitFor(() => {
+      expect(apiClient.post).toHaveBeenCalledWith('/api/custom-otp/request-otp', { phone: '+5521998991886' });
+      expect(mockSignInWithPhoneNumber).toHaveBeenCalledWith('+5521998991886');
+      expect(onVerificationSent).toHaveBeenCalledWith(
+        expect.objectContaining({ isCustomOtp: false, channel: 'sms' }),
+        '+5521998991886',
+        expect.anything(),
+      );
+    });
+  });
+
+  test('does not switch to SMS when the WhatsApp send limit is reached', async () => {
+    const onVerificationSent = jest.fn();
+    const apiClient = require('../src/services/httpClient');
+    const runtimeAccessPolicy = require('../src/config/runtimeAccessPolicy');
+    runtimeAccessPolicy.isWhatsAppOtpEnabled.mockReturnValue(true);
+    apiClient.post.mockRejectedValueOnce({
+      response: { status: 429, data: { code: 'OTP_SEND_LIMIT', error: 'Muitos pedidos de código.' } },
+    });
+
+    const { getByTestId } = render(
+      <PhoneInputStep onSwitchToRegister={jest.fn()} onVerificationSent={onVerificationSent} />,
+    );
+    fireEvent.changeText(getByTestId('auth-phone-input'), '21998991886');
+    fireEvent.press(getByTestId('auth-continue-btn'));
+
+    await waitFor(() => expect(Alert.alert).toHaveBeenCalled());
+    expect(mockSignInWithPhoneNumber).not.toHaveBeenCalled();
+    expect(onVerificationSent).not.toHaveBeenCalled();
+  });
+
   test('keeps the Firebase confirmation prototype so confirm() still works', async () => {
     class FakeConfirmationResult {
       constructor() {

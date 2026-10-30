@@ -26,7 +26,14 @@ router.get('/chat/inbox', authenticateSupport, async (req, res) => {
 
         const limit = parseInt(req.query.limit, 10) || 50;
         const includeClosed = String(req.query.includeClosed || '').toLowerCase() === 'true';
-        const chats = await supportChatService.listActiveChats({ limit, includeClosed });
+        const nativeChats = await supportChatService.listActiveChats({ limit, includeClosed });
+        const whatsappChats = [req.query.scope, req.headers['x-leaf-support-scope']]
+            .filter(Boolean).every((scope) => scope === 'operational')
+            ? await require('../services/whatsapp-support-service').listActiveChats({ limit, includeClosed })
+            : [];
+        const chats = [...nativeChats, ...whatsappChats]
+            .sort((a, b) => new Date(b.lastMessageAt || b.updatedAt || 0) - new Date(a.lastMessageAt || a.updatedAt || 0))
+            .slice(0, Math.min(100, Math.max(1, limit)));
 
         const payload = await backofficeCostGuardService.attachToResponse(
             res,

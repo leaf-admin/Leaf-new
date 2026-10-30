@@ -6,11 +6,18 @@ const request = require('supertest');
 const mockSendMessage = jest.fn();
 const mockGetChatStatus = jest.fn();
 const mockReopenChatForOpenTicket = jest.fn();
+const mockListActiveChats = jest.fn();
+const mockListWhatsAppChats = jest.fn();
+
+jest.mock('../../../services/whatsapp-support-service', () => ({
+  listActiveChats: (...args) => mockListWhatsAppChats(...args)
+}));
 
 jest.mock('../../../services/support-chat-service', () => ({
   getChatStatus: (...args) => mockGetChatStatus(...args),
   reopenChatForOpenTicket: (...args) => mockReopenChatForOpenTicket(...args),
-  sendMessage: (...args) => mockSendMessage(...args)
+  sendMessage: (...args) => mockSendMessage(...args),
+  listActiveChats: (...args) => mockListActiveChats(...args)
 }));
 
 jest.mock('../../../services/backoffice-cost-guard-service', () => ({
@@ -60,6 +67,8 @@ function createApp() {
 describe('support chat REST routes', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockListActiveChats.mockResolvedValue([]);
+    mockListWhatsAppChats.mockResolvedValue([]);
     mockGetChatStatus.mockResolvedValue({ status: 'open' });
     mockReopenChatForOpenTicket.mockResolvedValue({ reopened: true });
     mockSendMessage.mockResolvedValue({
@@ -82,6 +91,17 @@ describe('support chat REST routes', () => {
 
     expect(response.status).toBe(200);
     expect(mockSendMessage).toHaveBeenCalledWith('user_1', 'Oi', 'user');
+  });
+
+  it('merges WhatsApp with native inbox by timestamp without exposing it in sandbox scope', async () => {
+    mockListActiveChats.mockResolvedValue([{ userId: 'native', lastMessageAt: '2026-10-26T10:00:00Z' }]);
+    mockListWhatsAppChats.mockResolvedValue([{ userId: 'whatsapp:1:5521999990000', channel: 'whatsapp', lastMessageAt: '2026-10-26T11:00:00Z' }]);
+    const response = await request(createApp()).get('/support/chat/inbox').set('Authorization', 'agent-token');
+    expect(response.body.chats.map((chat) => chat.userId)).toEqual(['whatsapp:1:5521999990000', 'native']);
+    mockListWhatsAppChats.mockClear();
+    const sandbox = await request(createApp()).get('/support/chat/inbox?scope=operational').set('Authorization', 'agent-token').set('X-Leaf-Support-Scope', 'sandbox');
+    expect(sandbox.body.chats.map((chat) => chat.userId)).toEqual(['native']);
+    expect(mockListWhatsAppChats).not.toHaveBeenCalled();
   });
 
   it('keeps agent senderType only for support agents', async () => {
