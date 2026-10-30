@@ -865,6 +865,42 @@ describe('drivers earnings route settled rides source (Firestore rides, namespac
     expect(realtimeQueries.some((query) => query.path === 'bookings')).toBe(false);
   });
 
+  it('?days=2 lê só as corridas dos últimos dias e devolve a série curta da home', async () => {
+    const app = createApp();
+    const { firestore } = mockRealtimeDb({
+      users: { driver_1: driverProfile },
+      profile: SANDBOX_QA_PROFILE,
+      sandboxRides: {
+        [rideId('2026-10-11T12:10:00.000Z')]: completedRide('2026-10-11T12:40:00.000Z', sandboxEnvelope())
+      }
+    });
+
+    const response = await request(app)
+      .get('/api/drivers/driver_1/earnings?days=2')
+      .set('Authorization', 'Bearer firebase:driver_1');
+
+    expect(response.status).toBe(200);
+    const { report } = response.body;
+    expect(report.dailySeriesWindowDays).toBe(2);
+    expect(report.dailySeries).toHaveLength(2);
+    expect(slotOf(report, '2026-10-11')).toMatchObject({ completedCount: 1 });
+    expect(firestore.queries[0].filters[1]).toEqual(
+      { field: '__name__', op: '>=', value: `booking_${Date.parse(NOW) - 3 * 24 * 60 * 60 * 1000}` }
+    );
+  });
+
+  it('?days fora de 1 a 30 cai na janela padrão de 30 dias', async () => {
+    const app = createApp();
+    mockRealtimeDb({ users: { driver_1: driverProfile }, profile: SANDBOX_QA_PROFILE, sandboxRides: {} });
+
+    const response = await request(app)
+      .get('/api/drivers/driver_1/earnings?days=90')
+      .set('Authorization', 'Bearer firebase:driver_1');
+
+    expect(response.status).toBe(200);
+    expect(response.body.report.dailySeriesWindowDays).toBe(30);
+  });
+
   it('corrida de ontem fica no dia de ontem', async () => {
     const app = createApp();
     mockRealtimeDb({

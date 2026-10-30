@@ -12,11 +12,19 @@ import { formatCurrencyBRL } from './tripFinancialSummary';
 
 const REQUEST_TIMEOUT_MS = 10000;
 const DEFAULT_WINDOW_DAYS = 30;
+// The home only shows today: 2 days keeps today's slot across midnight and makes
+// the server read the last 2 days of rides instead of 30.
+export const HOME_EARNINGS_WINDOW_DAYS = 2;
 
-// Last good report per driver, kept for the life of the JS runtime so a
-// remount or a failed refresh still shows the last server value.
+// Last good report per driver and window, kept for the life of the JS runtime so
+// a remount or a failed refresh still shows the last server value. Keyed by window
+// so the home's short report never stands in for the 30-day Atividade totals.
 const lastServerReportByDriver = new Map();
 const pendingRequestByDriver = new Map();
+
+function reportCacheKey(driverId, windowDays = DEFAULT_WINDOW_DAYS) {
+  return `${String(driverId || '').trim()}|${windowDays}`;
+}
 
 function toFiniteNumber(value) {
   if (value === null || value === undefined || String(value).trim() === '') {
@@ -37,8 +45,11 @@ export function toLocalDateKey(date = new Date()) {
   return `${year}-${month}-${day}`;
 }
 
-export function getCachedDriverEarningsReport(driverId) {
-  return lastServerReportByDriver.get(String(driverId || '').trim()) || null;
+export function getCachedDriverEarningsReport(driverId, windowDays = DEFAULT_WINDOW_DAYS) {
+  if (!String(driverId || '').trim()) {
+    return null;
+  }
+  return lastServerReportByDriver.get(reportCacheKey(driverId, windowDays)) || null;
 }
 
 export function resetDriverEarningsReportCache() {
@@ -46,14 +57,16 @@ export function resetDriverEarningsReportCache() {
   pendingRequestByDriver.clear();
 }
 
-export async function fetchDriverEarningsReport(driverId) {
+export async function fetchDriverEarningsReport(driverId, { windowDays = DEFAULT_WINDOW_DAYS } = {}) {
   const id = String(driverId || '').trim();
   if (!id) {
     return { success: false, error: 'missing_driver_id' };
   }
+  const cacheKey = reportCacheKey(id, windowDays);
+  const query = windowDays === DEFAULT_WINDOW_DAYS ? '' : `?days=${encodeURIComponent(windowDays)}`;
 
-  // One request in flight per driver: focus and ride-end can fire together.
-  const pending = pendingRequestByDriver.get(id);
+  // One request in flight per driver and window: focus and ride-end can fire together.
+  const pending = pendingRequestByDriver.get(cacheKey);
   if (pending) {
     return pending;
   }
@@ -71,25 +84,25 @@ export async function fetchDriverEarningsReport(driverId) {
         headers = {};
       }
       const response = await fetch(
-        `${getSelfHostedApiUrl('/api')}/drivers/${encodeURIComponent(id)}/earnings`,
+        `${getSelfHostedApiUrl('/api')}/drivers/${encodeURIComponent(id)}/earnings${query}`,
         { method: 'GET', headers, ...(controller ? { signal: controller.signal } : {}) },
       );
       const payload = await response.json();
       if (!payload?.success || !payload?.report || !Array.isArray(payload.report.dailySeries)) {
         return { success: false, error: payload?.message || 'invalid_earnings_report' };
       }
-      lastServerReportByDriver.set(id, payload.report);
+      lastServerReportByDriver.set(cacheKey, payload.report);
       return { success: true, report: payload.report };
     } catch (error) {
       Logger.warn('Relatório de ganhos indisponível:', error?.message);
       return { success: false, error: error?.message || 'earnings_report_failed' };
     } finally {
       if (timeoutId) clearTimeout(timeoutId);
-      pendingRequestByDriver.delete(id);
+      pendingRequestByDriver.delete(cacheKey);
     }
   })();
 
-  pendingRequestByDriver.set(id, request);
+  pendingRequestByDriver.set(cacheKey, request);
   return request;
 }
 
@@ -204,11 +217,16 @@ export function selectDriverTodayEarnings({
 
 // Loads the report when `enabled` turns true (screen focus, ride finished or
 // cancelled) and when `refreshKey` changes while enabled. No timer.
-export function useDriverEarningsReport({ driverId, enabled = true, refreshKey = '' } = {}) {
+export function useDriverEarningsReport({
+  driverId,
+  enabled = true,
+  refreshKey = '',
+  windowDays = DEFAULT_WINDOW_DAYS,
+} = {}) {
   const id = String(driverId || '').trim();
   const [state, setState] = useState(() => ({
     driverId: id,
-    report: getCachedDriverEarningsReport(id),
+    report: getCachedDriverEarningsReport(id, windowDays),
     status: 'idle',
   }));
   const liveDriverIdRef = useRef(id);
@@ -221,10 +239,10 @@ export function useDriverEarningsReport({ driverId, enabled = true, refreshKey =
     let cancelled = false;
     setState(current => ({
       driverId: id,
-      report: current.driverId === id ? current.report : getCachedDriverEarningsReport(id),
+      report: current.driverId === id ? current.report : getCachedDriverEarningsReport(id, windowDays),
       status: 'loading',
     }));
-    fetchDriverEarningsReport(id).then(result => {
+    fetchDriverEarningsReport(id, { windowDays }).then(result => {
       if (cancelled || liveDriverIdRef.current !== id) {
         return;
       }
@@ -234,17 +252,17 @@ export function useDriverEarningsReport({ driverId, enabled = true, refreshKey =
           ? result.report
           : current.driverId === id
             ? current.report
-            : getCachedDriverEarningsReport(id),
+            : getCachedDriverEarningsReport(id, windowDays),
         status: result?.success ? 'loaded' : 'failed',
       }));
     });
     return () => {
       cancelled = true;
     };
-  }, [enabled, id, refreshKey]);
+  }, [enabled, id, refreshKey, windowDays]);
 
   // Never hand out another driver's report while the identity is changing.
-  const report = state.driverId === id ? state.report : getCachedDriverEarningsReport(id);
+  const report = state.driverId === id ? state.report : getCachedDriverEarningsReport(id, windowDays);
   const status = state.driverId === id ? state.status : 'idle';
   return {
     report,

@@ -98,6 +98,15 @@ const EARLY_ENDED_BY_RIDER_STATUS = 'EARLY_ENDED_BY_RIDER';
 // completionType só indica que o valor liquidado é o do trecho percorrido.
 const EARLY_ENDED_BY_DRIVER_COMPLETION_TYPE = 'EARLY_ENDED_BY_DRIVER';
 const EARNINGS_REPORT_WINDOW_DAYS = 30;
+
+// `?days=` encurta a janela (1 a 30). A home só mostra o ganho de hoje e pede 2 dias:
+// a leitura cai de todas as corridas de 30 dias para as dos últimos 2 dias.
+function resolveEarningsReportWindowDays(rawDays) {
+  const days = Number.parseInt(rawDays, 10);
+  return Number.isInteger(days) && days >= 1 && days <= EARNINGS_REPORT_WINDOW_DAYS
+    ? days
+    : EARNINGS_REPORT_WINDOW_DAYS;
+}
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 
 // Valor executado (em centavos) de uma corrida encerrada antecipadamente, quando o
@@ -1280,7 +1289,7 @@ router.get('/api/drivers/:id/earnings', requireDriverSelf, requireFirebase, asyn
     const driverCar = null;
 
     // 4. Buscar viagens na fonte que recebe as corridas liquidadas
-    const dailyWindowDays = EARNINGS_REPORT_WINDOW_DAYS;
+    const dailyWindowDays = resolveEarningsReportWindowDays(req.query?.days);
     const allDriverBookings = await loadDriverRidesForEarningsReport(firestore, persistenceScope, id, dailyWindowDays);
 
     // Multas de cancelamento/no-show creditadas ao motorista. Se o extrato não responder,

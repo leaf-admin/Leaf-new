@@ -7,6 +7,7 @@ jest.mock('../src/services/DriverBalanceService', () => ({
 
 const {
   buildDriverHistoryStats,
+  HOME_EARNINGS_WINDOW_DAYS,
   fetchDriverEarningsReport,
   getCachedDriverEarningsReport,
   resetDriverEarningsReportCache,
@@ -170,6 +171,17 @@ describe('driver earnings report', () => {
     expect(first).toEqual({ success: true, report });
     expect(second).toBe(first);
     expect(getCachedDriverEarningsReport('driver_1')).toBe(report);
+  });
+
+  it('asks the short home window and never serves it as the 30-day report', async () => {
+    const report = buildReport();
+    mockFetchReport(report);
+
+    await fetchDriverEarningsReport('driver_1', { windowDays: HOME_EARNINGS_WINDOW_DAYS });
+
+    expect(global.fetch.mock.calls[0][0]).toMatch(/\/api\/drivers\/driver_1\/earnings\?days=2$/);
+    expect(getCachedDriverEarningsReport('driver_1', HOME_EARNINGS_WINDOW_DAYS)).toBe(report);
+    expect(getCachedDriverEarningsReport('driver_1')).toBeNull();
   });
 
   it('keeps the last server report when a refresh fails', async () => {
