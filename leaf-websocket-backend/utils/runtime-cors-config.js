@@ -111,8 +111,18 @@ function buildRuntimeCorsConfig(options = {}) {
       }
     },
     credentials: false,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    // Cabeçalhos que o dashboard envia: idempotência (resposta do WhatsApp, tickets)
+    // e escopo sandbox de suporte e KYC. Fora desta lista o navegador barra o pedido.
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'X-Requested-With',
+      'Idempotency-Key',
+      'X-Idempotency-Key',
+      'X-Leaf-Support-Scope',
+      'X-Leaf-KYC-Scope'
+    ]
   };
 
   return {
