@@ -5,7 +5,9 @@ const DEFAULT_GRAPH_BASE_URL = 'https://graph.facebook.com';
 const DEFAULT_GRAPH_VERSION = 'v23.0';
 const DEFAULT_TEMPLATE_LANGUAGE = 'pt_BR';
 const DEFAULT_TIMEOUT_MS = 10000;
-const DEFAULT_MAX_ATTEMPTS = 2;
+// One send per code: a retried timeout could deliver two paid messages. The
+// user asks again instead, under the per-phone send limits of /api/custom-otp.
+const DEFAULT_MAX_ATTEMPTS = 1;
 const DEFAULT_RETRY_DELAY_MS = 150;
 const RETRYABLE_HTTP_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
 const RETRYABLE_NETWORK_CODES = new Set([

@@ -27,9 +27,9 @@ const configuredEnv = {
   WHATSAPP_OTP_TEMPLATE_NAME: 'leaf_authentication',
   WHATSAPP_OTP_TEMPLATE_LANGUAGE: 'pt_BR',
   WHATSAPP_OTP_TIMEOUT_MS: '5000',
-  WHATSAPP_OTP_MAX_ATTEMPTS: '2',
   WHATSAPP_OTP_RETRY_DELAY_MS: '0'
 };
+const retryEnv = { ...configuredEnv, WHATSAPP_OTP_MAX_ATTEMPTS: '2' };
 const mockAxios = { post: jest.fn() };
 
 describe('whatsapp-otp-service', () => {
@@ -140,7 +140,21 @@ describe('whatsapp-otp-service', () => {
     expect(logger.info.mock.calls.flat().join(' ')).not.toContain('123456');
   });
 
-  it('retries transient Meta responses and returns a sanitized delivery error', async () => {
+  it('sends once by default so a timeout never produces two paid messages', async () => {
+    mockAxios.post.mockRejectedValue(Object.assign(new Error('timeout'), { code: 'ECONNABORTED' }));
+
+    await expect(sendOtp({
+      phoneNumber: '+5521999999999',
+      otp: '123456',
+      verificationId: 'vid_single_attempt',
+      axiosClient: mockAxios,
+      env: configuredEnv
+    })).rejects.toMatchObject({ code: 'WHATSAPP_OTP_DELIVERY_FAILED', status: 502 });
+    expect(getWhatsAppOtpConfig(configuredEnv).maxAttempts).toBe(1);
+    expect(mockAxios.post).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries transient Meta responses when explicitly configured and returns a sanitized delivery error', async () => {
     mockAxios.post
       .mockRejectedValueOnce({ response: { status: 503 }, message: 'provider secret should not leak' })
       .mockRejectedValueOnce({ response: { status: 429 }, message: 'rate limited' });
@@ -150,7 +164,7 @@ describe('whatsapp-otp-service', () => {
       otp: '123456',
       verificationId: 'vid_failure',
       axiosClient: mockAxios,
-      env: configuredEnv
+      env: retryEnv
     })).rejects.toMatchObject({
       code: 'WHATSAPP_OTP_DELIVERY_FAILED',
       status: 502,
@@ -188,7 +202,7 @@ describe('whatsapp-otp-service', () => {
       otp: '123456',
       verificationId: 'vid_network_retry',
       axiosClient: mockAxios,
-      env: configuredEnv
+      env: retryEnv
     })).resolves.toEqual({ provider: 'whatsapp', messageId: 'wamid.retry' });
     expect(isRetryableDeliveryError({ code: 'ECONNABORTED' })).toBe(true);
     expect(mockAxios.post).toHaveBeenCalledTimes(2);
