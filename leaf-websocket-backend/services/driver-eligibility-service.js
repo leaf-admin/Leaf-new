@@ -216,7 +216,9 @@ class DriverEligibilityService {
         return null;
     }
 
-    async _getProfileFromFirebase(driverId) {
+    // A timeout or read failure returns { lookupFailed: true }, never null:
+    // null means the profile really does not exist.
+    async _getProfileFromFirebase(driverId, { timeoutMs = FIREBASE_PROFILE_TIMEOUT_MS } = {}) {
         if (!ENABLE_FIREBASE_PROFILE_LOOKUP) {
             return null;
         }
@@ -228,8 +230,8 @@ class DriverEligibilityService {
 
         const timeoutPromise = (stage) => new Promise((_, reject) => {
             const timer = setTimeout(() => {
-                reject(new Error(`driver_eligibility_firebase_timeout:${stage}:${FIREBASE_PROFILE_TIMEOUT_MS}ms`));
-            }, FIREBASE_PROFILE_TIMEOUT_MS);
+                reject(new Error(`driver_eligibility_firebase_timeout:${stage}:${timeoutMs}ms`));
+            }, timeoutMs);
             timer.unref?.();
         });
 
@@ -248,10 +250,10 @@ class DriverEligibilityService {
                 service: 'driver-eligibility-service',
                 driverId,
                 stage: 'user_and_user_vehicles',
-                timeoutMs: FIREBASE_PROFILE_TIMEOUT_MS,
+                timeoutMs,
                 error: error.message
             });
-            return null;
+            return { lookupFailed: true };
         }
 
         if (!userRecord && !userVehiclesRecord) {
@@ -286,7 +288,7 @@ class DriverEligibilityService {
                     driverId,
                     vehicleId: activeUserVehicle.vehicleId,
                     stage: 'vehicle',
-                    timeoutMs: FIREBASE_PROFILE_TIMEOUT_MS,
+                    timeoutMs,
                     error: error.message
                 });
             }
@@ -299,7 +301,11 @@ class DriverEligibilityService {
         };
     }
 
-    async resolveDriverProfile(driverId, fallbackDriverData = {}) {
+    /**
+     * options.profileTimeoutMs: Firebase budget for this read. Dispatch keeps the
+     * short default; going online can wait longer.
+     */
+    async resolveDriverProfile(driverId, fallbackDriverData = {}, options = {}) {
         await redisPool.ensureConnection();
         const cacheKey = `driver_eligibility_profile:${driverId}`;
         const cached = await this.redis.hgetall(cacheKey);
@@ -330,8 +336,11 @@ class DriverEligibilityService {
             };
         }
 
-        const firebaseProfile = await this._getProfileFromFirebase(driverId);
-        if (!firebaseProfile) {
+        const firebaseProfile = await this._getProfileFromFirebase(driverId, {
+            timeoutMs: options?.profileTimeoutMs || FIREBASE_PROFILE_TIMEOUT_MS
+        });
+        const lookupFailed = firebaseProfile?.lookupFailed === true;
+        if (!firebaseProfile || lookupFailed) {
             const fallbackProfile = {
                 driverId,
                 driverApproved: false,
@@ -350,6 +359,12 @@ class DriverEligibilityService {
                 assignmentConflict: false
             };
             fallbackProfile.vehicleIdentityComplete = buildDriverVehicleIdentity(fallbackProfile).complete;
+
+            // A slow Firebase is not a missing approval: report it as unavailable
+            // and cache nothing, so an approved driver is not blocked for the TTL.
+            if (lookupFailed) {
+                return { ...fallbackProfile, lookupUnavailable: true };
+            }
 
             // Cache curto para evitar repetição de lookups lentos em ondas consecutivas.
             await this.redis.hset(cacheKey, {
@@ -535,12 +550,18 @@ class DriverEligibilityService {
             };
         }
 
-        const profile = await this.resolveDriverProfile(driverId, fallbackDriverData);
+        const profile = await this.resolveDriverProfile(driverId, fallbackDriverData, {
+            profileTimeoutMs: options?.profileTimeoutMs
+        });
         const normalizedRequested = normalizeCategory(requestedCategory);
         const profileWithActivation = {
             ...profile,
             activationState
         };
+
+        if (profile.lookupUnavailable) {
+            return { eligible: false, code: 'DRIVER_PROFILE_UNAVAILABLE', profile: profileWithActivation };
+        }
 
         if (!profile.driverApproved) {
             return { eligible: false, code: 'DRIVER_NOT_APPROVED', profile: profileWithActivation };

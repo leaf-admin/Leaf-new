@@ -32,6 +32,17 @@ const { readLocationBooking } = require('../utils/active-trip-location-snapshot'
 const ENABLE_ACTIVE_TRIP_INDEX = process.env.ENABLE_ACTIVE_TRIP_INDEX !== 'false';
 const ACTIVE_TRIP_RECOVERY_INTERVAL_SECONDS = 30;
 const ACTIVE_TRIP_RECOVERY_MAX_ACTIVE_RIDES = 2000;
+// Going online is not the dispatch hot path: give Firebase time after a cold start.
+const GO_ONLINE_PROFILE_TIMEOUT_MS = Math.max(
+    300,
+    Number.parseInt(process.env.DRIVER_GO_ONLINE_PROFILE_TIMEOUT_MS || '2000', 10) || 2000
+);
+
+function driverNotEligibleMessage(code) {
+    return code === 'DRIVER_PROFILE_UNAVAILABLE'
+        ? 'Não foi possível validar seu cadastro agora. Tente novamente.'
+        : 'Cadastro pendente de aprovação para receber corridas.';
+}
 
 // Rare repair path for a missing active-trip lease. One attempt per driver per
 // interval keeps it off the per-fix hot path; HSCAN pages bound each call.
@@ -498,7 +509,8 @@ function registerSocketUpdateLocationHandler({
                     dispatchEligibility = await driverEligibilityService.isDriverEligibleForRide(
                         driverId,
                         null,
-                        existingDriverState || {}
+                        existingDriverState || {},
+                        { profileTimeoutMs: GO_ONLINE_PROFILE_TIMEOUT_MS }
                     );
                     if (!dispatchEligibility.eligible) {
                         const checkedAt = new Date().toISOString();
@@ -518,7 +530,7 @@ function registerSocketUpdateLocationHandler({
                             }
                         });
                         socket.emit('driverStatusError', {
-                            error: 'Cadastro pendente de aprovação para receber corridas.',
+                            error: driverNotEligibleMessage(dispatchEligibility.code),
                             reason: dispatchEligibility.code || 'NOT_ELIGIBLE',
                             code: 'driverNotEligible',
                             eligibilityRequired: true
@@ -526,7 +538,7 @@ function registerSocketUpdateLocationHandler({
                         return {
                             success: false,
                             code: dispatchEligibility.code || 'NOT_ELIGIBLE',
-                            error: 'Cadastro pendente de aprovação para receber corridas.'
+                            error: driverNotEligibleMessage(dispatchEligibility.code)
                         };
                     }
                 }
@@ -603,7 +615,8 @@ function registerSocketUpdateLocationHandler({
                 dispatchEligibility = await driverEligibilityService.isDriverEligibleForRide(
                     driverId,
                     null,
-                    existingDriverState || {}
+                    existingDriverState || {},
+                    { profileTimeoutMs: GO_ONLINE_PROFILE_TIMEOUT_MS }
                 );
 
                 if (!dispatchEligibility.eligible) {
@@ -624,7 +637,7 @@ function registerSocketUpdateLocationHandler({
                         }
                     });
                     socket.emit('driverStatusError', {
-                        error: 'Cadastro pendente de aprovação para receber corridas.',
+                        error: driverNotEligibleMessage(dispatchEligibility.code),
                         reason: dispatchEligibility.code || 'NOT_ELIGIBLE',
                         code: 'driverNotEligible',
                         eligibilityRequired: true
@@ -632,7 +645,7 @@ function registerSocketUpdateLocationHandler({
                     return {
                         success: false,
                         code: dispatchEligibility.code || 'NOT_ELIGIBLE',
-                        error: 'Cadastro pendente de aprovação para receber corridas.'
+                        error: driverNotEligibleMessage(dispatchEligibility.code)
                     };
                 }
             }
