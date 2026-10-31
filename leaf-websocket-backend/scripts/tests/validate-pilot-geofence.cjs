@@ -17,13 +17,13 @@ const geofenceService = require('../../services/geofence-service');
 const geofenceArtifact = require(path.resolve(__dirname, '../../config/geofence.json'));
 
 const pointCases = [
-  { id: 'centro', lat: -22.9068, lng: -43.1729, expected: true },
-  { id: 'lapa', lat: -22.9137, lng: -43.1808, expected: true },
+  { id: 'centro', lat: -22.9068, lng: -43.1729, expected: false },
+  { id: 'lapa', lat: -22.9137, lng: -43.1808, expected: false },
   { id: 'copacabana', lat: -22.971964, lng: -43.182543, expected: true },
   { id: 'leblon', lat: -22.984843, lng: -43.221972, expected: true },
   { id: 'botafogo', lat: -22.951912, lng: -43.182182, expected: true },
-  { id: 'barra', lat: -23.0005, lng: -43.365, expected: true },
-  { id: 'jacarepagua', lat: -22.943426, lng: -43.420071, expected: true },
+  { id: 'barra', lat: -23.0005, lng: -43.365, expected: false },
+  { id: 'jacarepagua', lat: -22.943426, lng: -43.420071, expected: false },
   { id: 'tijuca', lat: -22.925, lng: -43.233, expected: false },
   { id: 'paqueta', lat: -22.7595, lng: -43.1095, expected: false },
   { id: 'niteroi', lat: -22.8977, lng: -43.1183, expected: false },
@@ -40,28 +40,28 @@ const pointResults = pointCases.map((testCase) => {
 
 const rideCases = [
   {
-    id: 'centro-to-copacabana',
-    pickup: { lat: -22.9068, lng: -43.1729 },
-    destination: { lat: -22.971964, lng: -43.182543 },
-    expected: { valid: true, code: null }
-  },
-  {
-    id: 'lapa-to-leblon',
-    pickup: { lat: -22.9137, lng: -43.1808 },
+    id: 'copacabana-to-leblon',
+    pickup: { lat: -22.971964, lng: -43.182543 },
     destination: { lat: -22.984843, lng: -43.221972 },
     expected: { valid: true, code: null }
   },
   {
-    id: 'barra-pickup-allowed',
-    pickup: { lat: -23.0005, lng: -43.365 },
+    id: 'botafogo-to-copacabana',
+    pickup: { lat: -22.951912, lng: -43.182182 },
     destination: { lat: -22.971964, lng: -43.182543 },
     expected: { valid: true, code: null }
   },
   {
-    id: 'jacarepagua-to-barra',
-    pickup: { lat: -22.943426, lng: -43.420071 },
-    destination: { lat: -23.0005, lng: -43.365 },
-    expected: { valid: true, code: null }
+    id: 'barra-pickup-blocked',
+    pickup: { lat: -23.0005, lng: -43.365 },
+    destination: { lat: -22.971964, lng: -43.182543 },
+    expected: { valid: false, code: 'PICKUP_OUTSIDE_REGION' }
+  },
+  {
+    id: 'centro-destination-blocked',
+    pickup: { lat: -22.971964, lng: -43.182543 },
+    destination: { lat: -22.9068, lng: -43.1729 },
+    expected: { valid: false, code: 'DESTINATION_OUTSIDE_REGION' }
   },
   {
     id: 'tijuca-destination-blocked',

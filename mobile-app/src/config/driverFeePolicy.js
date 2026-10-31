@@ -5,7 +5,7 @@
 // assinatura diária (services/daily-subscription-service.js). Decisão de 17/10/2026: transparência total, sem nomes de
 // fornecedores.
 
-export const PILOT_SERVICE_AREA_LABEL = 'Zona Sul, Barra e Jacarepaguá';
+export const PILOT_SERVICE_AREA_LABEL = 'Zona Sul do Rio de Janeiro';
 
 export const DRIVER_FEE_POLICY = Object.freeze({
   serviceFeeBands: Object.freeze([

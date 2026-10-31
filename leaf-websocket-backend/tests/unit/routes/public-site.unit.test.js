@@ -85,7 +85,6 @@ describe('public site routes', () => {
     mockDocuments.set('public_site/numbers', { rides: 541, drivers: 7, published: false });
     const response = await request(app).get('/api/public/site-data').expect(200);
     expect(response.body.numbers).toBeNull();
-    expect(response.body.goals).toEqual({ drivers: 10, passengers: 100 });
   });
 
   it('returns published numbers and never lead data', async () => {
@@ -93,6 +92,22 @@ describe('public site routes', () => {
     mockDocuments.set('public_site/regions', { madureira: { drivers: 2 } });
     const response = await request(app).get('/api/public/site-data').expect(200);
     expect(response.body.numbers).toEqual({ rides: 12, drivers: 3 });
+    expect(response.body.regions).toEqual({});
+  });
+
+  it('hides goals and region counts until the flag is on', async () => {
+    mockDocuments.set('public_site/regions', { madureira: { drivers: 2 } });
+    const response = await request(app).get('/api/public/site-data').expect(200);
+    expect(response.body.goals).toBeNull();
+    expect(response.body.regions).toEqual({});
+  });
+
+  it('shows goals and region counts with the flag on', async () => {
+    process.env.PUBLIC_REGION_GOALS_ENABLED = 'true';
+    mockDocuments.set('public_site/regions', { madureira: { drivers: 2 } });
+    const response = await request(app).get('/api/public/site-data').expect(200);
+    delete process.env.PUBLIC_REGION_GOALS_ENABLED;
+    expect(response.body.goals).toEqual({ drivers: 10, passengers: 100 });
     expect(response.body.regions).toEqual({ madureira: { drivers: 2 } });
   });
 

@@ -89,7 +89,7 @@ describe('geofence-service', () => {
     }));
   });
 
-  it('loads the official Zona Sul, Centro, Lapa, Barra da Tijuca and Jacarepaguá multi-polygon', () => {
+  it('loads the official Zona Sul multi-polygon', () => {
     delete process.env.GEOFENCE_REGION;
     process.env.GEOFENCE_REGION_FILE = 'config/geofence.json';
     process.env.LEAF_LAUNCH_PROFILE = 'pilot_controlled';
@@ -98,17 +98,17 @@ describe('geofence-service', () => {
     expect(geofenceService.getOperationalStatus()).toEqual(expect.objectContaining({
       configured: true,
       regionSource: 'default',
-      regionVersion: 'rio-zona-sul-barra-jacarepagua-v2',
-      regionPolygons: 33,
-      regionPoints: 7122,
+      regionVersion: 'rio-zona-sul-v3',
+      regionPolygons: 18,
+      regionPoints: 3722,
       destinationInsideRegionRequired: true,
     }));
-    expect(geofenceService.isPointInPolygon(-22.9068, -43.1729)).toBe(true); // Centro
-    expect(geofenceService.isPointInPolygon(-22.9137, -43.1808)).toBe(true); // Lapa
+    expect(geofenceService.isPointInPolygon(-22.9068, -43.1729)).toBe(false); // Centro
+    expect(geofenceService.isPointInPolygon(-22.9137, -43.1808)).toBe(false); // Lapa
     expect(geofenceService.isPointInPolygon(-22.971964, -43.182543)).toBe(true); // Copacabana
     expect(geofenceService.isPointInPolygon(-22.984843, -43.221972)).toBe(true); // Leblon
-    expect(geofenceService.isPointInPolygon(-23.0005, -43.3650)).toBe(true); // Barra da Tijuca
-    expect(geofenceService.isPointInPolygon(-22.943426, -43.420071)).toBe(true); // Jacarepaguá
+    expect(geofenceService.isPointInPolygon(-23.0005, -43.3650)).toBe(false); // Barra da Tijuca
+    expect(geofenceService.isPointInPolygon(-22.943426, -43.420071)).toBe(false); // Jacarepaguá
     expect(geofenceService.isPointInPolygon(-22.9250, -43.2330)).toBe(false); // Tijuca
     expect(geofenceService.isPointInPolygon(-22.7595, -43.1095)).toBe(false); // Paqueta
 
