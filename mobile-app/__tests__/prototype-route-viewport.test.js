@@ -1,4 +1,6 @@
 import {
+  DRIVER_RIDE_CAR_ANCHOR_RATIO,
+  buildDriverRideCamera,
   buildOverlaySheetViewportMetrics,
   buildPickupMapCamera,
   buildRouteViewportRegion,
@@ -11,6 +13,83 @@ import {
 } from '../src/screens/prototype/prototypeRouteViewport';
 
 describe('prototype route viewport', () => {
+  describe('driver ride camera', () => {
+    const car = { latitude: -22.9852, longitude: -43.1978 };
+    const frame = { mapWidth: 412, mapHeight: 900, top: 260, bottom: 340 };
+    const toPoint = (camera, coordinate) => {
+      const metersPerDegree = 111320;
+      const scale = Math.cos(car.latitude * Math.PI / 180);
+      const metersPerPoint = 156543.03392 * scale / 2 ** camera.zoom;
+      const east = (coordinate.longitude - camera.center.longitude) * metersPerDegree * scale;
+      const north = (coordinate.latitude - camera.center.latitude) * metersPerDegree;
+      const heading = camera.heading * Math.PI / 180;
+      return {
+        x: frame.mapWidth / 2 + (east * Math.cos(heading) - north * Math.sin(heading)) / metersPerPoint,
+        y: frame.mapHeight / 2 - (north * Math.cos(heading) + east * Math.sin(heading)) / metersPerPoint,
+      };
+    };
+    const anchorY = frame.top +
+      (frame.mapHeight - frame.top - frame.bottom) * DRIVER_RIDE_CAR_ANCHOR_RATIO;
+
+    it.each([
+      ['north', { latitude: -22.9474, longitude: -43.1827 }],
+      ['south', { latitude: -23.02, longitude: -43.19 }],
+      ['east', { latitude: -22.985, longitude: -43.12 }],
+      ['west', { latitude: -22.99, longitude: -43.3 }],
+    ])('keeps the car on the same spot and the route on screen heading %s', (_name, target) => {
+      const middle = {
+        latitude: (car.latitude + target.latitude) / 2 + 0.002,
+        longitude: (car.longitude + target.longitude) / 2,
+      };
+      const camera = buildDriverRideCamera({ car, coordinates: [car, middle, target], ...frame });
+      const carPoint = toPoint(camera, car);
+
+      expect(carPoint.x).toBeCloseTo(frame.mapWidth / 2, 0);
+      expect(carPoint.y).toBeCloseTo(anchorY, 0);
+      [middle, target].forEach((coordinate) => {
+        const point = toPoint(camera, coordinate);
+        expect(point.y).toBeGreaterThanOrEqual(frame.top);
+        expect(point.y).toBeLessThanOrEqual(frame.mapHeight - frame.bottom);
+        expect(point.x).toBeGreaterThanOrEqual(0);
+        expect(point.x).toBeLessThanOrEqual(frame.mapWidth);
+      });
+    });
+
+    it('does not zoom into the grey Android base map on a short route', () => {
+      const camera = buildDriverRideCamera({
+        car,
+        coordinates: [{ latitude: -22.9842, longitude: -43.1978 }],
+        ...frame,
+      });
+      expect(camera.zoom).toBe(15.8);
+    });
+
+    it('keeps the heading through small bearing changes and near the end of the route', () => {
+      const target = { latitude: -22.9474, longitude: -43.1827 };
+      const first = buildDriverRideCamera({ car, coordinates: [target], ...frame });
+      const calm = buildDriverRideCamera({
+        car,
+        coordinates: [{ latitude: -22.9474, longitude: -43.18 }],
+        previousHeading: first.heading,
+        ...frame,
+      });
+      const arriving = buildDriverRideCamera({
+        car,
+        coordinates: [{ latitude: -22.9851, longitude: -43.1979 }],
+        previousHeading: 123,
+        ...frame,
+      });
+
+      expect(calm.heading).toBe(first.heading);
+      expect(arriving.heading).toBe(123);
+    });
+
+    it('returns no camera without a car position or a route', () => {
+      expect(buildDriverRideCamera({ car: null, coordinates: [car], ...frame })).toBeNull();
+      expect(buildDriverRideCamera({ car, coordinates: [], ...frame })).toBeNull();
+    });
+  });
+
   it.each([
     [852, 184, 230, 403],
     [667, 142, 242, 283.5],
