@@ -320,6 +320,7 @@ function sendSupport(req, res) {
   );
 }
 
+            'Nos formulários do site, coletamos apenas o que você informa: nome, WhatsApp, região e perfil nos pedidos de operação; nome, e-mail, empresa e mensagem no contato de investidores. Esses dados servem para avaliar a expansão e falar com você.',
 router.get(['/privacy-policy', '/privacy'], sendPrivacyPolicy);
 router.get(['/terms-of-service', '/terms'], sendTermsOfService);
 router.get('/refund-policy', sendRefundPolicy);
