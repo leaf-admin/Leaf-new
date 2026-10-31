@@ -8,6 +8,9 @@
 export const PILOT_SERVICE_AREA_LABEL = 'Zona Sul do Rio de Janeiro';
 
 export const DRIVER_FEE_POLICY = Object.freeze({
+  // Promoção de lançamento (services/driver-intro-fee-policy.js): total da corrida, Pix incluso.
+  promoTotalFeeCents: 99,
+  promoQualifyingRides: 25,
   serviceFeeBands: Object.freeze([
     Object.freeze({ upToCents: 1000, feeCents: 79 }),
     Object.freeze({ upToCents: 2500, feeCents: 99 }),
@@ -66,6 +69,7 @@ export function resolveDriverNetExample(fareCents, policy = DRIVER_FEE_POLICY) {
     processingCents,
     netCents,
     netPercent: fare > 0 ? Math.round((netCents / fare) * 1000) / 10 : 0,
+    promoNetCents: Math.max(0, fare - policy.promoTotalFeeCents),
   };
 }
 
@@ -83,6 +87,12 @@ export function describeDailySubscriptionTiers(policy = DRIVER_FEE_POLICY) {
 export function buildDriverFeeRows(policy = DRIVER_FEE_POLICY) {
   const [b1, b2, b3] = policy.serviceFeeBands;
   return [
+    {
+      key: 'promo',
+      title: `Promoção nas ${policy.promoQualifyingRides} primeiras corridas`,
+      value: formatCents(policy.promoTotalFeeCents),
+      detail: `Taxa total por corrida concluída no destino, com o Pix incluso. É uma condição promocional e pode ser alterada. Depois, valem as taxas abaixo.`,
+    },
     {
       key: 'service',
       title: 'Taxa da Leaf por corrida',

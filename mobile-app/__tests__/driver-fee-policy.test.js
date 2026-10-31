@@ -29,16 +29,19 @@ describe('driver fee policy shown in onboarding', () => {
       processingCents: 50,
       netCents: 2801,
       netPercent: 93.4,
+      promoNetCents: 2901,
     });
     expect(formatCents(2801)).toBe('R$ 28,01');
   });
 
   it('lists every fee without provider names', () => {
     const rows = buildDriverFeeRows();
-    expect(rows.map((row) => row.key)).toEqual(['service', 'processing', 'toll', 'withdrawal', 'subscription', 'cancel']);
+    expect(rows.map((row) => row.key)).toEqual(['promo', 'service', 'processing', 'toll', 'withdrawal', 'subscription', 'cancel']);
     const text = JSON.stringify(rows).toLowerCase();
     expect(text).not.toMatch(/woovi|openpix|stripe|mercado ?pago/);
     expect(text).toContain('r$ 1,00');
+    expect(text).toContain('pix incluso');
+    expect(text).toContain('condição promocional');
     expect(text).toContain('grátis até r$ 100,00, r$ 4,90 até r$ 200,00, r$ 7,90 até r$ 300,00, r$ 12,90 até r$ 500,00, r$ 14,90 acima de r$ 500,00');
     expect(DRIVER_FEE_POLICY.withdrawalFeeCents).toBe(100);
   });

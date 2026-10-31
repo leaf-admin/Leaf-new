@@ -4,7 +4,8 @@
   const input = document.getElementById('rideValue');
   if (!input) return;
   const money = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
-  const leafFeeCents = 99;
+  // Promoção: R$ 0,99 é o total da corrida, com o Pix incluso.
+  const promoFeeCents = 99;
   // Tabela regular: acompanha DEFAULT_POLICY de services/ride-financial-contract.js.
   const regularLeafFeeCents = rideCents => {
     if (rideCents <= 1000) return 79;
@@ -18,7 +19,7 @@
     const rideCents = Math.round(value * 100);
     const validNumber = Number.isFinite(value) && value >= 0 && Number.isSafeInteger(rideCents * 8);
     const pixFeeCents = validNumber ? Math.max(50, Math.floor((rideCents * 8 + 500) / 1000)) : 0;
-    const totalCents = leafFeeCents + pixFeeCents;
+    const regularTotalCents = regularLeafFeeCents(rideCents) + pixFeeCents;
     const format = cents => money.format(cents / 100);
     const warning = document.getElementById('value-warning');
     const belowMinimum = validNumber && rideCents < 850;
@@ -26,16 +27,13 @@
     warning.style.display = belowMinimum ? 'block' : 'none';
     input.setAttribute('aria-invalid', String(!validNumber || belowMinimum));
 
-    document.getElementById('leaf-fee').textContent = format(leafFeeCents);
-    document.getElementById('payment-fee').textContent = validNumber ? format(pixFeeCents) : '—';
-    document.getElementById('total-fees').textContent = validNumber ? format(totalCents) : '—';
-    document.getElementById('net-amount').textContent = validNumber ? format(Math.max(0, rideCents - totalCents)) : '—';
+    document.getElementById('leaf-fee').textContent = format(promoFeeCents);
+    document.getElementById('payment-fee').textContent = validNumber ? 'Incluso' : '—';
+    document.getElementById('total-fees').textContent = validNumber ? format(promoFeeCents) : '—';
+    document.getElementById('net-amount').textContent = validNumber ? format(Math.max(0, rideCents - promoFeeCents)) : '—';
     document.getElementById('regular-note').textContent = validNumber
-      ? `Depois da 25ª corrida, nesta mesma corrida: taxa Leaf de ${format(regularLeafFeeCents(rideCents))} e repasse de ${format(Math.max(0, rideCents - regularLeafFeeCents(rideCents) - pixFeeCents))}.`
+      ? `Depois da 25ª corrida, nesta mesma corrida: taxa Leaf de ${format(regularLeafFeeCents(rideCents))}, Pix de ${format(pixFeeCents)} e repasse de ${format(Math.max(0, rideCents - regularTotalCents))}.`
       : '';
-    document.getElementById('pix-calculation-note').textContent = validNumber && rideCents > 6250
-      ? 'Nesta corrida: 0,8% do valor da transação para o operador do Pix, apresentado em centavos.'
-      : 'Até R$ 62,50, aplica-se o mínimo de R$ 0,50 do operador do Pix.';
   }
 
   input.addEventListener('input', updateCalculation);

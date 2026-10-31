@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 
 const { DEFAULT_POLICY } = require('../../../services/ride-financial-contract');
+const { DRIVER_INTRO_FEE_POLICY } = require('../../../services/driver-intro-fee-policy');
 
 // O app explica as taxas ao motorista com os valores de
 // mobile-app/src/config/driverFeePolicy.js. Quem cobra é este backend: se uma
@@ -31,6 +32,12 @@ describe('mobile driver fee policy matches the backend', () => {
     expect(numbersAfter('serviceFeeAbovePercentage')).toBe(DEFAULT_POLICY.operationalFeeAbove50Percentage);
     expect(numbersAfter('paymentProcessingPercentage')).toBe(DEFAULT_POLICY.paymentIntermediationPercentage);
     expect(numbersAfter('paymentProcessingMinimumCents')).toBe(DEFAULT_POLICY.paymentIntermediationMinimumCents);
+  });
+
+  test('launch promotion', () => {
+    expect(DRIVER_INTRO_FEE_POLICY.paymentFeeIncluded).toBe(true);
+    expect(numbersAfter('promoTotalFeeCents')).toBe(DRIVER_INTRO_FEE_POLICY.operationalFeeCents);
+    expect(numbersAfter('promoQualifyingRides')).toBe(DRIVER_INTRO_FEE_POLICY.qualifyingRideLimit);
   });
 
   test('withdrawal fee', () => {

@@ -252,7 +252,7 @@ describe('CompleteTripCommand driver early end settlement', () => {
     });
     const result = await buildCommand().execute();
     expect(result.success).toBe(true);
-    expect(result.data.financialSnapshot).toMatchObject({ operationalFeeCents: 99, passengerPaidCents: 4000, driverIntroFee: introContext() });
+    expect(result.data.financialSnapshot).toMatchObject({ operationalFeeCents: 49, paymentIntermediationFeeCents: 50, passengerPaidCents: 4000, driverIntroFee: introContext() });
     expect(result.data.driverIntroFeeCompletion).toMatchObject({ qualified: true, reason: 'SERVER_DESTINATION_COMPLETION' });
     expect(record).toHaveBeenCalledWith(redis, 'driver_1', 'booking_1', 'operational');
     expect(record.mock.invocationCallOrder[0]).toBeLessThan(driverLockManager.releaseLock.mock.invocationCallOrder[0]);
@@ -265,7 +265,7 @@ describe('CompleteTripCommand driver early end settlement', () => {
     const result = await buildCommand().execute();
     expect(result.success).toBe(true);
     expect(result.data.finalFare).toBeLessThan(40);
-    expect(result.data.financialSnapshot.operationalFeeCents).toBe(99);
+    expect(result.data.financialSnapshot.operationalFeeCents).toBe(49);
     expect(result.data.driverIntroFeeCompletion).toMatchObject({ qualified: false, reviewRequired: false, reason: 'EARLY_END' });
   });
 
@@ -275,7 +275,7 @@ describe('CompleteTripCommand driver early end settlement', () => {
     jest.spyOn(driverIntroFeeService, 'recordCompletion').mockRejectedValue(new Error('synthetic Redis interruption'));
     const result = await buildCommand().execute();
     expect(result.success).toBe(true);
-    expect(result.data.financialSnapshot.operationalFeeCents).toBe(99);
+    expect(result.data.financialSnapshot.operationalFeeCents).toBe(49);
     expect(redis.store['booking:booking_1'].status).toBe('COMPLETED');
   });
 
@@ -286,7 +286,7 @@ describe('CompleteTripCommand driver early end settlement', () => {
     const result = await buildCommand({ endLocation: DESTINATION }).execute();
     expect(result.success).toBe(true);
     expect(result.data.driverIntroFeeCompletion).toMatchObject({ qualified: false, reviewRequired: true });
-    expect(result.data.financialSnapshot.operationalFeeCents).toBe(99);
+    expect(result.data.financialSnapshot.operationalFeeCents).toBe(49);
   });
 
   it('settles on the travelled share when the server saw the car far from the destination', async () => {
