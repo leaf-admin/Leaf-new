@@ -457,7 +457,8 @@ describe('pricing routes', () => {
     expect(response.status).toBe(200);
     expect(mockResolveTollFeeFromPricingPayload).toHaveBeenCalledWith(
       expect.objectContaining({
-        routePolyline: 'nuujC~|kgG_|B_|B_|B_|B'
+        routePolyline: 'nuujC~|kgG_|B_|B_|B_|B',
+        vehicleTollClass: 'Leaf Plus'
       })
     );
     expect(mockEstimateRideFare).toHaveBeenCalledWith(

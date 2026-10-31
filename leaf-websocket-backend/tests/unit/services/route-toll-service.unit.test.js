@@ -85,13 +85,48 @@ describe('route-toll-service', () => {
     });
 
     test('praça sem posição conferida mantém a tolerância geral de 2 km', () => {
-      const plaza = TOLL_PLAZAS.find((toll) => toll.id === 'p11_transoeste');
+      const plaza = TOLL_PLAZAS.find((toll) => toll.id === 'p17_mage');
       const result = estimateRouteTollsFromCoordinates([
         { latitude: plaza.lat + 0.015, longitude: plaza.lng - 0.01 },
         { latitude: plaza.lat + 0.015, longitude: plaza.lng + 0.01 },
       ], { now });
 
-      expect(result.tolls.map((toll) => toll.id)).toEqual(['p11_transoeste']);
+      expect(result.tolls.map((toll) => toll.id)).toEqual(['p17_mage']);
+    });
+
+    test.each([
+      ['Bangu', -22.89, -43.5],
+      ['Campo Grande', -22.9, -43.6],
+      ['Santa Cruz', -22.91, -43.7],
+      ['Nova Iguaçu', -22.752, -43.5],
+    ])('não cobra as posições antigas sem praça real em %s', (_area, latitude, longitude) => {
+      const result = estimateRouteTollsFromCoordinates([
+        { latitude: latitude - 0.01, longitude },
+        { latitude: latitude + 0.01, longitude },
+      ], { now });
+
+      expect(result.tolls).toEqual([]);
+      expect(result.tollFee).toBe(0);
+    });
+
+    test.each([
+      ['sul', tollRoutes.transolimpicaThroughSouthbound],
+      ['norte', tollRoutes.transolimpicaThroughNorthbound],
+    ])('cobra uma vez a Transolímpica inteira no sentido %s, com as duas praças na rota', (_direction, polyline) => {
+      const result = estimateRouteTollsFromPolyline(polyline, { now });
+
+      expect(result.tollCount).toBe(1);
+      expect(result.tollFee).toBe(9.95);
+      expect(findCrossedTolls(decodePolyline(polyline))).toHaveLength(1);
+    });
+
+    test('todas as praças dentro da área de destino têm posição conferida', () => {
+      const insideDestinationBounds = TOLL_PLAZAS.filter((toll) =>
+        toll.lat >= -23.0823 && toll.lat <= -22.7423 && toll.lng >= -43.7958 && toll.lng <= -43.0990
+      );
+
+      expect(insideDestinationBounds.length).toBeGreaterThan(0);
+      expect(insideDestinationBounds.filter((toll) => !toll.positionVerified)).toEqual([]);
     });
 
     test('a geometria da rota vale mais que um tollFee antigo guardado na rota', () => {
@@ -109,6 +144,37 @@ describe('route-toll-service', () => {
 
       expect(result.tollFee).toBe(4);
       expect(result.source).toBe('payload_toll_fee_fallback');
+    });
+  });
+
+  describe('tarifa de moto', () => {
+    const now = new Date('2026-10-31T12:00:00.000Z');
+
+    test.each(['leaf_moto', 'Leaf Moto', 'type_moto'])('cota R$ 4,00 na Transolímpica para %s', (carType) => {
+      const result = resolveTollFeeFromPricingPayload({
+        routePolyline: tollRoutes.transolimpicaSouthbound,
+        vehicleTollClass: carType,
+      });
+
+      expect(result.tollFee).toBe(4);
+    });
+
+    test('moto é isenta na Linha Amarela, sem cair no tollFee guardado na rota', () => {
+      const result = resolveTollFeeFromPricingPayload({
+        routePolyline: tollRoutes.linhaAmarelaWestbound,
+        routeDetails: { tollFee: 4 },
+        vehicleTollClass: 'leaf_moto',
+      });
+
+      expect(result.tollFee).toBe(0);
+      expect(result.tolls.map((toll) => toll.id)).toEqual(['p09_linha_amarela']);
+    });
+
+    test('carro segue na tarifa de carro', () => {
+      expect(estimateRouteTollsFromPolyline(tollRoutes.transolimpicaSouthbound, {
+        now,
+        vehicleType: 'leaf_plus',
+      }).tollFee).toBe(9.95);
     });
   });
 
@@ -197,9 +263,9 @@ describe('route-toll-service', () => {
 
   describe('praça de duas cabines (P06/P07 Viúva Graça)', () => {
     const throughPlaza = [
-      { latitude: -22.74, longitude: -43.49 },
-      { latitude: -22.7525, longitude: -43.5005 },
-      { latitude: -22.765, longitude: -43.51 },
+      { latitude: -22.7145, longitude: -43.72 },
+      { latitude: -22.7151, longitude: -43.7307 },
+      { latitude: -22.7157, longitude: -43.74 },
     ];
 
     test('a rota estimada cobra uma cabine só', () => {
