@@ -1,4 +1,5 @@
 const {
+  decodePolyline,
   estimateRouteTollsFromCoordinates,
   estimateRouteTollsFromPolyline,
   resolveTollFeeFromPricingPayload,
@@ -7,10 +8,11 @@ const {
   summarizeTollCrossings,
   TOLL_PLAZAS,
 } = require('../../../services/route-toll-service');
+const tollRoutes = require('./fixtures/toll-routes.json');
 
 describe('route-toll-service', () => {
   test('detecta Linha Amarela quando a polyline cruza a praca P09', () => {
-    const result = estimateRouteTollsFromPolyline('nuujC~|kgG_|B_|B_|B_|B', {
+    const result = estimateRouteTollsFromPolyline(tollRoutes.linhaAmarelaWestbound, {
       now: new Date('2026-06-26T12:00:00.000Z'),
     });
 
@@ -36,12 +38,78 @@ describe('route-toll-service', () => {
 
   test('resolve pedágio por geometria antes do fallback tollFee do payload', () => {
     const result = resolveTollFeeFromPricingPayload({
-      routePolyline: 'nuujC~|kgG_|B_|B_|B_|B',
+      routePolyline: tollRoutes.linhaAmarelaWestbound,
       tollFee: 99,
     });
 
     expect(result.tollFee).toBe(4);
     expect(result.source).toBe('leaf_toll_catalog');
+  });
+
+  describe('cotação perto de praça com posição conferida', () => {
+    const now = new Date('2026-10-31T12:00:00.000Z');
+
+    test('não cobra a P10 numa rota curta que passa a 1 km da praça (estudo de 2026-10-31)', () => {
+      const result = estimateRouteTollsFromPolyline(tollRoutes.pastorinhasToPauDaFome, { now });
+
+      expect(result.tollFee).toBe(0);
+      expect(result.tolls).toEqual([]);
+    });
+
+    test.each([
+      ['sul', tollRoutes.transolimpicaSouthbound, 'p10b_transolimpica'],
+      ['norte', tollRoutes.transolimpicaNorthbound, 'p10a_transolimpica'],
+    ])('cobra uma vez a rota que cruza a P10 no sentido %s', (_direction, polyline, tollId) => {
+      const result = estimateRouteTollsFromPolyline(polyline, { now });
+
+      expect(result.tolls.map((toll) => toll.id)).toEqual([tollId]);
+      expect(result.tollFee).toBe(9.95);
+    });
+
+    test.each([
+      ['oeste', tollRoutes.linhaAmarelaWestbound],
+      ['leste', tollRoutes.linhaAmarelaEastbound],
+    ])('cobra e confirma a travessia da Linha Amarela no sentido %s', (_direction, polyline) => {
+      const result = estimateRouteTollsFromPolyline(polyline, { now });
+
+      expect(result.tolls.map((toll) => toll.id)).toEqual(['p09_linha_amarela']);
+      expect(result.tollFee).toBe(4);
+      expect(findCrossedTolls(decodePolyline(polyline)).map((toll) => toll.id)).toEqual(['p09_linha_amarela']);
+    });
+
+    test('não cobra nem conta travessia da P09 numa rota do Méier fora da Linha Amarela', () => {
+      const result = estimateRouteTollsFromPolyline(tollRoutes.meierNearOldP09Point, { now });
+
+      expect(result.tollFee).toBe(0);
+      expect(findCrossedTolls(decodePolyline(tollRoutes.meierNearOldP09Point))).toEqual([]);
+    });
+
+    test('praça sem posição conferida mantém a tolerância geral de 2 km', () => {
+      const plaza = TOLL_PLAZAS.find((toll) => toll.id === 'p11_transoeste');
+      const result = estimateRouteTollsFromCoordinates([
+        { latitude: plaza.lat + 0.015, longitude: plaza.lng - 0.01 },
+        { latitude: plaza.lat + 0.015, longitude: plaza.lng + 0.01 },
+      ], { now });
+
+      expect(result.tolls.map((toll) => toll.id)).toEqual(['p11_transoeste']);
+    });
+
+    test('a geometria da rota vale mais que um tollFee antigo guardado na rota', () => {
+      const result = resolveTollFeeFromPricingPayload({
+        routePolyline: tollRoutes.pastorinhasToPauDaFome,
+        routeDetails: { tollFee: 9.95 },
+      });
+
+      expect(result.tollFee).toBe(0);
+      expect(result.source).toBe('leaf_toll_catalog');
+    });
+
+    test('sem geometria, ainda usa o tollFee informado', () => {
+      const result = resolveTollFeeFromPricingPayload({ routeDetails: { tollFee: 4 } });
+
+      expect(result.tollFee).toBe(4);
+      expect(result.source).toBe('payload_toll_fee_fallback');
+    });
   });
 
   describe('crossing detection for the executed trip', () => {
