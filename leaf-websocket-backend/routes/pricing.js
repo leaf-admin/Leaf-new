@@ -591,7 +591,8 @@ router.post('/pricing/quote', async (req, res) => {
     const canonicalPricingPayload = {
       routePolyline: canonicalRoute.polylinePoints,
       polylinePoints: canonicalRoute.polylinePoints,
-      routeDetails: canonicalRoute
+      routeDetails: canonicalRoute,
+      vehicleTollClass: body.carType
     };
     const tollEstimate = routeTollService.resolveTollFeeFromPricingPayload(
       canonicalPricingPayload
