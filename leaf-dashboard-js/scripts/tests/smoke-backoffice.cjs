@@ -639,6 +639,12 @@ function fixtureForApiPath(apiPath, method) {
           message: "Preciso de ajuda com minha corrida",
           createdAt: new Date().toISOString(),
         },
+        {
+          id: "msg-smoke-0",
+          senderType: "agent",
+          message: "Mensagem mais antiga do suporte",
+          createdAt: new Date(Date.now() - 3600000).toISOString(),
+        },
       ],
     });
   }
@@ -945,9 +951,21 @@ async function assertReportsDownloadContract(page, observed) {
 
 async function assertWhatsAppSupportContract(page, observed) {
   // Local fixture validation only; never evidence of a real Meta delivery.
+  if (await page.locator('.support-thread-row', { hasText: 'Contato WhatsApp Smoke' }).count()) {
+    throw new Error('WhatsApp conversations must stay out of the App tab');
+  }
+  await page.locator('.support-channel-tab', { hasText: 'WhatsApp' }).click();
   await page.locator('.support-thread-row', { hasText: 'Contato WhatsApp Smoke' }).click();
+  if (await page.locator('.support-thread-row', { hasText: 'Passageiro Smoke' }).count()) {
+    throw new Error('App conversations must stay out of the WhatsApp tab');
+  }
   const conversation = page.locator('.support-conversation-panel');
   await conversation.getByText('Contato externo:', { exact: false }).waitFor();
+  await conversation.locator('.support-bubble-text', { hasText: 'Mensagem mais antiga do suporte' }).waitFor();
+  const bubbles = await conversation.locator('.support-bubble-text').allTextContents();
+  if (bubbles[0] !== 'Mensagem mais antiga do suporte' || bubbles.at(-1) !== 'Preciso de ajuda com minha corrida') {
+    throw new Error(`Messages must render oldest first, received: ${bubbles.join(' | ')}`);
+  }
   if (!await conversation.getByRole('button', { name: 'Virar chamado', exact: true }).isDisabled()) {
     throw new Error('Unverified WhatsApp contact must not be converted automatically');
   }
@@ -964,6 +982,31 @@ async function assertWhatsAppSupportContract(page, observed) {
     throw new Error('Expired WhatsApp reply window must disable the composer');
   }
   log('WhatsApp fixture: external identity, idempotency and expired window validated');
+}
+
+async function assertSupportDetachedWindow(page) {
+  await page.evaluate(() => window.sessionStorage.setItem("leaf_smoke_session_copy", "1"));
+  const [popup] = await Promise.all([
+    page.waitForEvent("popup"),
+    page.getByRole("button", { name: "Abrir em janela", exact: true }).click(),
+  ]);
+  await popup.waitForLoadState("domcontentloaded");
+  if (!popup.url().includes("/support?view=window")) {
+    throw new Error(`Detached support window opened the wrong page: ${popup.url()}`);
+  }
+  if (await popup.evaluate(() => window.sessionStorage.getItem("leaf_smoke_session_copy")) !== "1") {
+    throw new Error("Detached support window must inherit the admin session");
+  }
+  await popup.close();
+  // Sob `next dev` o popup nem sempre hidrata no Playwright; o layout é conferido na própria aba.
+  await page.goto("/support?view=window", { waitUntil: "domcontentloaded" });
+  await page.locator(".support-channel-tabs").waitFor({ timeout: 15000 });
+  if (await page.locator(".app-sidebar").count()) {
+    throw new Error("Detached support window must not render the dashboard navigation");
+  }
+  await page.goto("/support", { waitUntil: "domcontentloaded" });
+  await page.locator(".support-channel-tabs").waitFor({ timeout: 15000 });
+  log("support detached window keeps the session and hides navigation");
 }
 
 async function main() {
@@ -1059,6 +1102,7 @@ async function main() {
     await page
       .locator("[data-testid='support-freshness-status']", { hasText: "Dados: atualizados" })
       .waitFor({ timeout: 15000 });
+    await page.getByRole("button", { name: "Dados", exact: true }).click();
     await page
       .locator("[data-testid='support-freshness-detail']", { hasText: "Tickets atualizado" })
       .waitFor({ timeout: 15000 });
@@ -1076,6 +1120,7 @@ async function main() {
       })
       .waitFor({ timeout: 15000 });
     await assertWhatsAppSupportContract(page, observed);
+    await assertSupportDetachedWindow(page);
     const campaignsLink = page.getByRole("link", { name: "Campanhas" }).first();
     if (await campaignsLink.count()) {
       await campaignsLink.click();
