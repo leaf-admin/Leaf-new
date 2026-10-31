@@ -49,6 +49,7 @@ import {
 } from './prototypeMapRoute';
 import {
   buildRouteViewportRegion,
+  buildDriverRideCamera,
   buildPickupMapCamera,
   buildVisibleRouteEdgePadding,
   distanceBetweenCoordinatesKm,
@@ -403,20 +404,18 @@ const MERCATOR_METERS_PER_PIXEL_AT_ZOOM_0 = 156543.03392;
 const FOLLOW_CAMERA_RECENTER_RATIO = 0.18;
 const NAV_CAMERA_MIN_MOVE_METERS = 8;
 const NAV_CAMERA_MIN_HEADING_DEG = 12;
-// Driver map shows the whole leg still ahead (car to pickup or destination),
-// north up, between the banner and the card (Izaak, 2026-10-29). Refit only
-// after the car moved this much or this long passed, so the map stays calm.
+// Driver map shows the whole leg still ahead (car to pickup or destination)
+// between the banner and the card (Izaak, 2026-10-29), turned so the car keeps
+// one screen position (Izaak, 2026-10-31). Refit only after the car moved this
+// much or this long passed, so the map stays calm.
 const NAV_OVERVIEW_REFIT_METERS = 120;
 const NAV_OVERVIEW_REFIT_MS = 20000;
 const NAV_OVERVIEW_ANIMATION_MS = 600;
 // Height of the navigation banner below the safe area, measured on the Android QA
 // phone (about 220 pt): the overview keeps the route start out from under it.
 const NAV_OVERVIEW_BANNER_CLEARANCE = 236;
-// Between the banner and the pickup card only ~220 pt of map are left. The regular
-// route paddings (bias, extras, 180 pt minimum) ate that window and the fit fell back
-// to a frame that ran under the card, so the overview uses lean ones.
-const NAV_OVERVIEW_MIN_VISIBLE_HEIGHT = 120;
-const NAV_OVERVIEW_EDGE_PADDING = 10;
+// Without the banner (offer, waiting at pickup) the ride camera only clears the status bar.
+const DRIVER_RIDE_CAMERA_TOP_CLEARANCE = 24;
 
 function isFollowRegionClose(previous, next) {
   if (!previous || !next) return false;
@@ -6582,6 +6581,58 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     windowWidth,
   ]);
 
+  const [driverRideCameraHeading, setDriverRideCameraHeading] = useState(0);
+  const lastDriverRideHeadingRef = useRef(null);
+  const resetDriverRideCameraHeading = useCallback(() => {
+    if (lastDriverRideHeadingRef.current === null) {
+      return;
+    }
+    lastDriverRideHeadingRef.current = null;
+    setDriverRideCameraHeading(0);
+    mapRef.current?.animateCamera({ heading: 0, pitch: 0 }, { duration: 0 });
+  }, []);
+  const focusDriverRideCamera = useCallback((coordinates, duration = MAP_OCCLUSION_REPOSITION_MS) => {
+    if (!isDriverRole || !driverRideOwnsCamera || !mapRef.current) {
+      return false;
+    }
+    const camera = buildDriverRideCamera({
+      car: activeDriverNavigationCoordinate,
+      coordinates,
+      mapWidth: mapWidth || windowWidth,
+      mapHeight: mapHeight || windowHeight,
+      // The navigation banner is not part of the measured occlusion.
+      top: Math.max(
+        Number(routeViewportOcclusion.top) || 0,
+        insets.top + (showLeafNativeNavigation
+          ? NAV_OVERVIEW_BANNER_CLEARANCE
+          : DRIVER_RIDE_CAMERA_TOP_CLEARANCE),
+      ),
+      bottom: Number(routeViewportOcclusion.bottom) || 0,
+      nativeSafeArea: Platform.OS === 'ios' ? { top: insets.top, bottom: insets.bottom } : {},
+      previousHeading: lastDriverRideHeadingRef.current,
+    });
+    if (!camera) {
+      return false;
+    }
+    lastDriverRideHeadingRef.current = camera.heading;
+    setDriverRideCameraHeading(camera.heading);
+    mapRef.current.animateCamera(camera, { duration });
+    return true;
+  }, [
+    activeDriverNavigationCoordinate,
+    driverRideOwnsCamera,
+    insets.bottom,
+    insets.top,
+    isDriverRole,
+    mapHeight,
+    mapWidth,
+    routeViewportOcclusion.bottom,
+    routeViewportOcclusion.top,
+    showLeafNativeNavigation,
+    windowHeight,
+    windowWidth,
+  ]);
+
   const focusRoute = useCallback((routePayload, animatedFit = true) => {
     if (!mapRef.current || !homeMapInteractiveReady || !routePayload) {
       return;
@@ -6593,6 +6644,11 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     if (coordinates.length < 2) {
       return;
     }
+
+    if (focusDriverRideCamera(coordinates)) {
+      return;
+    }
+    resetDriverRideCameraHeading();
 
     const edgePadding = getRouteEdgePadding();
     const routeViewportRegion = buildRouteViewportRegion({
@@ -6638,7 +6694,9 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       }
     }
   }, [
+    focusDriverRideCamera,
     getRouteEdgePadding,
+    resetDriverRideCameraHeading,
     homeMapInteractiveReady,
     insets,
     mapHeight,
@@ -6723,6 +6781,13 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     showLeafNativeNavigation,
   ]);
 
+  // The offer fit moves the map, but the follow target stays the same, so the
+  // close-region check below left the car wherever the fit had put it.
+  const driverRideCameraReleasePendingRef = useRef(false);
+  if (driverRideOwnsCamera) {
+    driverRideCameraReleasePendingRef.current = true;
+  }
+
   useEffect(() => {
     // From an offer until the ride ends the camera belongs to the ride (offer
     // fit, then navigation). Re-centring on the user in between made accepting
@@ -6731,14 +6796,20 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       return;
     }
 
-    if (!mapFollowingUser) {
+    const rideCameraReleased = driverRideCameraReleasePendingRef.current;
+    driverRideCameraReleasePendingRef.current = false;
+    if (!mapFollowingUser && !rideCameraReleased) {
       return;
     }
 
-    if (isFollowRegionClose(lastFollowRegionRef.current, targetRegion)) {
+    if (!rideCameraReleased && isFollowRegionClose(lastFollowRegionRef.current, targetRegion)) {
       return;
     }
 
+    if (rideCameraReleased) {
+      setMapFollowingUser(true);
+      resetDriverRideCameraHeading();
+    }
     lastRouteLayoutKeyRef.current = '';
     lastFollowRegionRef.current = targetRegion;
     mapRef.current.animateToRegion(targetRegion, MAP_OCCLUSION_REPOSITION_MS);
@@ -6758,6 +6829,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     lastRouteLayoutKeyRef.current = '';
     lastFollowRegionRef.current = targetRegion;
     setMapFollowingUser(true);
+    resetDriverRideCameraHeading();
     mapRef.current.animateToRegion(targetRegion, MAP_OCCLUSION_REPOSITION_MS);
   }, [driverRideOwnsCamera, hasActiveRoute, homeMapInteractiveReady, isScreenFocused, isSearchingMode, targetRegion]);
 
@@ -7100,33 +7172,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
         return;
       }
     }
-    // The navigation banner is not part of the measured occlusion: keep the route below it.
-    const overviewOcclusion = {
-      ...routeViewportOcclusion,
-      top: showLeafNativeNavigation
-        ? Math.max(Number(routeViewportOcclusion.top) || 0, insets.top + NAV_OVERVIEW_BANNER_CLEARANCE)
-        : Number(routeViewportOcclusion.top) || 0,
-    };
-    const overviewRegion = buildRouteViewportRegion({
-      coordinates: overviewCoordinates,
-      mapWidth: mapWidth || windowWidth,
-      mapHeight: mapHeight || windowHeight,
-      activeOcclusion: overviewOcclusion,
-      insets,
-      viewportPadding: buildVisibleRouteEdgePadding({
-        mapHeight: mapHeight || windowHeight,
-        activeOcclusion: overviewOcclusion,
-        insets,
-        sidePadding: ROUTE_SIDE_PADDING,
-        topExtraPadding: NAV_OVERVIEW_EDGE_PADDING,
-        bottomExtraPadding: NAV_OVERVIEW_EDGE_PADDING,
-        minVisibleHeight: NAV_OVERVIEW_MIN_VISIBLE_HEIGHT,
-        minRouteAreaHeight: NAV_OVERVIEW_MIN_VISIBLE_HEIGHT,
-        overlayBiasRatio: 0,
-      }),
-      minVisibleHeight: NAV_OVERVIEW_MIN_VISIBLE_HEIGHT,
-    });
-    if (!overviewRegion) {
+    if (!focusDriverRideCamera(overviewCoordinates, NAV_OVERVIEW_ANIMATION_MS)) {
       return;
     }
     lastNativeNavigationCameraPoseRef.current = {
@@ -7136,14 +7182,12 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       at: now,
     };
     lastNativeNavigationCameraAtRef.current = now;
-    mapRef.current.animateCamera({ heading: 0, pitch: 0 }, { duration: 0 });
-    mapRef.current.animateToRegion(overviewRegion, NAV_OVERVIEW_ANIMATION_MS);
     appendPrototypeRuntimeDebugStep('leaf_native_camera_overview', {
       key: leafNativeNavigationKey,
       points: overviewCoordinates.length,
-      latitudeDelta: Number(Number(overviewRegion.latitudeDelta).toFixed(4)),
     });
   }, [
+    focusDriverRideCamera,
     activeDriverNavigationCoordinate,
     activeRoute?.destination,
     driverTripAssistNativeNavigation?.routeCoordinates,
@@ -7387,6 +7431,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     });
     if (camera) {
       driverWaitingCameraKeyRef.current = bookingKey;
+      resetDriverRideCameraHeading();
       mapRef.current.animateCamera({ ...camera, heading: 0, pitch: 0 }, { duration: 450 });
     }
   }, [
@@ -10114,7 +10159,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           userAvatarLetter={profileInitial}
           driverCoordinate={presentedDriverCoordinate}
           driverHeading={presentedDriverHeading}
-          mapCameraHeading={0}
+          mapCameraHeading={driverRideCameraHeading}
           showTraffic={shouldShowTrafficLayer}
           searchingMode={presentedSearchingMode}
           searchCenterCoordinate={presentedSearchingMode ? searchCenterCoordinate : null}
