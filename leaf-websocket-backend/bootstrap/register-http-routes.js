@@ -106,6 +106,7 @@ function registerHttpRoutes({ app, logStructured, io = null }) {
     app.use('/api/support', supportFullRoutes);
 
     // Rotas de Chat de Suporte (Redis Pub/Sub + Firestore)
+    app.use('/api/support', require('../routes/support-tools'));
     const supportChatRoutes = require('../routes/support-chat');
     app.use('/api/support', supportChatRoutes);
 

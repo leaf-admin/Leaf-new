@@ -38,9 +38,10 @@ const SUPPORT_CHANNELS = [
 ];
 const INBOX_FILTERS = {
   app: [
-    { id: "all", label: "Tudo" },
-    { id: "chats", label: "Chats" },
-    { id: "tickets", label: "Chamados" },
+    { id: "all", label: "Todas" },
+    { id: "mine", label: "Minhas" },
+    { id: "unowned", label: "Sem dono" },
+    { id: "overdue", label: "Atrasadas" },
   ],
   whatsapp: [
     { id: "all", label: "Todas" },
@@ -48,6 +49,15 @@ const INBOX_FILTERS = {
     { id: "reply_closed", label: "Fora da janela" },
   ],
 };
+const DEFAULT_SAVED_REPLIES = [
+  { shortcut: "oi", message: N0_QUICK_REPLIES[0] },
+  { shortcut: "detalhes", message: N0_QUICK_REPLIES[1] },
+  { shortcut: "encerrar", message: N0_QUICK_REPLIES[2] },
+  { shortcut: "verificando", message: SUPPORT_QUICK_REPLIES[0] },
+  { shortcut: "chamado", message: SUPPORT_QUICK_REPLIES[1] },
+  { shortcut: "atualizado", message: SUPPORT_QUICK_REPLIES[2] },
+];
+const SAVED_REPLY_MANAGER_ROLES = new Set(["admin", "manager", "super-admin", "development", "support_n3", "support-n3"]);
 const SUPPORT_STATUS_LABELS = {
   active: "Ativo",
   open: "Aberto",
@@ -407,6 +417,11 @@ function personTypeLabel(value) {
   return SUPPORT_PERSON_TYPES[normalize(value)] || "";
 }
 
+function formatMoney(value) {
+  if (value === null || value === undefined) return "Sem valor fechado";
+  return Number(value).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
 function SupportMessageBubbles({ messages, emptyText }) {
   if (!messages.length) return <p className="support-messages-empty">{emptyText}</p>;
   return messages.map((message, index) => {
@@ -414,12 +429,18 @@ function SupportMessageBubbles({ messages, emptyText }) {
     const day = formatMessageDay(sentAt);
     const showDay = index === 0 || day !== formatMessageDay(messages[index - 1].createdAt || messages[index - 1].timestamp);
     const fromAgent = message.senderType === "agent";
+    const isNote = message.isInternal === true;
     const delivery = deliveryLabel(message.deliveryStatus);
     const ticks = { sent: "✓", delivered: "✓✓", read: "✓✓" }[message.deliveryStatus];
     return (
       <div key={message.id || `${sentAt}-${message.message}`} className="support-message-group">
         {showDay && day ? <span className="support-message-day">{day}</span> : null}
-        <div className={`support-bubble ${fromAgent ? "support-bubble-agent" : "support-bubble-user"}`}>
+        <div className={`support-bubble ${isNote ? "support-bubble-note" : fromAgent ? "support-bubble-agent" : "support-bubble-user"}`}>
+          {isNote ? (
+            <span className="support-bubble-note-label">
+              Nota interna{message.authorName ? ` · ${message.authorName}` : ""}, o cliente não vê
+            </span>
+          ) : null}
           <span className="support-bubble-text">{message.message || "-"}</span>
           <small>
             {formatMessageTime(sentAt)}
@@ -586,6 +607,7 @@ function deriveSummary(tickets, queueSummary) {
 function SupportPageContent({ supportScope }) {
   const chatRealtimeRef = useRef(false);
   const threadMessagesRef = useRef(null);
+  const composerInputRef = useRef(null);
   const supportWindowRef = useRef(null);
   const isDetachedWindow = useSearchParams().get("view") === "window";
   const whatsappSendKeys = useRef(new Map());
@@ -620,6 +642,14 @@ function SupportPageContent({ supportScope }) {
   const [mode, setMode] = useState("ticket");
   const [inboxChannel, setInboxChannel] = useState("app");
   const [contextOpen, setContextOpen] = useState(false);
+  const [typeFilter, setTypeFilter] = useState("all");
+  const [composerMode, setComposerMode] = useState("reply");
+  const [noteDraft, setNoteDraft] = useState("");
+  const [chatNotes, setChatNotes] = useState([]);
+  const [savedReplies, setSavedReplies] = useState([]);
+  const [slashIndex, setSlashIndex] = useState(0);
+  const [savedReplyForm, setSavedReplyForm] = useState({ shortcut: "", message: "" });
+  const [activeRide, setActiveRide] = useState(null);
   const [inboxFilter, setInboxFilter] = useState("all");
   const [orchestratorStatus, setOrchestratorStatus] = useState(null);
   const [orchestratorRuns, setOrchestratorRuns] = useState([]);
@@ -811,7 +841,7 @@ function SupportPageContent({ supportScope }) {
     setChatMessages([]);
     setN0ChatMessages([]);
     setChatStatus(null);
-    setInboxFilter("tickets");
+    setTypeFilter("tickets");
     setMode("ticket");
   }, [isOperationalSupportScope]);
 
@@ -1110,10 +1140,10 @@ function SupportPageContent({ supportScope }) {
   );
   const currentMessages = useMemo(
     () => {
-      if (mode === "n0") return n0ChatMessages;
-      return mode === "ticket" ? ticketMessages : chatMessages;
+      if (mode === "n0") return [...n0ChatMessages, ...chatNotes];
+      return mode === "ticket" ? ticketMessages : [...chatMessages, ...chatNotes];
     },
-    [chatMessages, mode, n0ChatMessages, ticketMessages],
+    [chatMessages, chatNotes, mode, n0ChatMessages, ticketMessages],
   );
   const activeMessagesFreshnessSnapshot = useMemo(() => {
     if (mode === "n0") return scopedFreshness(supportFreshness.n0ChatMessages, selectedN0Chat?.userId);
@@ -1186,6 +1216,74 @@ function SupportPageContent({ supportScope }) {
     const container = threadMessagesRef.current;
     if (container) container.scrollTop = container.scrollHeight;
   }, [activeThreadKey, filteredMessages.length]);
+  const noteUserId = mode === "n0" ? selectedN0Chat?.userId : mode === "chat" ? selectedUserId : null;
+  useEffect(() => {
+    if (!isOperationalSupportScope || !noteUserId) {
+      setChatNotes([]);
+      return undefined;
+    }
+    let mounted = true;
+    const loadNotes = () => leafAPI.getSupportChatNotes(noteUserId, supportApiContext)
+      .then((response) => {
+        if (mounted) setChatNotes(response?.notes || []);
+      })
+      .catch(() => null);
+    setChatNotes([]);
+    loadNotes();
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") loadNotes();
+    }, MESSAGE_POLL_MS);
+    return () => {
+      mounted = false;
+      clearInterval(timer);
+    };
+  }, [isOperationalSupportScope, noteUserId, supportApiContext]);
+  useEffect(() => {
+    let mounted = true;
+    leafAPI.getSupportSavedReplies(supportApiContext)
+      .then((response) => {
+        if (mounted) setSavedReplies(response?.replies || []);
+      })
+      .catch(() => null);
+    return () => {
+      mounted = false;
+    };
+  }, [supportApiContext]);
+  const activeRideTicket = mode === "n0"
+    ? tickets.find((ticket) => ticket.id === selectedN0Chat?.ticketId)
+    : selectedTicket;
+  const activeRideId = activeRideTicket?.metadata?.bookingId
+    || activeRideTicket?.metadata?.tripId
+    || activeRideTicket?.metadata?.rideId
+    || activeRideTicket?.bookingId
+    || null;
+  useEffect(() => {
+    setActiveRide(null);
+    if (!isOperationalSupportScope || !activeRideId) return undefined;
+    let mounted = true;
+    leafAPI.getSupportRide(activeRideId, supportApiContext)
+      .then((response) => {
+        if (mounted) setActiveRide(response?.ride || null);
+      })
+      .catch(() => null);
+    return () => {
+      mounted = false;
+    };
+  }, [activeRideId, isOperationalSupportScope, supportApiContext]);
+  const matchesQueue = useCallback((item, queue) => {
+    if (queue === "reply_open") return Boolean(item.canReply);
+    if (queue === "reply_closed") return !item.canReply;
+    if (queue === "overdue") return item.overdue === true;
+    if (queue === "mine") {
+      return item.type === "ticket" && [user?.id, user?.uid, user?.email].filter(Boolean).includes(item.ownerId);
+    }
+    if (queue === "unowned") {
+      return item.type === "ticket"
+        ? !item.ownerId
+        : !item.raw?.ticketId && normalize(item.status) !== "closed";
+    }
+    return true;
+  }, [user?.email, user?.id, user?.uid]);
   const allInboxItems = useMemo(() => {
     const ticketItems = tickets.map((ticket) => {
       const health = queueHealthBadge(ticket);
@@ -1194,6 +1292,8 @@ function SupportPageContent({ supportScope }) {
         id: `ticket:${ticket.id}`,
         type: "ticket",
         channel: "app",
+        ownerId: ticket.assignedAgent || "",
+        overdue: Boolean(ticket.queue?.overdueAck || ticket.queue?.overdueFirstResponse),
         title: getTicketTitle(ticket),
         subtitle: [personTypeLabel(ticket.userType), ticket.user?.name || ticket.userId || "Usuário sem identificação"]
           .filter(Boolean)
@@ -1241,17 +1341,24 @@ function SupportPageContent({ supportScope }) {
     const searchTerm = ticketSearch.trim().toLowerCase();
     return allInboxItems.filter((item) => {
       if (item.channel !== inboxChannel) return false;
-      if (inboxFilter === "chats" && item.type !== "n0") return false;
-      if (inboxFilter === "tickets" && item.type !== "ticket") return false;
-      if (inboxFilter === "reply_open" && !item.canReply) return false;
-      if (inboxFilter === "reply_closed" && item.canReply) return false;
+      if (item.channel === "app") {
+        if (typeFilter === "chats" && item.type !== "n0") return false;
+        if (typeFilter === "tickets" && item.type !== "ticket") return false;
+      }
+      if (inboxFilter !== "all" && !matchesQueue(item, inboxFilter)) return false;
       if (!searchTerm) return true;
       return [item.title, item.subtitle, item.phone, item.preview, item.status, item.priority]
         .join(" ")
         .toLowerCase()
         .includes(searchTerm);
     });
-  }, [allInboxItems, inboxChannel, inboxFilter, ticketSearch]);
+  }, [allInboxItems, inboxChannel, inboxFilter, matchesQueue, ticketSearch, typeFilter]);
+  const queueCounts = useMemo(() => {
+    const appItems = allInboxItems.filter((item) => item.channel === "app");
+    return Object.fromEntries(
+      ["mine", "unowned", "overdue"].map((queue) => [queue, appItems.filter((item) => matchesQueue(item, queue)).length]),
+    );
+  }, [allInboxItems, matchesQueue]);
   const channelSummary = useMemo(() => {
     const summaryByChannel = { app: { total: 0, unread: 0 }, whatsapp: { total: 0, unread: 0 } };
     allInboxItems.forEach((item) => {
@@ -1398,7 +1505,7 @@ function SupportPageContent({ supportScope }) {
     chips.push({ label: health.label, className: health.className });
     chips.push({ label: `Dono: ${selectedTicketDetails.responsavel}`, className: "meta-badge" });
     if (selectedTicketDetails.idade !== "-") chips.push({ label: `Há ${selectedTicketDetails.idade}`, className: "meta-badge" });
-    if (selectedTicketDetails.bookingId !== "-") {
+    if (selectedTicketDetails.bookingId !== "-" && !activeRide) {
       chips.push({ label: `Corrida ${selectedTicketDetails.bookingId}`, className: "meta-badge" });
     }
     const classificationLabel = getTicketClassificationLabel(selectedTicket);
@@ -1453,6 +1560,7 @@ function SupportPageContent({ supportScope }) {
   const selectInboxItem = (item) => {
     setError("");
     setActionMessage("");
+    setNoteDraft("");
     if (item.type === "n0") {
       setSelectedN0Chat(item.raw);
       setMode("n0");
@@ -1931,6 +2039,215 @@ function SupportPageContent({ supportScope }) {
     }
   };
 
+  const availableReplies = savedReplies.length ? savedReplies : DEFAULT_SAVED_REPLIES;
+  const canManageSavedReplies = SAVED_REPLY_MANAGER_ROLES.has(supportPolicy.role);
+  const isNoteMode = composerMode === "note";
+  const composerDraft = isNoteMode ? noteDraft : replyValue;
+  const canWriteNote = mode === "n0" ? canRunSupportAction(supportPolicy, "message", "N3") : canMessageSelected;
+  const slashTerm = /^\/[\w-]*$/.test(composerDraft) ? composerDraft.slice(1).toLowerCase() : null;
+  const slashMatches = slashTerm === null ? [] : availableReplies
+    .filter((reply) => reply.shortcut.startsWith(slashTerm) || reply.message.toLowerCase().includes(slashTerm))
+    .slice(0, 6);
+  const updateComposerDraft = (value) => {
+    setSlashIndex(0);
+    if (isNoteMode) setNoteDraft(value);
+    else updateActiveReply(value);
+  };
+  const saveInternalNote = async () => {
+    const message = noteDraft.trim();
+    if (!message || actionBusy || !canWriteNote) return;
+    try {
+      setActionBusy("note");
+      setError("");
+      setActionMessage("");
+      if (mode === "ticket") {
+        await leafAPI.sendSupportMessage(selectedTicket.id, message, "internal_note", [], supportApiContext);
+        await loadTicketMessages(selectedTicket.id);
+      } else {
+        const response = await leafAPI.addSupportChatNote(noteUserId, message, supportApiContext);
+        setChatNotes((current) => [...current, response.note]);
+      }
+      setNoteDraft("");
+      setActionMessage("Nota interna salva. O cliente não vê.");
+    } catch (err) {
+      setError(err?.message || "Falha ao salvar nota interna");
+    } finally {
+      setActionBusy("");
+    }
+  };
+  const submitComposer = () => (isNoteMode ? saveInternalNote() : sendActiveReply());
+  const handleComposerKeyDown = (event) => {
+    if (slashMatches.length) {
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        const step = event.key === "ArrowDown" ? 1 : -1;
+        setSlashIndex((current) => (current + step + slashMatches.length) % slashMatches.length);
+        return;
+      }
+      if (event.key === "Enter" || event.key === "Tab") {
+        event.preventDefault();
+        updateComposerDraft(slashMatches[Math.min(slashIndex, slashMatches.length - 1)].message);
+        return;
+      }
+      if (event.key === "Escape") {
+        updateComposerDraft("");
+        return;
+      }
+    }
+    if (event.key === "Escape") {
+      event.currentTarget.blur();
+      return;
+    }
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      submitComposer();
+    }
+  };
+  const focusComposer = (nextMode) => {
+    setComposerMode(nextMode);
+    requestAnimationFrame(() => composerInputRef.current?.focus());
+  };
+  const moveInboxSelection = (step) => {
+    if (!inboxItems.length) return;
+    const currentIndex = inboxItems.findIndex((item) => item.id === selectedInboxId);
+    const nextIndex = currentIndex < 0 ? 0 : (currentIndex + step + inboxItems.length) % inboxItems.length;
+    selectInboxItem(inboxItems[nextIndex]);
+  };
+  const shortcutHandlerRef = useRef(null);
+  useEffect(() => {
+    shortcutHandlerRef.current = (event) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (document.querySelector('[role="dialog"]')) return;
+      const tag = event.target?.tagName;
+      if (["INPUT", "TEXTAREA", "SELECT"].includes(tag) || event.target?.isContentEditable) return;
+      const key = event.key.toLowerCase();
+      if (key === "arrowdown" || key === "arrowup") {
+        event.preventDefault();
+        moveInboxSelection(key === "arrowdown" ? 1 : -1);
+      } else if (key === "r" || key === "n") {
+        event.preventDefault();
+        focusComposer(key === "n" ? "note" : "reply");
+      } else if (key === "d") {
+        setContextOpen((current) => !current);
+      } else if (key === "escape") {
+        setContextOpen(false);
+      }
+    };
+  });
+  useEffect(() => {
+    const onKeyDown = (event) => shortcutHandlerRef.current?.(event);
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+  const addSavedReply = async () => {
+    try {
+      setActionBusy("saved-reply");
+      setError("");
+      const response = await leafAPI.saveSupportSavedReply(savedReplyForm.shortcut, savedReplyForm.message, supportApiContext);
+      setSavedReplies((current) => [
+        ...current.filter((reply) => reply.shortcut !== response.reply.shortcut),
+        response.reply,
+      ].sort((left, right) => left.shortcut.localeCompare(right.shortcut)));
+      setSavedReplyForm({ shortcut: "", message: "" });
+      setActionMessage("Resposta pronta salva.");
+    } catch (err) {
+      setError(err?.message || "Falha ao salvar resposta pronta");
+    } finally {
+      setActionBusy("");
+    }
+  };
+  const removeSavedReply = async (shortcut) => {
+    try {
+      setActionBusy("saved-reply");
+      setError("");
+      await leafAPI.deleteSupportSavedReply(shortcut, supportApiContext);
+      setSavedReplies((current) => current.filter((reply) => reply.shortcut !== shortcut));
+      setActionMessage("Resposta pronta removida.");
+    } catch (err) {
+      setError(err?.message || "Falha ao remover resposta pronta");
+    } finally {
+      setActionBusy("");
+    }
+  };
+  const rideCard = activeRide ? (
+    <div className="support-ride-card" data-testid="support-ride-card">
+      <div className="support-ride-main">
+        <strong>Corrida {activeRide.statusLabel}</strong>
+        <span>{formatMoney(activeRide.grossAmount)}</span>
+        {activeRide.paymentStatus ? <span>Pagamento: {activeRide.paymentStatus}</span> : null}
+      </div>
+      {activeRide.pickupAddress || activeRide.destinationAddress ? (
+        <p>{activeRide.pickupAddress || "Origem indisponível"} → {activeRide.destinationAddress || "Destino indisponível"}</p>
+      ) : null}
+      <div className="support-ride-links">
+        {activeRide.passengerId ? (
+          <a href={`/users/${encodeURIComponent(activeRide.passengerId)}`}>Passageiro: {activeRide.passengerName || "ver perfil"}</a>
+        ) : null}
+        {activeRide.driverId ? (
+          <a href={`/drivers/${encodeURIComponent(activeRide.driverId)}`}>Motorista: {activeRide.driverName || "ver perfil"}</a>
+        ) : null}
+      </div>
+    </div>
+  ) : null;
+  const threadComposer = (
+    <div className={isNoteMode ? "support-composer support-composer-note" : "support-composer"}>
+      {selectedWhatsAppWindow && !isNoteMode ? (
+        <p className={whatsappReplyBlocked ? "support-channel-notice support-channel-notice-blocked" : "support-channel-notice"}>
+          Contato externo: confirme a identidade antes de tratar dados da conta Leaf.
+          {selectedN0Chat.pendingOperationId
+            ? " Há um envio sem confirmação. Aguarde antes de reenviar."
+            : whatsappReplyBlocked
+              ? " Aguarde uma nova mensagem do contato para responder."
+              : " Respostas de texto disponíveis por 24 horas após a última mensagem do contato."}
+        </p>
+      ) : null}
+      {slashMatches.length ? (
+        <div className="support-slash-menu" role="listbox" aria-label="Respostas prontas">
+          {slashMatches.map((reply, index) => (
+            <button
+              key={reply.shortcut}
+              type="button"
+              role="option"
+              aria-selected={index === Math.min(slashIndex, slashMatches.length - 1)}
+              className={index === Math.min(slashIndex, slashMatches.length - 1) ? "support-slash-active" : ""}
+              onMouseDown={(event) => {
+                event.preventDefault();
+                updateComposerDraft(reply.message);
+              }}
+            >
+              <strong>/{reply.shortcut}</strong>
+              <span>{reply.message}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+      <div className="support-composer-modes" role="group" aria-label="Tipo de mensagem">
+        <button type="button" aria-pressed={!isNoteMode} onClick={() => focusComposer("reply")}>Responder</button>
+        <button type="button" aria-pressed={isNoteMode} onClick={() => focusComposer("note")}>Nota interna</button>
+      </div>
+      <textarea
+        ref={composerInputRef}
+        rows={1}
+        aria-label={isNoteMode ? "Nota interna" : "Resposta ao cliente"}
+        placeholder={isNoteMode
+          ? "Nota para a equipe. O cliente não vê."
+          : `${selectedWhatsAppWindow ? "Responder no WhatsApp" : mode === "ticket" ? "Responder chamado" : "Responder chat"}. Use / para respostas prontas`}
+        value={composerDraft}
+        onChange={(event) => updateComposerDraft(event.target.value)}
+        onKeyDown={handleComposerKeyDown}
+      />
+      <button
+        type="button"
+        onClick={submitComposer}
+        disabled={!!actionBusy || !composerDraft.trim() || (isNoteMode ? !canWriteNote : !canReplyActiveThread)}
+      >
+        {isNoteMode
+          ? actionBusy === "note" ? "Salvando..." : "Salvar nota"
+          : actionBusy === "message" || actionBusy === "n0-message" ? "Enviando..." : "Enviar"}
+      </button>
+    </div>
+  );
+
   return (
     <ProtectedRoute>
       <main className={isDetachedWindow ? "page-shell support-page-shell support-page-detached" : "page-shell support-page-shell"}>
@@ -2031,6 +2348,9 @@ function SupportPageContent({ supportScope }) {
                   onClick={() => setInboxFilter(filter.id)}
                 >
                   {filter.label}
+                  {queueCounts[filter.id] && inboxChannel === "app" ? (
+                    <span className="support-queue-count">{queueCounts[filter.id]}</span>
+                  ) : null}
                 </button>
               ))}
             </div>
@@ -2041,14 +2361,23 @@ function SupportPageContent({ supportScope }) {
                 onChange={(event) => setTicketSearch(event.target.value)}
               />
             </div>
-            {inboxChannel === "app" && inboxFilter !== "chats" ? (
+            {inboxChannel === "app" ? (
               <div className="support-inbox-filters">
+                <select
+                  aria-label="Tipo de atendimento"
+                  value={typeFilter}
+                  onChange={(event) => setTypeFilter(event.target.value)}
+                >
+                  <option value="all">Tipo</option>
+                  <option value="chats">Só chats</option>
+                  <option value="tickets">Só chamados</option>
+                </select>
                 <select
                   aria-label="Prioridade do chamado"
                   value={priorityFilter}
                   onChange={(event) => setPriorityFilter(event.target.value)}
                 >
-                  <option value="all">Todas prioridades</option>
+                  <option value="all">Prioridade</option>
                   <option value="N1">N1</option>
                   <option value="N2">N2</option>
                   <option value="N3">N3</option>
@@ -2058,7 +2387,7 @@ function SupportPageContent({ supportScope }) {
                   value={statusFilter}
                   onChange={(event) => setStatusFilter(event.target.value)}
                 >
-                  <option value="all">Todos status</option>
+                  <option value="all">Status</option>
                   <option value="open">Abertos</option>
                   <option value="assigned">Atribuídos</option>
                   <option value="in_progress">Em andamento</option>
@@ -2068,7 +2397,7 @@ function SupportPageContent({ supportScope }) {
                 </select>
               </div>
             ) : null}
-            {isOperationalSupportScope && inboxFilter !== "tickets" ? (
+            {isOperationalSupportScope && typeFilter !== "tickets" ? (
               <label className="support-inbox-toggle">
                 <input
                   type="checkbox"
@@ -2123,6 +2452,7 @@ function SupportPageContent({ supportScope }) {
                 </p>
               ) : null}
             </div>
+            <p className="support-shortcut-hint">↑↓ navegar · R responder · N nota · D dados · / respostas</p>
           </aside>
 
           <section className="support-conversation-panel card">
@@ -2167,49 +2497,11 @@ function SupportPageContent({ supportScope }) {
                     </div>
                   </div>
                   {threadContextBar}
+                  {rideCard}
                   <div className="support-messages support-conversation-messages" ref={threadMessagesRef}>
                     <SupportMessageBubbles messages={filteredMessages} emptyText="Sem histórico neste chat." />
                   </div>
-                  <div className="support-composer">
-                    {selectedN0Chat.channel === "whatsapp" ? (
-                      <p className={whatsappReplyBlocked ? "support-channel-notice support-channel-notice-blocked" : "support-channel-notice"}>
-                        Contato externo: confirme a identidade antes de tratar dados da conta Leaf.
-                        {selectedN0Chat.pendingOperationId
-                          ? " Há um envio sem confirmação. Aguarde antes de reenviar."
-                          : whatsappReplyBlocked
-                            ? " Aguarde uma nova mensagem do contato para responder."
-                            : " Respostas de texto disponíveis por 24 horas após a última mensagem do contato."}
-                      </p>
-                    ) : null}
-                    {whatsappReplyBlocked ? null : (
-                      <div className="quick-reply-row">
-                        {N0_QUICK_REPLIES.map((template) => (
-                          <button key={template} type="button" onClick={() => updateActiveReply(template)}>
-                            {template}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                    <textarea
-                      rows={1}
-                      placeholder={selectedWhatsAppWindow ? "Responder no WhatsApp..." : "Responder atendimento simples..."}
-                      value={replyValue}
-                      onChange={(event) => updateActiveReply(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter" && !event.shiftKey) {
-                          event.preventDefault();
-                          sendActiveReply();
-                        }
-                      }}
-                    />
-                    <button
-                      type="button"
-                      onClick={sendActiveReply}
-                      disabled={!!actionBusy || !replyValue.trim() || !canReplyActiveThread}
-                    >
-                      {actionBusy === "n0-message" ? "Enviando..." : "Enviar"}
-                    </button>
-                  </div>
+                  {threadComposer}
                 </>
               ) : (
                 <p className="text-muted">Selecione um chat.</p>
@@ -2244,37 +2536,11 @@ function SupportPageContent({ supportScope }) {
                   </div>
                 </div>
                 {threadContextBar}
+                  {rideCard}
                 <div className="support-messages support-conversation-messages" ref={threadMessagesRef}>
                   <SupportMessageBubbles messages={filteredMessages} emptyText="Sem mensagens neste canal." />
                 </div>
-                <div className="support-composer">
-                  <div className="quick-reply-row">
-                    {SUPPORT_QUICK_REPLIES.map((template) => (
-                      <button key={template} type="button" onClick={() => updateActiveReply(template)}>
-                        {template}
-                      </button>
-                    ))}
-                  </div>
-                  <textarea
-                    rows={1}
-                    placeholder={mode === "chat" ? "Responder chat..." : "Responder chamado..."}
-                    value={replyValue}
-                    onChange={(event) => updateActiveReply(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" && !event.shiftKey) {
-                        event.preventDefault();
-                        sendActiveReply();
-                      }
-                    }}
-                  />
-                  <button
-                    type="button"
-                    onClick={sendActiveReply}
-                    disabled={!!actionBusy || !replyValue.trim() || !canReplyActiveThread}
-                  >
-                    {actionBusy === "message" ? "Enviando..." : "Enviar"}
-                  </button>
-                </div>
+                {threadComposer}
               </>
             ) : (
               <p className="text-muted">Selecione uma conversa ou chamado.</p>
@@ -2410,6 +2676,52 @@ function SupportPageContent({ supportScope }) {
                     </button>
                   ) : null}
                 </div>
+              </div>
+            ) : null}
+
+            {canManageSavedReplies ? (
+              <div className="support-context-section">
+                <h2>Respostas prontas</h2>
+                {savedReplies.length ? (
+                  <ul className="support-saved-replies">
+                    {savedReplies.map((reply) => (
+                      <li key={reply.shortcut} title={reply.message}>
+                        <strong>/{reply.shortcut}</strong>
+                        <span>{reply.message}</span>
+                        <button
+                          type="button"
+                          className="mode-btn"
+                          disabled={!!actionBusy}
+                          onClick={() => removeSavedReply(reply.shortcut)}
+                        >
+                          Remover
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-muted">Usando as respostas padrão até você salvar a primeira.</p>
+                )}
+                <input
+                  placeholder="Atalho, ex: pix"
+                  aria-label="Atalho da resposta pronta"
+                  value={savedReplyForm.shortcut}
+                  onChange={(event) => setSavedReplyForm((current) => ({ ...current, shortcut: event.target.value }))}
+                />
+                <textarea
+                  rows={2}
+                  placeholder="Texto da resposta"
+                  aria-label="Texto da resposta pronta"
+                  value={savedReplyForm.message}
+                  onChange={(event) => setSavedReplyForm((current) => ({ ...current, message: event.target.value }))}
+                />
+                <button
+                  type="button"
+                  disabled={!!actionBusy || !savedReplyForm.shortcut.trim() || !savedReplyForm.message.trim()}
+                  onClick={addSavedReply}
+                >
+                  Salvar resposta
+                </button>
               </div>
             ) : null}
 
