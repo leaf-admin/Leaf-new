@@ -1428,6 +1428,7 @@ function PrototypeMapLayer({
   destinationMarkerLetter = 'P',
   viewportPadding = null,
   routeViewportRegion = null,
+  routeViewportCameraManaged = false,
   forceRegionUpdate = false,
   manualCameraHoldMs = 0,
   mapCameraHeading = 0,
@@ -2258,7 +2259,7 @@ function PrototypeMapLayer({
   useEffect(() => {
     const had = hadRouteViewportRef.current;
     hadRouteViewportRef.current = Boolean(resolvedRouteViewportRegion);
-    if (Date.now() < manualCameraHoldUntilRef.current) return;
+    if (routeViewportCameraManaged || Date.now() < manualCameraHoldUntilRef.current) return;
     // Prévia nova com o mesmo enquadramento da anterior (oferta reenviada): os valores
     // não mudam, então nada reposicionava a câmera e a rota ficava fora da tela.
     if (!had && resolvedRouteViewportRegion) {
@@ -2267,7 +2268,7 @@ function PrototypeMapLayer({
     }
     if (!had || resolvedRouteViewportRegion || !isValidMapRegion(region)) return;
     mapRef?.current?.animateToRegion?.(region, 420);
-  }, [mapRef, region, resolvedRouteViewportRegion]);
+  }, [mapRef, region, resolvedRouteViewportRegion, routeViewportCameraManaged]);
 
   // Glass lens backdrop (Android + Skia): snapshot the settled map so floating
   // glass can refract it; any camera motion drops the snapshot immediately.
