@@ -25,7 +25,7 @@ const TOLL_PLAZAS = Object.freeze([
   { id: 'p05_serrinha', name: 'P05 - Serrinha', road: 'BR-101', direction: 'bidirectional', lat: -22.04975, lng: -41.685157, fees: { car: { weekday: 7.1, weekend: 7.1 }, truck: { weekday: 14.2, weekend: 14.2 } } },
   { id: 'p06_viuva_graca', name: 'P06 - Viuva Graca', road: 'BR-116', direction: 'bidirectional', twinGroup: 'p06_viuva_graca', positionVerified: true, lat: -22.7150807, lng: -43.7313205, fees: { car: { weekday: 16.4, weekend: 16.4 }, truck: { weekday: 32.8, weekend: 32.8 } } },
   { id: 'p07_viuva_graca_b', name: 'P07 - Viuva Graca B', road: 'BR-116', direction: 'bidirectional', twinGroup: 'p06_viuva_graca', positionVerified: true, lat: -22.7151381, lng: -43.730208, fees: { car: { weekday: 16.4, weekend: 16.4 }, truck: { weekday: 32.8, weekend: 32.8 } } },
-  { id: 'p08_ponte_rio_niteroi', name: 'P08 - Ponte Rio-Niteroi', road: 'BR-101', direction: 'bidirectional', positionVerified: true, lat: -22.8779216, lng: -43.1157367, fees: { motorcycle: { weekday: 3.3, weekend: 3.3 }, car: { weekday: 6.6, weekend: 6.6 }, truck: { weekday: 13.2, weekend: 13.2 } } },
+  { id: 'p08_ponte_rio_niteroi', name: 'P08 - Ponte Rio-Niteroi', road: 'BR-101', direction: 'southeast', positionVerified: true, lat: -22.8779216, lng: -43.1157367, fees: { motorcycle: { weekday: 3.3, weekend: 3.3 }, car: { weekday: 6.6, weekend: 6.6 }, truck: { weekday: 13.2, weekend: 13.2 } } },
   { id: 'p09_linha_amarela', name: 'P09 - Linha Amarela', road: 'RJ-065', direction: 'bidirectional', positionVerified: true, lat: -22.9073168, lng: -43.3089095, fees: { motorcycle: { weekday: 0, weekend: 0 }, car: { weekday: 4, weekend: 4 }, truck: { weekday: 8, weekend: 8 } } },
   { id: 'p15_mangaratiba', name: 'P15 - Mangaratiba', road: 'BR-101', direction: 'bidirectional', lat: -22.959, lng: -44.04, fees: { car: { weekday: 4.7, weekend: 7.9 }, truck: { weekday: 9.4, weekend: 15.8 } } },
   { id: 'p16_paraty', name: 'P16 - Paraty', road: 'BR-101', direction: 'bidirectional', lat: -23.22, lng: -44.72, fees: { car: { weekday: 4.7, weekend: 7.9 }, truck: { weekday: 9.4, weekend: 15.8 } } },
@@ -35,8 +35,8 @@ const TOLL_PLAZAS = Object.freeze([
   { id: 'p20_barra_do_pirai', name: 'P20 - Barra do Pirai', road: 'RJ-116', direction: 'bidirectional', lat: -22.471, lng: -43.826, fees: { car: { weekday: 6.5, weekend: 6.5 }, truck: { weekday: 13, weekend: 13 } } },
   { id: 'p10a_transolimpica', name: 'P10a - Transolimpica', road: 'RJ-066', direction: 'north', twinGroup: 'p10_transolimpica', positionVerified: true, lat: -22.9194989223804, lng: -43.3962833, fees: { motorcycle: { weekday: 4, weekend: 4 }, car: { weekday: 9.95, weekend: 9.95 }, truck: { weekday: 19.9, weekend: 19.9 } } },
   { id: 'p10b_transolimpica', name: 'P10b - Transolimpica', road: 'RJ-066', direction: 'south', twinGroup: 'p10_transolimpica', positionVerified: true, lat: -22.9193061842793, lng: -43.3967711, fees: { motorcycle: { weekday: 4, weekend: 4 }, car: { weekday: 9.95, weekend: 9.95 }, truck: { weekday: 19.9, weekend: 19.9 } } },
-  { id: 'p10c_transolimpica', name: 'P10c - Transolimpica Rio Grande', road: 'RJ-066', direction: 'north', twinGroup: 'p10_transolimpica', positionVerified: true, lat: -22.8957976, lng: -43.3989547, fees: { motorcycle: { weekday: 4, weekend: 4 }, car: { weekday: 9.95, weekend: 9.95 }, truck: { weekday: 19.9, weekend: 19.9 } } },
-  { id: 'p10d_transolimpica', name: 'P10d - Transolimpica Rio Grande', road: 'RJ-066', direction: 'south', twinGroup: 'p10_transolimpica', positionVerified: true, lat: -22.8960031, lng: -43.3994978, fees: { motorcycle: { weekday: 4, weekend: 4 }, car: { weekday: 9.95, weekend: 9.95 }, truck: { weekday: 19.9, weekend: 19.9 } } }
+  { id: 'p10c_transolimpica', name: 'P10c - Transolimpica Rio Grande', road: 'RJ-066', direction: 'north', twinGroup: 'p10_rio_grande', positionVerified: true, lat: -22.8957976, lng: -43.3989547, fees: { motorcycle: { weekday: 4, weekend: 4 }, car: { weekday: 9.95, weekend: 9.95 }, truck: { weekday: 19.9, weekend: 19.9 } } },
+  { id: 'p10d_transolimpica', name: 'P10d - Transolimpica Rio Grande', road: 'RJ-066', direction: 'south', twinGroup: 'p10_rio_grande', positionVerified: true, lat: -22.8960031, lng: -43.3994978, fees: { motorcycle: { weekday: 4, weekend: 4 }, car: { weekday: 9.95, weekend: 9.95 }, truck: { weekday: 19.9, weekend: 19.9 } } }
 ]);
 
 function toRad(value) {
@@ -149,6 +149,15 @@ function bearingToDirection(bearing) {
   return 'west';
 }
 
+// A Ponte cobra só no sentido Região dos Lagos. Ali a via aponta para ~126°, perto
+// do limite entre leste e sul, então esse sentido cobre os dois quadrantes.
+function headingMatches(direction, bearing) {
+  if (direction === 'southeast') {
+    return bearing >= 45 && bearing < 225;
+  }
+  return bearingToDirection(bearing) === direction;
+}
+
 function directionMatches(toll, routeCoordinates, nearestSegmentIndex, minSegmentKm = 0) {
   if (!toll.direction || toll.direction === 'bidirectional') {
     return true;
@@ -177,7 +186,7 @@ function directionMatches(toll, routeCoordinates, nearestSegmentIndex, minSegmen
     return false;
   }
 
-  return bearingToDirection(bearingDegrees(start, end)) === toll.direction;
+  return headingMatches(toll.direction, bearingDegrees(start, end));
 }
 
 function normalizeVehicleTollClass(value) {

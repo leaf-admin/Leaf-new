@@ -110,14 +110,35 @@ describe('route-toll-service', () => {
     });
 
     test.each([
-      ['sul', tollRoutes.transolimpicaThroughSouthbound],
-      ['norte', tollRoutes.transolimpicaThroughNorthbound],
-    ])('cobra uma vez a Transolímpica inteira no sentido %s, com as duas praças na rota', (_direction, polyline) => {
+      ['sul', tollRoutes.transolimpicaThroughSouthbound, ['p10d_transolimpica', 'p10b_transolimpica']],
+      ['norte', tollRoutes.transolimpicaThroughNorthbound, ['p10a_transolimpica', 'p10c_transolimpica']],
+    ])('cobra as duas praças da Transolímpica no sentido %s', (_direction, polyline, tollIds) => {
       const result = estimateRouteTollsFromPolyline(polyline, { now });
 
-      expect(result.tollCount).toBe(1);
-      expect(result.tollFee).toBe(9.95);
-      expect(findCrossedTolls(decodePolyline(polyline))).toHaveLength(1);
+      expect(result.tolls.map((toll) => toll.id).sort()).toEqual([...tollIds].sort());
+      expect(result.tollFee).toBe(19.9);
+      expect(findCrossedTolls(decodePolyline(polyline))).toHaveLength(2);
+    });
+
+    test('duas praças diferentes contam na mesma janela de passagem', () => {
+      const at = 1792481675018;
+      const merged = mergeTollCrossings(
+        [{ id: 'p10d_transolimpica', amount: 9.95, at }],
+        [{ id: 'p10b_transolimpica', amount: 9.95, at: at + 120000 }]
+      );
+
+      expect(summarizeTollCrossings({ tollCrossingsTracked: true, tollCrossings: merged }).crossedTollFee).toBe(19.9);
+    });
+
+    test('a Ponte cobra só no sentido Região dos Lagos', () => {
+      const toNiteroi = estimateRouteTollsFromPolyline(tollRoutes.ponteTowardNiteroi, { now });
+      const toRio = estimateRouteTollsFromPolyline(tollRoutes.ponteTowardRio, { now });
+
+      expect(toNiteroi.tolls.map((toll) => toll.id)).toEqual(['p08_ponte_rio_niteroi']);
+      expect(toNiteroi.tollFee).toBe(6.6);
+      expect(findCrossedTolls(decodePolyline(tollRoutes.ponteTowardNiteroi))).toHaveLength(1);
+      expect(toRio.tollFee).toBe(0);
+      expect(findCrossedTolls(decodePolyline(tollRoutes.ponteTowardRio))).toEqual([]);
     });
 
     test('todas as praças dentro da área de destino têm posição conferida', () => {
@@ -168,6 +189,11 @@ describe('route-toll-service', () => {
 
       expect(result.tollFee).toBe(0);
       expect(result.tolls.map((toll) => toll.id)).toEqual(['p09_linha_amarela']);
+    });
+
+    test('cota R$ 3,30 na Ponte e R$ 8,00 nas duas praças da Transolímpica', () => {
+      expect(estimateRouteTollsFromPolyline(tollRoutes.ponteTowardNiteroi, { now, vehicleType: 'leaf_moto' }).tollFee).toBe(3.3);
+      expect(estimateRouteTollsFromPolyline(tollRoutes.transolimpicaThroughSouthbound, { now, vehicleType: 'leaf_moto' }).tollFee).toBe(8);
     });
 
     test('carro segue na tarifa de carro', () => {
