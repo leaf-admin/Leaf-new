@@ -47,9 +47,9 @@ describe('ReceiptService financial snapshot', () => {
     const service = createReceiptService();
     const financial = service.calculateFinancialBreakdown({ driver: 'driver_1', finalFare: 85, finalPrice: 85, tollFee: 15, financialSnapshot: { driverIntroFee } });
     expect(financial.totalPaid.amount).toBe(85);
-    expect(financial.breakdown.operationalCost.amount).toBe(0.99);
+    expect(financial.breakdown.operationalCost.amount).toBe(0.31);
     expect(financial.breakdown.wooviFee.amount).toBe(0.68);
-    expect(financial.breakdown.driverAmount.amount).toBe(83.33);
+    expect(financial.breakdown.driverAmount.amount).toBe(84.01);
   });
 
   it('preserves the final backend fee breakdown instead of recalculating it', () => {

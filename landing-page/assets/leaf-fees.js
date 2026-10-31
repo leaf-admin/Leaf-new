@@ -15,16 +15,13 @@
       <form method="dialog"><button class="dialog-close" aria-label="Fechar explicação das taxas" autofocus>×</button></form>
     </div>
     <div class="fees-dialog-content">
-      <section><h3>R$ 0,99 é a taxa da Leaf por corrida.</h3>
-        <p>Esse valor é uma condição promocional de lançamento. O custo do operador do Pix é cobrado separadamente.</p></section>
-      <section><h3>Até R$ 62,50: R$ 1,49 no total.</h3>
-        <p>Para uma corrida de até R$ 62,50, são <strong>R$ 0,99 da Leaf + R$ 0,50 do operador do Pix</strong>.</p></section>
-      <section><h3>Acima de R$ 62,50, o Pix acompanha o valor.</h3>
-        <p>O operador cobra <strong>0,8% do valor da transação, com mínimo de R$ 0,50</strong>. Por isso, acima de R$ 62,50 o cálculo percentual supera esse mínimo. O valor é apresentado em centavos.</p>
-        <p>A taxa da Leaf continua em R$ 0,99 por corrida durante a promoção.</p></section>
+      <section><h3>R$ 0,99 por corrida, com o Pix incluso.</h3>
+        <p>Nas 25 primeiras corridas concluídas no destino, esse é o total que você paga, para qualquer valor de corrida. É uma condição promocional e pode ser alterada.</p></section>
+      <section><h3>Depois da promoção, o Pix é cobrado à parte.</h3>
+        <p>Vale a tabela regular da Leaf, mais o custo do operador do Pix: <strong>0,8% do valor da transação, com mínimo de R$ 0,50</strong>.</p></section>
       <div class="fee-example"><p>Exemplo: corrida de <strong>R$ 100,00</strong></p>
-        <dl><div><dt>Taxa Leaf</dt><dd>R$ 0,99</dd></div><div><dt>Operador do Pix</dt><dd>R$ 0,80</dd></div><div><dt>Total das taxas</dt><dd>R$ 1,79</dd></div><div><dt>Repasse estimado</dt><dd>R$ 98,21</dd></div></dl></div>
-      <p class="fees-small-print">O operador do Pix é responsável por processar o pagamento digital. Esse custo é separado da taxa da Leaf. Os exemplos não incluem pedágios ou outros repasses.</p>
+        <dl><div><dt>Taxa na promoção</dt><dd>R$ 0,99</dd></div><div><dt>Repasse na promoção</dt><dd>R$ 99,01</dd></div><div><dt>Taxas na tabela regular</dt><dd>R$ 3,80</dd></div><div><dt>Repasse na tabela regular</dt><dd>R$ 96,20</dd></div></dl></div>
+      <p class="fees-small-print">O operador do Pix é responsável por processar o pagamento digital. Os exemplos não incluem pedágios ou outros repasses.</p>
       <a class="fees-detail-link" href="/taxas">Ver todos os detalhes e as faixas regulares →</a>
     </div>`;
   document.body.append(dialog);

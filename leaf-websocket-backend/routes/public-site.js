@@ -64,6 +64,8 @@ function validName(name) {
   return name.length >= 3 && !/[<>]/.test(name);
 }
 
+const regionGoalsEnabled = () => process.env.PUBLIC_REGION_GOALS_ENABLED === 'true';
+
 let siteDataCache = { expiresAt: 0, payload: null };
 
 function publishedNumbers(snapshot) {
@@ -84,8 +86,9 @@ router.get('/api/public/site-data', async (_req, res) => {
         expiresAt: Date.now() + SITE_DATA_TTL_MS,
         payload: {
           success: true,
-          goals: REGION_GOALS,
-          regions: regions.exists ? regions.data() : {},
+          // Metas e contagem por região só aparecem no site com a flag ligada. Os pedidos seguem gravados.
+          goals: regionGoalsEnabled() ? REGION_GOALS : null,
+          regions: regionGoalsEnabled() && regions.exists ? regions.data() : {},
           numbers: publishedNumbers(numbers)
         }
       };

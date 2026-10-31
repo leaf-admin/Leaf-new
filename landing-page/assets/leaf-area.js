@@ -2,7 +2,6 @@
   "use strict";
 
   var SVG_NS = "http://www.w3.org/2000/svg";
-  var FALLBACK_GOALS = { drivers: 10, passengers: 100 };
 
   function element(tag, attrs, text) {
     var node = document.createElement(tag);
@@ -84,7 +83,7 @@
     var mapHost = card.querySelector("[data-area-map]");
     var select = card.querySelector("[data-area-select]");
     var detail = card.querySelector("[data-area-detail]");
-    var state = { goals: FALLBACK_GOALS, counts: {}, byKey: {}, paths: {}, selected: null };
+    var state = { goals: null, counts: {}, byKey: {}, paths: {}, selected: null };
 
     function showRegion(key) {
       var region = state.byKey[key];
@@ -103,10 +102,12 @@
       var counts = state.counts[key] || {};
       var drivers = Number(counts.drivers) || 0;
       var passengers = Number(counts.passengers) || 0;
-      var driversDone = drivers >= state.goals.drivers;
+      var driversDone = Boolean(state.goals) && drivers >= state.goals.drivers;
       detail.appendChild(element("p", {}, "A Leaf ainda não chegou aqui. Peça para a gente vir."));
-      detail.appendChild(goalBlock("1. Motoristas", drivers, state.goals.drivers, driversDone ? "Meta de motoristas atingida." : "Primeiro reunimos quem vai dirigir."));
-      detail.appendChild(goalBlock("2. Passageiros", passengers, state.goals.passengers, driversDone ? "Agora é a vez de quem vai viajar." : "Passageiros já podem deixar o pedido."));
+      if (state.goals) {
+        detail.appendChild(goalBlock("1. Motoristas", drivers, state.goals.drivers, driversDone ? "Meta de motoristas atingida." : "Primeiro reunimos quem vai dirigir."));
+        detail.appendChild(goalBlock("2. Passageiros", passengers, state.goals.passengers, driversDone ? "Agora é a vez de quem vai viajar." : "Passageiros já podem deixar o pedido."));
+      }
       detail.appendChild(regionForm(region, driversDone, apiBase, function (role) {
         var field = role === "driver" ? "drivers" : "passengers";
         state.counts[key] = state.counts[key] || {};
@@ -171,7 +172,7 @@
       .then(function (response) { return response.ok ? response.json() : null; })
       .then(function (data) {
         if (!data) return;
-        state.goals = data.goals || FALLBACK_GOALS;
+        state.goals = data.goals || null;
         state.counts = data.regions || {};
         showNumbers(data.numbers);
         if (state.selected) showRegion(state.selected);
