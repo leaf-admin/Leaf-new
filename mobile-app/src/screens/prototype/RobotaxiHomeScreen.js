@@ -4953,10 +4953,13 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     () => measureRouteLengthMeters(activeRouteCoordinates),
     [activeRouteCoordinates],
   );
+  // Once the driver marks the arrival the approach leg is behind them, however
+  // long it still measures.
   const driverShowsTripAhead = Boolean(
     isDriverRole &&
-      ['accepted', 'arrived'].includes(normalizedBookingStatus) &&
-      (activeRouteCoordinates.length < 2 || driverApproachLegMeters < DRIVER_AT_PICKUP_ROUTE_METERS) &&
+      (normalizedBookingStatus === 'arrived' ||
+        (normalizedBookingStatus === 'accepted' &&
+          (activeRouteCoordinates.length < 2 || driverApproachLegMeters < DRIVER_AT_PICKUP_ROUTE_METERS))) &&
       driverTripAheadCoordinates.length >= 2,
   );
   const basePresentedRouteCoordinates = driverOfferPreviewActive
