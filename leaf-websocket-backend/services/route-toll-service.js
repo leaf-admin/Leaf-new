@@ -11,28 +11,32 @@ const DEFAULT_CROSSING_TOLERANCE_KM = Math.max(
   Number.parseFloat(process.env.TOLL_CROSSING_TOLERANCE_KM || '0.25') || 0.25
 );
 
+// `positionVerified`: posição conferida com as cabines no OpenStreetMap
+// (2026-10-31). Nessas praças a cotação usa a tolerância de travessia, para não
+// cobrar quem só passa perto e para cotar com a mesma conta do encerramento. As
+// demais ficam fora da área de operação e seguem na tolerância geral.
+// `fees.motorcycle`: ViaRio pela tabela oficial de 03/05/2026; P09 isenta e P08
+// conforme OpenStreetMap. Sem essa tabela, a moto recebe a tarifa de carro.
 const TOLL_PLAZAS = Object.freeze([
   { id: 'p01_casimiro_de_abreu', name: 'P01 - Casimiro de Abreu', road: 'BR-101', direction: 'bidirectional', lat: -22.476441, lng: -42.088519, fees: { car: { weekday: 7.1, weekend: 7.1 }, truck: { weekday: 14.2, weekend: 14.2 } } },
   { id: 'p02_conselheiro_josino', name: 'P02 - Conselheiro Josino', road: 'BR-101', direction: 'bidirectional', lat: -21.552594, lng: -41.331597, fees: { car: { weekday: 7.1, weekend: 7.1 }, truck: { weekday: 14.2, weekend: 14.2 } } },
   { id: 'p03_rio_bonito', name: 'P03 - Rio Bonito', road: 'BR-101', direction: 'bidirectional', lat: -22.687469, lng: -42.539855, fees: { car: { weekday: 7.1, weekend: 7.1 }, truck: { weekday: 14.2, weekend: 14.2 } } },
   { id: 'p04_sao_goncalo', name: 'P04 - Sao Goncalo', road: 'BR-101', direction: 'north', lat: -22.774713, lng: -42.9455, fees: { car: { weekday: 7.1, weekend: 7.1 }, truck: { weekday: 14.2, weekend: 14.2 } } },
   { id: 'p05_serrinha', name: 'P05 - Serrinha', road: 'BR-101', direction: 'bidirectional', lat: -22.04975, lng: -41.685157, fees: { car: { weekday: 7.1, weekend: 7.1 }, truck: { weekday: 14.2, weekend: 14.2 } } },
-  { id: 'p06_viuva_graca', name: 'P06 - Viuva Graca', road: 'BR-116', direction: 'bidirectional', twinGroup: 'p06_viuva_graca', lat: -22.752, lng: -43.5, fees: { car: { weekday: 16.4, weekend: 16.4 }, truck: { weekday: 32.8, weekend: 32.8 } } },
-  { id: 'p07_viuva_graca_b', name: 'P07 - Viuva Graca B', road: 'BR-116', direction: 'bidirectional', twinGroup: 'p06_viuva_graca', lat: -22.753, lng: -43.501, fees: { car: { weekday: 16.4, weekend: 16.4 }, truck: { weekday: 32.8, weekend: 32.8 } } },
-  { id: 'p08_ponte_rio_niteroi', name: 'P08 - Ponte Rio-Niteroi', road: 'BR-101', direction: 'bidirectional', lat: -22.895, lng: -43.12, fees: { car: { weekday: 6.2, weekend: 6.2 }, truck: { weekday: 12.4, weekend: 12.4 } } },
-  { id: 'p09_linha_amarela', name: 'P09 - Linha Amarela', road: 'RJ-065', direction: 'bidirectional', lat: -22.87, lng: -43.3, fees: { car: { weekday: 4, weekend: 4 }, truck: { weekday: 8, weekend: 8 } } },
-  { id: 'p11_transoeste', name: 'P11 - Transoeste', road: 'RJ-070', direction: 'bidirectional', lat: -22.89, lng: -43.5, fees: { car: { weekday: 4.7, weekend: 4.7 }, truck: { weekday: 9.4, weekend: 9.4 } } },
-  { id: 'p12_transbrasiliana', name: 'P12 - Transbrasiliana', road: 'RJ-071', direction: 'bidirectional', lat: -22.9, lng: -43.6, fees: { car: { weekday: 4.7, weekend: 4.7 }, truck: { weekday: 9.4, weekend: 9.4 } } },
-  { id: 'p13_transcarioca', name: 'P13 - Transcarioca', road: 'RJ-072', direction: 'bidirectional', lat: -22.91, lng: -43.7, fees: { car: { weekday: 4.7, weekend: 4.7 }, truck: { weekday: 9.4, weekend: 9.4 } } },
-  { id: 'p14_transoeste', name: 'P14 - Transoeste', road: 'RJ-073', direction: 'bidirectional', lat: -22.92, lng: -43.8, fees: { car: { weekday: 4.7, weekend: 4.7 }, truck: { weekday: 9.4, weekend: 9.4 } } },
+  { id: 'p06_viuva_graca', name: 'P06 - Viuva Graca', road: 'BR-116', direction: 'bidirectional', twinGroup: 'p06_viuva_graca', positionVerified: true, lat: -22.7150807, lng: -43.7313205, fees: { car: { weekday: 16.4, weekend: 16.4 }, truck: { weekday: 32.8, weekend: 32.8 } } },
+  { id: 'p07_viuva_graca_b', name: 'P07 - Viuva Graca B', road: 'BR-116', direction: 'bidirectional', twinGroup: 'p06_viuva_graca', positionVerified: true, lat: -22.7151381, lng: -43.730208, fees: { car: { weekday: 16.4, weekend: 16.4 }, truck: { weekday: 32.8, weekend: 32.8 } } },
+  { id: 'p08_ponte_rio_niteroi', name: 'P08 - Ponte Rio-Niteroi', road: 'BR-101', direction: 'southeast', positionVerified: true, lat: -22.8779216, lng: -43.1157367, fees: { motorcycle: { weekday: 3.3, weekend: 3.3 }, car: { weekday: 6.6, weekend: 6.6 }, truck: { weekday: 13.2, weekend: 13.2 } } },
+  { id: 'p09_linha_amarela', name: 'P09 - Linha Amarela', road: 'RJ-065', direction: 'bidirectional', positionVerified: true, lat: -22.9073168, lng: -43.3089095, fees: { motorcycle: { weekday: 0, weekend: 0 }, car: { weekday: 4, weekend: 4 }, truck: { weekday: 8, weekend: 8 } } },
   { id: 'p15_mangaratiba', name: 'P15 - Mangaratiba', road: 'BR-101', direction: 'bidirectional', lat: -22.959, lng: -44.04, fees: { car: { weekday: 4.7, weekend: 7.9 }, truck: { weekday: 9.4, weekend: 15.8 } } },
   { id: 'p16_paraty', name: 'P16 - Paraty', road: 'BR-101', direction: 'bidirectional', lat: -23.22, lng: -44.72, fees: { car: { weekday: 4.7, weekend: 7.9 }, truck: { weekday: 9.4, weekend: 15.8 } } },
   { id: 'p17_mage', name: 'P17 - Mage', road: 'BR-116', direction: 'bidirectional', lat: -22.663, lng: -43.031, fees: { car: { weekday: 19.3, weekend: 19.3 }, truck: { weekday: 38.6, weekend: 38.6 } } },
   { id: 'p18_sapucaia', name: 'P18 - Sapucaia', road: 'RJ-116', direction: 'bidirectional', lat: -21.994, lng: -42.914, fees: { car: { weekday: 6.5, weekend: 6.5 }, truck: { weekday: 13, weekend: 13 } } },
   { id: 'p19_paraiba_do_sul', name: 'P19 - Paraiba do Sul', road: 'RJ-116', direction: 'bidirectional', lat: -22.158, lng: -43.29, fees: { car: { weekday: 6.5, weekend: 6.5 }, truck: { weekday: 13, weekend: 13 } } },
   { id: 'p20_barra_do_pirai', name: 'P20 - Barra do Pirai', road: 'RJ-116', direction: 'bidirectional', lat: -22.471, lng: -43.826, fees: { car: { weekday: 6.5, weekend: 6.5 }, truck: { weekday: 13, weekend: 13 } } },
-  { id: 'p10a_transolimpica', name: 'P10a - Transolimpica', road: 'RJ-066', direction: 'north', twinGroup: 'p10_transolimpica', lat: -22.9194989223804, lng: -43.3962833, fees: { car: { weekday: 9.95, weekend: 9.95 }, truck: { weekday: 19.9, weekend: 19.9 } } },
-  { id: 'p10b_transolimpica', name: 'P10b - Transolimpica', road: 'RJ-066', direction: 'south', twinGroup: 'p10_transolimpica', lat: -22.9193061842793, lng: -43.3967711, fees: { car: { weekday: 9.95, weekend: 9.95 }, truck: { weekday: 19.9, weekend: 19.9 } } }
+  { id: 'p10a_transolimpica', name: 'P10a - Transolimpica', road: 'RJ-066', direction: 'north', twinGroup: 'p10_transolimpica', positionVerified: true, lat: -22.9194989223804, lng: -43.3962833, fees: { motorcycle: { weekday: 4, weekend: 4 }, car: { weekday: 9.95, weekend: 9.95 }, truck: { weekday: 19.9, weekend: 19.9 } } },
+  { id: 'p10b_transolimpica', name: 'P10b - Transolimpica', road: 'RJ-066', direction: 'south', twinGroup: 'p10_transolimpica', positionVerified: true, lat: -22.9193061842793, lng: -43.3967711, fees: { motorcycle: { weekday: 4, weekend: 4 }, car: { weekday: 9.95, weekend: 9.95 }, truck: { weekday: 19.9, weekend: 19.9 } } },
+  { id: 'p10c_transolimpica', name: 'P10c - Transolimpica Rio Grande', road: 'RJ-066', direction: 'north', twinGroup: 'p10_rio_grande', positionVerified: true, lat: -22.8957976, lng: -43.3989547, fees: { motorcycle: { weekday: 4, weekend: 4 }, car: { weekday: 9.95, weekend: 9.95 }, truck: { weekday: 19.9, weekend: 19.9 } } },
+  { id: 'p10d_transolimpica', name: 'P10d - Transolimpica Rio Grande', road: 'RJ-066', direction: 'south', twinGroup: 'p10_rio_grande', positionVerified: true, lat: -22.8960031, lng: -43.3994978, fees: { motorcycle: { weekday: 4, weekend: 4 }, car: { weekday: 9.95, weekend: 9.95 }, truck: { weekday: 19.9, weekend: 19.9 } } }
 ]);
 
 function toRad(value) {
@@ -145,28 +149,50 @@ function bearingToDirection(bearing) {
   return 'west';
 }
 
+// A Ponte cobra só no sentido Região dos Lagos. Ali a via aponta para ~126°, perto
+// do limite entre leste e sul, então esse sentido cobre os dois quadrantes.
+function headingMatches(direction, bearing) {
+  if (direction === 'southeast') {
+    return bearing >= 45 && bearing < 225;
+  }
+  return bearingToDirection(bearing) === direction;
+}
+
 function directionMatches(toll, routeCoordinates, nearestSegmentIndex, minSegmentKm = 0) {
   if (!toll.direction || toll.direction === 'bidirectional') {
     return true;
   }
 
-  const start = routeCoordinates[nearestSegmentIndex];
-  const end = routeCoordinates[nearestSegmentIndex + 1];
-  if (!start || !end) {
+  let startIndex = nearestSegmentIndex;
+  let endIndex = nearestSegmentIndex + 1;
+  if (!routeCoordinates[startIndex] || !routeCoordinates[endIndex]) {
     return false;
   }
+  // Numa sequência densa o trecho mais próximo pode ter poucos metros: os pontos
+  // vizinhos completam a extensão mínima para ler o sentido.
+  while (
+    minSegmentKm > 0 &&
+    distanceToSegmentKm(routeCoordinates[startIndex], routeCoordinates[endIndex], routeCoordinates[endIndex]) < minSegmentKm &&
+    (startIndex > 0 || endIndex < routeCoordinates.length - 1)
+  ) {
+    startIndex = Math.max(0, startIndex - 1);
+    endIndex = Math.min(routeCoordinates.length - 1, endIndex + 1);
+  }
+  const start = routeCoordinates[startIndex];
+  const end = routeCoordinates[endIndex];
   // Poucos metros de oscilação do GPS, ou um ponto que chegou fora de ordem,
   // apontam para qualquer lado: não dizem em que sentido o carro passou.
   if (minSegmentKm > 0 && distanceToSegmentKm(start, end, end) < minSegmentKm) {
     return false;
   }
 
-  return bearingToDirection(bearingDegrees(start, end)) === toll.direction;
+  return headingMatches(toll.direction, bearingDegrees(start, end));
 }
 
 function normalizeVehicleTollClass(value) {
   const normalized = String(value || '').toLowerCase().trim();
-  return normalized.includes('truck') || normalized.includes('caminhao') ? 'truck' : 'car';
+  if (normalized.includes('truck') || normalized.includes('caminhao')) return 'truck';
+  return normalized.includes('moto') ? 'motorcycle' : 'car';
 }
 
 function getTollFeeForDate(toll, vehicleClass, now = new Date()) {
@@ -207,8 +233,11 @@ function findRouteTolls(routeCoordinates = [], options = {}) {
       }
     }
 
+    const plazaToleranceKm = toll.positionVerified
+      ? Math.min(toleranceKm, DEFAULT_CROSSING_TOLERANCE_KM)
+      : toleranceKm;
     if (
-      nearestDistanceKm <= toleranceKm &&
+      nearestDistanceKm <= plazaToleranceKm &&
       directionMatches(toll, coordinates, nearestSegmentIndex, Number(options.minDirectionSegmentKm) || 0)
     ) {
       foundIds.add(toll.id);
@@ -310,6 +339,7 @@ function estimateRouteTollsFromCoordinates(routeCoordinates = [], options = {}) 
     tolls,
     tollCount: tolls.length,
     source: 'leaf_toll_catalog',
+    routeChecked: routeCoordinates.length >= 2,
     toleranceKm: Math.max(0.1, Number(options.toleranceKm) || DEFAULT_TOLERANCE_KM)
   };
 }
@@ -358,7 +388,9 @@ function resolveTollFeeFromPricingPayload(payload = {}) {
     vehicleType: payload.vehicleTollClass || payload.tollVehicleType || 'car'
   });
 
-  if (tollEstimate.tollFee > 0) {
+  // Com geometria, o catálogo decide: um tollFee guardado na rota pode ser de
+  // uma conta anterior.
+  if (tollEstimate.tollFee > 0 || tollEstimate.routeChecked) {
     return tollEstimate;
   }
 
