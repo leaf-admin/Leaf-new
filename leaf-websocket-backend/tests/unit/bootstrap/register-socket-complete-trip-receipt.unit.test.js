@@ -279,10 +279,10 @@ describe('register-socket-complete-trip-handler receipt generation', () => {
       executedDurationSecs: 600
     };
 
-    async function runCompleteTrip({ commandData, payload = {} }) {
+    async function runCompleteTrip({ commandData, payload = {}, bookingOverrides = {} }) {
       const socket = createSocket();
       const redis = {
-        hgetall: jest.fn(async (key) => (key === 'booking:booking_1' ? { ...bookingHash } : {})),
+        hgetall: jest.fn(async (key) => (key === 'booking:booking_1' ? { ...bookingHash, ...bookingOverrides } : {})),
         hset: jest.fn().mockResolvedValue(1)
       };
       const idempotencyService = {
@@ -366,6 +366,7 @@ describe('register-socket-complete-trip-handler receipt generation', () => {
     it('sends the settled values and the same settlement shape to both apps', async () => {
       const earlyEnd = { detected: true, remainingMeters: 4040, thresholdMeters: 500, driverReason: 'passenger_request' };
       const { CompleteTripCommand, redis, driverPayload, passengerPayload } = await runCompleteTrip({
+        bookingOverrides: { startedAt: new Date(Date.now() - 480000).toISOString() },
         payload: { earlyEnd: { reason: 'passenger_request', remainingMeters: 4000 } },
         commandData: {
           endLocation: { lat: -22.95175, lng: -43.38515 },
@@ -420,6 +421,11 @@ describe('register-socket-complete-trip-handler receipt generation', () => {
           status: 'COMPLETED'
         })
       );
+
+      for (const tripPayload of [driverPayload, passengerPayload]) {
+        expect(tripPayload.actualDurationSecs).toBeGreaterThanOrEqual(480);
+        expect(tripPayload.actualDurationSecs).toBeLessThan(490);
+      }
     });
 
     it('sends the uncrossed toll refund to both apps and persists it', async () => {

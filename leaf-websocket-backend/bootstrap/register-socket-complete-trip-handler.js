@@ -530,6 +530,11 @@ function registerSocketCompleteTripHandler({
                         : null,
                     persistence: 'accepted_background'
                 });
+                // Tempo real da viagem, para a tela final não repetir a estimativa da rota.
+                const tripStartedAtMs = Date.parse(bookingSnapshot?.startedAt);
+                if (Number.isFinite(tripStartedAtMs) && Date.now() > tripStartedAtMs) {
+                    tripCompletedData.actualDurationSecs = Math.round((Date.now() - tripStartedAtMs) / 1000);
+                }
                 // Pedágio contratado não cruzado devolvido ao passageiro (recibo mostra
                 // valor pago, reembolso e valor final).
                 const tollAdjustment = result.data?.tollAdjustment || null;
