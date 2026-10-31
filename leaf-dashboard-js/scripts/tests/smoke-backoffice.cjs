@@ -629,6 +629,9 @@ function fixtureForApiPath(apiPath, method) {
       ],
     });
   }
+  if (apiPath === "/waitlist/investor-leads") {
+    return json({ success: true, leads: [] });
+  }
   if (apiPath === "/support/tools/saved-replies") {
     return json({ success: true, replies: [{ shortcut: "pix", message: "Vou conferir seu Pix agora." }] });
   }

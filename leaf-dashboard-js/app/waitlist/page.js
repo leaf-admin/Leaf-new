@@ -35,6 +35,7 @@ export default function WaitlistPage() {
   const [drivers, setDrivers] = useState([]);
   const [landingLeads, setLandingLeads] = useState([]);
   const [landingStats, setLandingStats] = useState(null);
+  const [investorLeads, setInvestorLeads] = useState([]);
   const [stats, setStats] = useState(null);
   const [pagination, setPagination] = useState(null);
   const [runtimeFlags, setRuntimeFlags] = useState(null);
@@ -96,6 +97,8 @@ export default function WaitlistPage() {
       setDrivers(listData?.drivers || []);
       setLandingLeads(landingData?.waitlist || []);
       setLandingStats(landingData?.stats || null);
+      const investorData = await leafAPI.getInvestorLeads().catch(() => null);
+      setInvestorLeads(investorData?.leads || []);
       setPagination(listData?.pagination || null);
       setStats(statsData);
     } catch (err) {
@@ -433,6 +436,36 @@ export default function WaitlistPage() {
                 </tbody>
               </table>
             </div>
+          </Panel>
+          <Panel title="Investidores" subtitle="Contatos deixados na página de investidores do site.">
+            {investorLeads.length === 0 ? (
+              <p>Nenhum contato de investidor.</p>
+            ) : (
+              <div className="table-shell">
+                <table className="table table-compact">
+                  <thead>
+                    <tr>
+                      <th>Data</th>
+                      <th>Nome</th>
+                      <th>E-mail</th>
+                      <th>Empresa</th>
+                      <th>Mensagem</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {investorLeads.map((lead) => (
+                      <tr key={lead.id}>
+                        <td>{new Date(lead.createdAt).toLocaleDateString("pt-BR")}</td>
+                        <td>{lead.nome}</td>
+                        <td>{lead.email}</td>
+                        <td>{lead.empresa || "-"}</td>
+                        <td>{lead.mensagem || "-"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </Panel>
         </section>
         {notice ? <p className="success-text">{notice}</p> : null}
