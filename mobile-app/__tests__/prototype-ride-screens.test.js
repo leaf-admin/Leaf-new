@@ -4548,6 +4548,30 @@ describe('prototype ride screens', () => {
     });
   });
 
+  it('shows the Pix amount paid on the search card even when the quote changed afterwards', () => {
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        bookingStatus: 'searching',
+        searchingElapsedSeconds: 12,
+        selectedFare: 23.9,
+        selectedVehicle: 'Leaf Plus',
+        selectedDestination: { name: 'Botafogo Praia Shopping' },
+        currentAddress: 'R. Prudente de Morais, 123',
+        activeBooking: { estimatedFare: 23.9, paymentAmount: 24.46 },
+        cancelRideSearch: jest.fn(),
+        lastError: '',
+      })
+    );
+
+    const navigation = { navigate: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
+    const { getAllByText, queryByText } = render(
+      <RobotaxiDriverSearchScreen navigation={navigation} route={{ params: { selectedFare: 23.9 } }} />
+    );
+
+    expect(getAllByText('R$ 24,46').length).toBeGreaterThan(0);
+    expect(queryByText('R$ 23,90')).toBeNull();
+  });
+
   it('renders the passenger search card with time progress, rotating status and route summary', () => {
     usePrototypeRideRuntime.mockReturnValue(
       buildPassengerRuntime({

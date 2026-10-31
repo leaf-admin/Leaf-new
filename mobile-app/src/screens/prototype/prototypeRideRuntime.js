@@ -15581,6 +15581,7 @@ async function requestPrototypeRide(profile, payload) {
       bookingId: runtimeState.activeBookingId || null,
       status: "REQUESTING",
       estimatedFare: Number.isFinite(fare) ? fare : 0,
+      paymentAmount: paymentAmountInCents / 100,
       ...(routeDistanceKm !== null ? { routeDistanceKm } : {}),
       ...(routeDurationSecs !== null
         ? { routeDurationSecs: Math.max(60, Math.round(routeDurationSecs)) }

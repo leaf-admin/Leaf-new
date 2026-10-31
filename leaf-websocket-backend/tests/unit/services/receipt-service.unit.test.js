@@ -144,7 +144,7 @@ describe('ReceiptService financial snapshot', () => {
     expect(receipt.financial.totals.tollPassThrough).toBeCloseTo(15, 2);
   });
 
-  it('keeps receipt distance in kilometers and route duration in minutes', async () => {
+  it('keeps receipt distance in kilometers and real trip duration in minutes', async () => {
     const service = createReceiptService();
 
     const receipt = await service.generateReceipt('ride_backend_route_metrics', {
@@ -162,9 +162,22 @@ describe('ReceiptService financial snapshot', () => {
       formatted: '27.10 km',
       unit: 'km',
     });
-    expect(receipt.trip.duration).toBe(33);
-    expect(receipt.trip.durationFormatted).toBe('33min');
+    expect(receipt.trip.duration).toBe(20);
+    expect(receipt.trip.durationFormatted).toBe('20min');
     expect(receipt.payment.method).toBe('PIX');
+  });
+
+  it('uses the route estimate only when the ride has no real start time', async () => {
+    const service = createReceiptService();
+    const { tripStartTime, ...rideWithoutStart } = finalRideData;
+
+    const receipt = await service.generateReceipt('ride_without_start_time', {
+      ...rideWithoutStart,
+      routeDurationSecs: 1980,
+      payment_mode: 'pix',
+    });
+
+    expect(receipt.trip.duration).toBe(33);
   });
 
   it('rejects receipt generation without a backend final source', async () => {
