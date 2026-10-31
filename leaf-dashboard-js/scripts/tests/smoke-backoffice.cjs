@@ -629,6 +629,43 @@ function fixtureForApiPath(apiPath, method) {
       ],
     });
   }
+  if (apiPath === "/support/tools/saved-replies") {
+    return json({ success: true, replies: [{ shortcut: "pix", message: "Vou conferir seu Pix agora." }] });
+  }
+  if (apiPath.startsWith("/support/tools/chat-notes/")) {
+    if (method === "POST") {
+      return json({
+        success: true,
+        note: {
+          id: "note-smoke-1",
+          message: "Nota simulada",
+          senderType: "agent",
+          isInternal: true,
+          authorName: "Leaf Smoke Admin",
+          createdAt: new Date().toISOString(),
+        },
+      });
+    }
+    return json({ success: true, notes: [] });
+  }
+  if (apiPath.startsWith("/support/tools/rides/")) {
+    return json({
+      success: true,
+      ride: {
+        id: "booking-smoke-1",
+        status: "IN_PROGRESS",
+        statusLabel: "em andamento",
+        grossAmount: 32.5,
+        pickupAddress: "Rua da Origem",
+        destinationAddress: "Rua do Destino",
+        paymentStatus: "paid",
+        passengerId: "user-smoke",
+        passengerName: "Passageiro Smoke",
+        driverId: "driver-smoke",
+        driverName: "Motorista Smoke",
+      },
+    });
+  }
   if (apiPath.includes("/support/chat/") && apiPath.endsWith("/history")) {
     return json({
       success: true,
@@ -812,6 +849,7 @@ async function installRoutes(context, observed) {
       }
       if (apiPath.startsWith("/support/chat/whatsapp:") && apiPath.endsWith("/message")) {
         observed.whatsappRequestId = request.headers()["idempotency-key"] || "";
+        observed.whatsappSends = (observed.whatsappSends || 0) + 1;
       }
       await route.fulfill(fixtureForApiPath(apiPath, request.method()));
       return;
@@ -969,6 +1007,20 @@ async function assertWhatsAppSupportContract(page, observed) {
   if (!await conversation.getByRole('button', { name: 'Virar chamado', exact: true }).isDisabled()) {
     throw new Error('Unverified WhatsApp contact must not be converted automatically');
   }
+  await conversation.locator('textarea').fill('/pi');
+  await conversation.locator('.support-slash-menu').getByText('/pix').waitFor();
+  await conversation.locator('textarea').press('Enter');
+  if (await conversation.locator('textarea').inputValue() !== 'Vou conferir seu Pix agora.') {
+    throw new Error('Slash menu must insert the saved reply');
+  }
+  await conversation.getByRole('button', { name: 'Nota interna', exact: true }).click();
+  await conversation.locator('textarea').fill('Nota simulada');
+  await conversation.getByRole('button', { name: 'Salvar nota', exact: true }).click();
+  await conversation.locator('.support-bubble-note', { hasText: 'Nota simulada' }).waitFor();
+  if (observed.whatsappSends) {
+    throw new Error('Internal note must never go through the WhatsApp send route');
+  }
+  await conversation.getByRole('button', { name: 'Responder', exact: true }).click();
   await conversation.locator('textarea').fill('Resposta simulada do suporte');
   await conversation.getByRole('button', { name: 'Enviar', exact: true }).click();
   await page.getByText('Mensagem aceita pela Meta. Acompanhe o status de entrega.', { exact: true }).first().waitFor();
@@ -982,6 +1034,23 @@ async function assertWhatsAppSupportContract(page, observed) {
     throw new Error('Expired WhatsApp reply window must disable the composer');
   }
   log('WhatsApp fixture: external identity, idempotency and expired window validated');
+}
+
+async function assertSupportAgentTools(page) {
+  await page.locator("[data-testid='support-ride-card']", { hasText: "Motorista: Motorista Smoke" }).waitFor({ timeout: 15000 });
+  const inbox = page.locator(".support-inbox-panel");
+  await inbox.getByRole("button", { name: /^Atrasadas/ }).click();
+  await inbox.getByRole("button", { name: /^Sem dono/ }).click();
+  await page.locator(".support-thread-row").first().waitFor();
+  await inbox.getByRole("button", { name: /^Todas/ }).click();
+  const before = await page.locator(".support-conversation-head h2").textContent();
+  await page.locator("h1", { hasText: "Suporte" }).click();
+  await page.keyboard.press("ArrowDown");
+  await page.waitForFunction(
+    (title) => document.querySelector(".support-conversation-head h2")?.textContent !== title,
+    before,
+  );
+  log("support queues, ride card and keyboard navigation ok");
 }
 
 async function assertSupportDetachedWindow(page) {
@@ -1119,6 +1188,7 @@ async function main() {
         hasText: "payment_account_document_or_stuck_flow_keyword, payment_category_minimum",
       })
       .waitFor({ timeout: 15000 });
+    await assertSupportAgentTools(page);
     await assertWhatsAppSupportContract(page, observed);
     await assertSupportDetachedWindow(page);
     const campaignsLink = page.getByRole("link", { name: "Campanhas" }).first();

@@ -525,3 +525,52 @@ input[type="checkbox"], input[type="radio"] {
 .page-shell.support-page-detached > * { max-width: none; }
 .support-page-detached .support-inbox-layout { height: calc(100vh - 102px); }
 .support-page-detached .support-header h1 { font-size: 18px; }
+
+/* ---------- Suporte: filas, nota interna, respostas prontas e corrida ---------- */
+.support-inbox-tabs { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); grid-auto-flow: column; }
+.support-inbox-tabs .mode-btn { padding: 0 6px; font-size: 12.5px; white-space: nowrap; }
+.support-queue-count { margin-left: 4px; font-size: 11px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.support-inbox-filters { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.support-inbox-filters select { font-size: 12px; padding-left: 8px; padding-right: 18px; }
+.support-shortcut-hint { flex: none; margin: 0; padding: 6px 12px; border-top: 1px solid var(--line); font-size: 11px; color: var(--text-muted); }
+
+.support-ride-card {
+  flex: none; display: grid; gap: 2px; padding: 7px 14px; border-bottom: 1px solid var(--line);
+  background: var(--accent-soft); font-size: 12.5px;
+}
+.support-ride-main { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+.support-ride-main span { color: var(--text-soft); font-variant-numeric: tabular-nums; }
+.support-ride-card p { margin: 0; color: var(--text-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.support-ride-links { display: flex; flex-wrap: wrap; gap: 2px 14px; }
+.support-ride-links a { color: var(--accent); font-weight: 500; }
+
+.support-bubble-note {
+  align-self: center; width: min(92%, 620px); max-width: none; background: #fdf3df; border: 1px dashed #e2c37a; box-shadow: none;
+}
+.support-bubble-note-label { font-size: 11px; font-weight: 600; color: #7a5200; }
+
+.support-composer { position: relative; grid-template-columns: minmax(0, 1fr) auto; }
+.support-composer-note { background: #fdf3df; }
+.support-composer-note textarea { background: #fffaf0; border-color: #e2c37a; }
+.support-composer-modes { grid-column: 1 / -1; justify-self: start; display: inline-flex; padding: 3px; gap: 2px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); }
+.support-composer-modes button {
+  min-height: 30px; height: 30px; padding: 0 9px; border: 0; border-radius: 7px; box-shadow: none;
+  background: transparent; color: var(--text-muted); font-size: 12px; font-weight: 500; white-space: nowrap;
+}
+.support-composer-modes button:hover { background: var(--bg-soft); color: var(--text); }
+.support-composer-modes button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
+.support-composer-note .support-composer-modes button[aria-pressed="true"] { background: #fdf3df; color: #7a5200; }
+.support-slash-menu {
+  position: absolute; left: 14px; right: 14px; bottom: calc(100% - 4px); z-index: 5; display: grid; gap: 1px; padding: 4px;
+  background: var(--surface); border: 1px solid var(--line-strong); border-radius: 10px; box-shadow: var(--shadow-pop);
+}
+.support-slash-menu button {
+  display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 8px; align-items: center; min-height: 32px; padding: 4px 8px;
+  background: transparent; color: var(--text); border: 0; border-radius: 7px; box-shadow: none; text-align: left; font-size: 12.5px; font-weight: 400;
+}
+.support-slash-menu button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-soft); }
+.support-slash-menu button:hover, .support-slash-active { background: var(--accent-soft) !important; }
+.support-saved-replies { list-style: none; margin: 0 0 6px; padding: 0; display: grid; gap: 4px; }
+.support-saved-replies li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 6px; align-items: center; font-size: 12px; }
+.support-saved-replies span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-soft); }
+.support-saved-replies button { min-height: 24px; height: 24px; padding: 0 7px; font-size: 11px; }
