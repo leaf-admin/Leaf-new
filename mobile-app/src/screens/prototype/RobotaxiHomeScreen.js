@@ -7380,6 +7380,37 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   }, [effectiveHomePickupCoordinate, homeMapInteractiveReady, homePickupPickerCardHeight,
     insets.bottom, insets.top, windowHeight]);
 
+  // The offer is the first ride state: same car position, whole ride on screen.
+  const driverOfferCameraKeyRef = useRef('');
+  useEffect(() => {
+    if (!driverOfferPreviewActive) {
+      driverOfferCameraKeyRef.current = '';
+      return;
+    }
+    const offerCameraKey = [
+      driverLiveOfferInstance,
+      Math.round((Number(routeViewportOcclusion.bottom) || 0) / 24),
+    ].join('|');
+    if (
+      !homeMapInteractiveReady ||
+      !isScreenFocused ||
+      driverOfferCameraKeyRef.current === offerCameraKey
+    ) {
+      return;
+    }
+    if (focusDriverRideCamera(driverOfferPreviewCoordinates)) {
+      driverOfferCameraKeyRef.current = offerCameraKey;
+    }
+  }, [
+    driverLiveOfferInstance,
+    driverOfferPreviewActive,
+    driverOfferPreviewCoordinates,
+    focusDriverRideCamera,
+    homeMapInteractiveReady,
+    isScreenFocused,
+    routeViewportOcclusion.bottom,
+  ]);
+
   // Waiting at the pickup there is no navigation banner, so neither the
   // follow camera nor the route fit runs. Reopening the app in this state left
   // the map at city scale; frame the car once, above the trip card.
@@ -7395,7 +7426,15 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       return;
     }
     const coordinate = activeDriverNavigationCoordinate;
-    const bookingKey = String(activeBookingId || 'ride');
+    // The trip route and the card settle after the arrival, so the frame
+    // follows them instead of staying on the approach leg.
+    const tripRoute = (presentedRouteCoordinates.length > 1 ? presentedRouteCoordinates : activeRoute?.coordinates || [])
+      .filter(isFiniteCoordinate);
+    const bookingKey = [
+      activeBookingId || 'ride',
+      tripRoute.length,
+      Math.round((Number(routeViewportOcclusion.bottom) || 0) / 24),
+    ].join('|');
     if (
       !mapRef.current ||
       !homeMapInteractiveReady ||
@@ -7408,8 +7447,6 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     // At the pickup the whole trip to the destination is what matters next:
     // frame car plus route, like the quote does (Izaak, 2026-10-29).
     // The route drawn at the pickup is the trip ahead (pickup to destination).
-    const tripRoute = (presentedRouteCoordinates.length > 1 ? presentedRouteCoordinates : activeRoute?.coordinates || [])
-      .filter(isFiniteCoordinate);
     if (tripRoute.length > 1) {
       driverWaitingCameraKeyRef.current = bookingKey;
       focusRoute({ ...activeRoute, coordinates: [coordinate, ...tripRoute] }, true);
@@ -10205,8 +10242,9 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
           destinationMarkerLetter={passengerMarkerLetter}
           viewportPadding={homeRouteViewportPadding}
           routeViewportRegion={homeRouteViewportRegion}
+          routeViewportCameraManaged={driverRideOwnsCamera}
           forceRegionUpdate={Boolean(
-            ((hasActiveRoute || hasPresentedRoute) && !driverNavigationCameraOwnsMap) && !driverAwaitingNavigationCamera && isScreenFocused ||
+            ((hasActiveRoute || hasPresentedRoute) && !driverNavigationCameraOwnsMap && !driverOfferPreviewActive) && !driverAwaitingNavigationCamera && isScreenFocused ||
               shouldForceHomePickupRegionUpdate ||
               cancellationOverlayFramesRoute
           )}
