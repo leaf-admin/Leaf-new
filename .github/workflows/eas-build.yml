@@ -118,6 +118,9 @@ jobs:
           AUTH_OTP_PROVIDER: firebase
         run: npm run config:validate
 
+      - name: Check syntax of every backend script
+        run: npm run check:syntax
+
       - name: Validate versioned pilot geofence matrix
         run: npm run qa:geofence-pilot
 

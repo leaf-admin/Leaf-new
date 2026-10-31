@@ -10,6 +10,7 @@
     "start": "node server.js",
     "dev": "nodemon server.js",
     "worker:queue": "node workers/queue-worker-process.js",
+    "check:syntax": "node scripts/tests/check-js-syntax.cjs",
     "test": "node ../scripts/tests/run-with-profile.cjs backend-test \"npx jest --config config/jest.unit.config.js && npx jest --config config/jest.integration.config.js\"",
     "test:all": "node ../scripts/tests/run-with-profile.cjs backend-all \"npx jest --config config/jest.unit.config.js && npx jest --config config/jest.integration.config.js && npx jest --config config/jest.config.js\"",
     "test:unit": "node ../scripts/tests/run-with-profile.cjs backend-unit \"npx jest --config config/jest.unit.config.js\"",
