@@ -32,6 +32,12 @@ const N0_QUICK_REPLIES = [
 ];
 const SUPPORT_WINDOW_NAME = "leaf-support";
 const SUPPORT_WINDOW_FEATURES = "popup,width=1280,height=820";
+const INBOX_WIDTH_STORAGE_KEY = "leaf.support.inbox-width";
+const INBOX_WIDTH_DEFAULT = 340;
+const INBOX_WIDTH_MIN = 280;
+const INBOX_WIDTH_MAX = 720;
+const CONVERSATION_MIN_WIDTH = 420;
+const CONTEXT_PANEL_WIDTH = 340;
 const SUPPORT_CHANNELS = [
   { id: "app", label: "App" },
   { id: "whatsapp", label: "WhatsApp" },
@@ -417,6 +423,23 @@ function personTypeLabel(value) {
   return SUPPORT_PERSON_TYPES[normalize(value)] || "";
 }
 
+function readStoredInboxWidth() {
+  try {
+    const stored = Number(window.localStorage.getItem(INBOX_WIDTH_STORAGE_KEY));
+    return stored >= INBOX_WIDTH_MIN && stored <= INBOX_WIDTH_MAX ? stored : INBOX_WIDTH_DEFAULT;
+  } catch {
+    return INBOX_WIDTH_DEFAULT;
+  }
+}
+
+function storeInboxWidth(width) {
+  try {
+    window.localStorage.setItem(INBOX_WIDTH_STORAGE_KEY, String(width));
+  } catch {
+    // Só uma preferência do navegador: sem storage, a largura vale até recarregar.
+  }
+}
+
 function formatMoney(value) {
   if (value === null || value === undefined) return "Sem valor fechado";
   return Number(value).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -608,6 +631,7 @@ function SupportPageContent({ supportScope }) {
   const chatRealtimeRef = useRef(false);
   const threadMessagesRef = useRef(null);
   const composerInputRef = useRef(null);
+  const inboxLayoutRef = useRef(null);
   const supportWindowRef = useRef(null);
   const isDetachedWindow = useSearchParams().get("view") === "window";
   const whatsappSendKeys = useRef(new Map());
@@ -642,6 +666,7 @@ function SupportPageContent({ supportScope }) {
   const [mode, setMode] = useState("ticket");
   const [inboxChannel, setInboxChannel] = useState("app");
   const [contextOpen, setContextOpen] = useState(false);
+  const [inboxWidth, setInboxWidth] = useState(INBOX_WIDTH_DEFAULT);
   const [typeFilter, setTypeFilter] = useState("all");
   const [composerMode, setComposerMode] = useState("reply");
   const [noteDraft, setNoteDraft] = useState("");
@@ -1523,6 +1548,32 @@ function SupportPageContent({ supportScope }) {
       ))}
     </div>
   ) : null;
+  const clampInboxWidth = (width) => {
+    const layoutWidth = inboxLayoutRef.current?.getBoundingClientRect().width || 0;
+    const reserved = CONVERSATION_MIN_WIDTH + (contextOpen ? CONTEXT_PANEL_WIDTH : 0);
+    const max = Math.max(INBOX_WIDTH_MIN, Math.min(INBOX_WIDTH_MAX, layoutWidth - reserved));
+    return Math.round(Math.min(max, Math.max(INBOX_WIDTH_MIN, width)));
+  };
+  const applyInboxWidth = (width) => {
+    const next = clampInboxWidth(width);
+    setInboxWidth(next);
+    storeInboxWidth(next);
+  };
+  const handleInboxResizeStart = (event) => {
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+  const handleInboxResizeMove = (event) => {
+    if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
+    setInboxWidth(clampInboxWidth(event.clientX - inboxLayoutRef.current.getBoundingClientRect().left));
+  };
+  const handleInboxResizeEnd = () => storeInboxWidth(inboxWidth);
+  const handleInboxResizeKey = (event) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    event.stopPropagation();
+    applyInboxWidth(inboxWidth + (event.key === "ArrowRight" ? 24 : -24));
+  };
   const openSupportWindow = () => {
     if (supportWindowRef.current && !supportWindowRef.current.closed) {
       supportWindowRef.current.focus();
@@ -2107,6 +2158,10 @@ function SupportPageContent({ supportScope }) {
     setComposerMode(nextMode);
     requestAnimationFrame(() => composerInputRef.current?.focus());
   };
+  useEffect(() => {
+    const restoreInboxWidth = requestAnimationFrame(() => setInboxWidth(readStoredInboxWidth()));
+    return () => cancelAnimationFrame(restoreInboxWidth);
+  }, []);
   const moveInboxSelection = (step) => {
     if (!inboxItems.length) return;
     const currentIndex = inboxItems.findIndex((item) => item.id === selectedInboxId);
@@ -2311,7 +2366,27 @@ function SupportPageContent({ supportScope }) {
           </span>
         </section>
 
-        <section className={contextOpen ? "support-inbox-layout support-inbox-layout-context" : "support-inbox-layout"}>
+        <section
+          ref={inboxLayoutRef}
+          className={contextOpen ? "support-inbox-layout support-inbox-layout-context" : "support-inbox-layout"}
+          style={{ "--support-inbox-width": `${inboxWidth}px` }}
+        >
+          <div
+            className="support-inbox-resizer"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Largura da lista de conversas"
+            aria-valuenow={inboxWidth}
+            aria-valuemin={INBOX_WIDTH_MIN}
+            aria-valuemax={INBOX_WIDTH_MAX}
+            tabIndex={0}
+            title="Arraste para ajustar. Duplo clique volta ao tamanho padrão."
+            onPointerDown={handleInboxResizeStart}
+            onPointerMove={handleInboxResizeMove}
+            onPointerUp={handleInboxResizeEnd}
+            onDoubleClick={() => applyInboxWidth(INBOX_WIDTH_DEFAULT)}
+            onKeyDown={handleInboxResizeKey}
+          />
           <aside className="support-inbox-panel card">
             {isOperationalSupportScope ? (
               <div className="support-channel-tabs" role="tablist" aria-label="Canal de atendimento">

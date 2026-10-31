@@ -1043,6 +1043,22 @@ async function assertSupportAgentTools(page) {
   await inbox.getByRole("button", { name: /^Sem dono/ }).click();
   await page.locator(".support-thread-row").first().waitFor();
   await inbox.getByRole("button", { name: /^Todas/ }).click();
+  await page.getByRole("button", { name: "Fechar", exact: true }).click();
+  const widthBefore = (await inbox.boundingBox()).width;
+  const resizer = await page.getByRole("separator", { name: "Largura da lista de conversas" }).boundingBox();
+  await page.mouse.move(resizer.x + 5, resizer.y + 200);
+  await page.mouse.down();
+  await page.mouse.move(resizer.x + 165, resizer.y + 200, { steps: 4 });
+  await page.mouse.up();
+  await page.waitForFunction(
+    (width) => document.querySelector(".support-inbox-panel").getBoundingClientRect().width > width + 100,
+    widthBefore,
+  );
+  const storedWidth = await page.evaluate(() => Number(window.localStorage.getItem("leaf.support.inbox-width")));
+  if (Math.abs(storedWidth - (await inbox.boundingBox()).width) > 2) {
+    throw new Error(`Inbox width must persist, stored ${storedWidth}`);
+  }
+  await page.getByRole("separator", { name: "Largura da lista de conversas" }).dblclick();
   const before = await page.locator(".support-conversation-head h2").textContent();
   await page.locator("h1", { hasText: "Suporte" }).click();
   await page.keyboard.press("ArrowDown");
