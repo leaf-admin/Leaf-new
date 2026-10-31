@@ -1039,6 +1039,10 @@ class LeafApiService {
     return this.request(`/waitlist/landing/list${suffix ? `?${suffix}` : ""}`);
   }
 
+  async getInvestorLeads() {
+    return this.request("/waitlist/investor-leads");
+  }
+
   async updateLandingWaitlistStatus(leadId, status, notes = "") {
     return this.request(`/waitlist/landing/${encodeURIComponent(leadId)}/status`, {
       method: "PATCH",

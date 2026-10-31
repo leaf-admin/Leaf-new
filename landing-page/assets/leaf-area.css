@@ -1,0 +1,56 @@
+.area-section{padding-block:30px 60px;scroll-margin-top:100px}
+.area-card{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,.9fr);border:1px solid #dfe7d8;border-radius:var(--radius);overflow:hidden;background:var(--white);box-shadow:0 14px 48px -32px rgba(32,57,26,.24)}
+.area-map-wrap{position:relative;min-width:0;padding:20px;background:#eef3f1}
+.area-map svg{display:block;width:100%;height:auto}
+.area-map path{fill:#f8faf6;stroke:#c6d2c2;stroke-width:.8;vector-effect:non-scaling-stroke;cursor:pointer;transition:fill .12s}
+.area-map path:hover,.area-map path:focus-visible{fill:#dfe9d6;outline:none}
+.area-map path.is-on{fill:#285e32;stroke:#1d4725}
+.area-map path.is-on:hover,.area-map path.is-on:focus-visible{fill:#3a7a45}
+.area-map path.is-selected{fill:#b9f279;stroke:#15261c;stroke-width:1.4}
+.area-legend{position:absolute;left:24px;top:22px;z-index:1;display:flex;flex-wrap:wrap;gap:6px 14px;padding:7px 11px;border-radius:12px;background:rgba(255,255,255,.88);font-size:12px;font-weight:600}
+.area-legend span{display:inline-flex;align-items:center;gap:6px}
+.area-swatch{width:11px;height:11px;border-radius:3px;border:1px solid #c6d2c2;background:#f8faf6}
+.area-swatch-on{background:#285e32;border-color:#285e32}
+.area-panel{display:flex;flex-direction:column;gap:14px;min-width:0;padding:30px 28px;background:#f5f7f1}
+.area-label{font-size:13px;font-weight:700}
+.area-panel select,.area-form input:not([type=checkbox]):not([type=radio]),.area-form textarea{width:100%;min-height:46px;padding:10px 13px;border:1px solid #d5dfcd;border-radius:12px;background:var(--white);color:var(--ink);font:inherit;font-size:15px}
+.area-panel h3{margin-bottom:8px;font-size:23px}
+.area-panel p{color:var(--muted);font-size:15px}
+.area-goal{margin-top:12px}
+.area-goal-head{display:flex;justify-content:space-between;gap:10px;font-size:13.5px;font-weight:650}
+.area-goal-bar{height:8px;margin-top:6px;border-radius:99px;background:#e1e8da;overflow:hidden}
+.area-goal-bar i{display:block;height:100%;border-radius:99px;background:#285e32}
+.area-goal-note{margin-top:5px;font-size:12.5px}
+.area-form{display:grid;gap:12px;margin-top:14px}
+.area-form label{display:grid;gap:5px;font-size:13px;font-weight:650}
+.area-form small{font-weight:500;color:var(--muted)}
+.area-form .btn{justify-self:start;min-height:48px;padding:12px 22px;font-size:14px}
+.area-roles{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:0;padding:0;border:0}
+.area-roles legend{padding:0 0 5px;font-size:13px;font-weight:650}
+.area-roles label{display:flex;align-items:center;gap:7px;padding:10px;border:1px solid #d5dfcd;border-radius:12px;background:var(--white);font-weight:600;cursor:pointer}
+.area-consent{grid-template-columns:auto 1fr!important;align-items:start;font-weight:500!important;font-size:12.5px!important;color:var(--muted)}
+.area-consent input{margin-top:3px}
+.area-honeypot{position:absolute!important;left:-9999px;width:1px;height:1px;overflow:hidden}
+.area-feedback{min-height:20px;font-size:13.5px;font-weight:600;color:var(--leaf-dark)}
+.area-feedback.is-error{color:#b3261e}
+.numbers-section{padding-bottom:60px}
+.numbers-card{display:flex;align-items:center;justify-content:space-between;gap:40px;padding:40px 44px;border-radius:var(--radius);background:var(--ink);color:var(--white)}
+.numbers-card .eyebrow{color:var(--leaf)}
+.numbers-card h2{margin-top:10px;font-size:clamp(28px,3.4vw,42px)}
+.numbers-list{display:flex;gap:56px;margin:0}
+.numbers-list dt{font-size:14px;color:#c9d6c2}
+.numbers-list dd{margin:4px 0 0;font-size:clamp(38px,5vw,60px);font-weight:800;letter-spacing:-.04em;font-variant-numeric:tabular-nums;color:var(--leaf)}
+.investor-page{max-width:760px;padding-block:60px}
+.investor-intro h1{margin:14px 0 18px;font-size:clamp(38px,5vw,60px);line-height:1.08}
+.investor-intro p+p{margin-top:12px}
+.investor-intro p{color:var(--muted);font-size:17px}
+.investor-intro .eyebrow{color:var(--leaf-dark);font-size:11px}
+.investor-form{margin-top:30px;padding:28px;border:1px solid #dfe7d8;border-radius:24px;background:#f5f7f1}
+.investor-note{margin-top:16px;font-size:12.5px;color:var(--muted)}
+@media(max-width:900px){.area-card{grid-template-columns:minmax(0,1fr)}.area-panel{padding:24px 20px}.numbers-card{flex-direction:column;align-items:flex-start;padding:30px 24px}.numbers-list{gap:36px}}
+.area-map-wrap{display:flex;align-items:center}
+.area-map{width:100%;padding-top:34px}
+.area-form input[type=checkbox],.area-form input[type=radio]{flex:none;width:18px;height:18px;min-height:0;margin:0;padding:0;accent-color:#285e32}
+.area-consent{gap:9px!important}
+.area-consent input{margin-top:2px!important}
+.area-roles label{justify-content:flex-start}

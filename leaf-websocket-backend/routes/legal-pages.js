@@ -113,6 +113,7 @@ function sendPrivacyPolicy(req, res) {
           paragraphs: [
             'Coletamos dados de cadastro (como nome, telefone, e-mail e CPF quando aplicável), dados de localização durante o uso e dados transacionais necessários para operação de corridas e suporte.',
             'No caso de motoristas, coletamos dados adicionais de validação documental e conformidade regulatória.'
+            'Nos formulários do site, coletamos apenas o que você informa: nome, WhatsApp, região e perfil nos pedidos de operação; nome, e-mail, empresa e mensagem no contato de investidores. Esses dados servem para avaliar a expansão e falar com você.',
           ]
         },
         {
