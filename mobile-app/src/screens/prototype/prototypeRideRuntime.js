@@ -6583,6 +6583,23 @@ function resolveCompletedTripDistanceKm({
   return 0;
 }
 
+export function resolveCompletedReceiptDurationMin({
+  settledDurationSecs,
+  actualDurationSecs,
+  plannedDurationMinutes,
+}) {
+  const realDurationSecs = [settledDurationSecs, actualDurationSecs].find(
+    (value) =>
+      value !== null &&
+      value !== undefined &&
+      Number.isFinite(Number(value)) &&
+      Number(value) >= 0,
+  );
+  return realDurationSecs === undefined
+    ? plannedDurationMinutes
+    : Math.max(1, Math.round(Number(realDurationSecs) / 60));
+}
+
 function resolveCompletedTripDurationMin({
   payloadDurationSeconds,
   runtimeDurationMinutes,
@@ -11913,10 +11930,11 @@ function attachSocketListeners() {
       Number.isFinite(settledDistanceKm) &&
       settledDistanceKm >= 0;
     const distance = hasSettledTrip ? settledDistanceKm : plannedDistance;
-    const durationMinutes =
-      hasSettledTrip && Number.isFinite(settledDurationSecs) && settledDurationSecs >= 0
-        ? Math.max(1, Math.round(settledDurationSecs / 60))
-        : plannedDurationMinutes;
+    const durationMinutes = resolveCompletedReceiptDurationMin({
+      settledDurationSecs: hasSettledTrip ? settledDurationSecs : null,
+      actualDurationSecs: payload?.actualDurationSecs,
+      plannedDurationMinutes,
+    });
 
     const receipt = {
       pickupAddress: resolveCompletedReceiptPickupLabel(payload, runtimeState),
