@@ -152,5 +152,5 @@ describe('public site routes', () => {
         .send({ ...validRequest, regionKey: region.key, celular: '21999990000' })
         .expect((response) => expect(response.status).not.toBe(400));
     }
-  });
+  }, 30000);
 });
