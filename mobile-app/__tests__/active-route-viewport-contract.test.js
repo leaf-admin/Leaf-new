@@ -129,6 +129,7 @@ describe('active route viewport contract', () => {
     expect(source).toContain('const nextRouteFocusKey = `${routeViewportLayoutKey}|${routeFocusTrackingKey}`;');
     expect(source).toContain('lastRouteLayoutKeyRef.current = nextRouteFocusKey;');
     expect(source).toContain('((hasActiveRoute || hasPresentedRoute) && !driverNavigationCameraOwnsMap && !driverOfferPreviewActive) && !driverAwaitingNavigationCamera && isScreenFocused ||');
+    expect(source).toContain("(normalizedBookingStatus === 'arrived' ||");
     expect(source).toContain('shouldForceHomePickupRegionUpdate');
     expectPrototypeMapLayerContract(source, {
       viewportPadding: 'homeRouteViewportPadding',
