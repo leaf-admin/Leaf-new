@@ -3361,7 +3361,7 @@ class WebSocketManager {
         telemetryContext,
         rideId,
       );
-      this.socket.emit("rejectRide", { rideId, reason });
+      this.socket.emit("rejectRide", { bookingId: rideId, rideId, reason });
     });
   }
 

@@ -4349,7 +4349,7 @@ describe('prototype ride screens', () => {
     );
 
     expect(getByText('Corridas concluídas')).toBeTruthy();
-    expect(getByText('Viagens')).toBeTruthy();
+    expect(getByText('Corridas')).toBeTruthy();
     expect(getByText('Recibos, trajetos e valores líquidos em uma leitura direta.')).toBeTruthy();
     await waitFor(() => {
       expect(getByText('Partida: 1540 Mission St')).toBeTruthy();

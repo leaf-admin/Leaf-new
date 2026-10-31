@@ -98,8 +98,8 @@ export default function LeafAccountPasswordScreen({ navigation, route }) {
       onBack={back}
       title={forWithdrawal ? 'Crie sua senha do app' : 'Senha de acesso'}
       subtitle={forWithdrawal
-        ? 'Ela confirma os seus saques. Também serve para entrar sem esperar o código pelo WhatsApp.'
-        : 'Opcional. Com ela você entra sem esperar o código pelo WhatsApp.'}
+        ? 'Ela confirma os seus saques. Também serve para entrar sem esperar o código.'
+        : 'Opcional. Com ela você entra sem esperar o código.'}
       testID="leaf-account-password"
       footer={<PrimaryButton label="Salvar senha" onPress={save} loading={saving} disabled={!password || !confirmation} testID="leaf-account-password-save" />}
     >

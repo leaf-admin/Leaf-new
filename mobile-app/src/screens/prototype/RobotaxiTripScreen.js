@@ -1579,7 +1579,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
   const driverInitial = String(driverName || 'C').trim().charAt(0).toUpperCase() || 'C';
   const driverRatingLabel = Number(driverInfo?.rating) > 0
     ? `★ ${Number(driverInfo.rating).toFixed(1).replace('.', ',')}`
-    : 'Sem avaliações';
+    : '';
   const plateLabel = vehiclePlate || 'Placa não informada';
   const passengerSheetTitle = isProtectedStatusWithoutRideIdentity
     ? 'Sincronizando corrida'
@@ -1897,7 +1897,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
           label="SOS"
           icon="shield-checkmark-outline"
           tone="safety"
-          onPress={() => navigation.navigate('RobotaxiPrototypeSupport', passengerSupportContext)}
+          onPress={() => navigation.navigate('RobotaxiPrototypeSupport', { ...passengerSupportContext, initialTopicId: 'safety' })}
           style={styles.headerSafetyAction}
           testID={passengerCardFieldTestIDs.safety_action}
           accessibilityLabel="SOS"
@@ -2297,7 +2297,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
                 <Text testID={passengerCardFieldTestIDs.vehicle_model}>{vehicleModel}</Text>
                 <Text> · </Text>
                 <Text testID={passengerCardFieldTestIDs.vehicle_color}>{vehicleColorLabel}</Text>
-                <Text> · {driverRatingLabel}</Text>
+                {driverRatingLabel ? <Text> · {driverRatingLabel}</Text> : null}
               </>
             )}
             trailing={plateLabel}
@@ -2437,7 +2437,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
             label="Segurança"
             icon="shield-checkmark-outline"
             tone="safety"
-            onPress={() => navigation.navigate('RobotaxiPrototypeSupport', passengerSupportContext)}
+            onPress={() => navigation.navigate('RobotaxiPrototypeSupport', { ...passengerSupportContext, initialTopicId: 'safety' })}
             style={styles.expandedGridAction}
             testID={passengerCardFieldTestIDs.safety_action}
             accessibilityLabel="SOS"
@@ -2875,7 +2875,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
                     icon="shield-checkmark-outline"
                     tone="safety"
                     style={styles.expandedLifecycleAction}
-                    onPress={() => navigation.navigate('RobotaxiPrototypeSupport', passengerSupportContext)}
+                    onPress={() => navigation.navigate('RobotaxiPrototypeSupport', { ...passengerSupportContext, initialTopicId: 'safety' })}
                     testID="passenger-trip-expanded-safety-button"
                   />
                 </View>

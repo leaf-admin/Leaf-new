@@ -344,6 +344,8 @@ export default function WooviPaymentModal({
     
     // Refs
     const countdownIntervalRef = useRef(null);
+    const pixCopiedTimeoutRef = useRef(null);
+    const [pixCodeCopied, setPixCodeCopied] = useState(false);
     const paymentCheckIntervalRef = useRef(null);
     const timeoutRef = useRef(null);
     const paymentDataRef = useRef(null);
@@ -1400,19 +1402,17 @@ export default function WooviPaymentModal({
         if (paymentData?.qrCodeText) {
             try {
                 await Clipboard.setStringAsync(paymentData.qrCodeText);
-                // Mostra o código em um Alert para o usuário copiar manualmente
-                Alert.alert(
-                    '📋 Código PIX',
-                    `Copie o código abaixo:\n\n${paymentData.qrCodeText}\n\nCole no seu app de pagamentos.`,
-                    [{ text: 'OK' }]
-                );
+                setPixCodeCopied(true);
+                clearTimeout(pixCopiedTimeoutRef.current);
+                pixCopiedTimeoutRef.current = setTimeout(() => setPixCodeCopied(false), 2500);
             } catch (error) {
                 Logger.error('❌ Erro ao copiar código PIX:', error);
                 // Fallback: mostra o código mesmo em caso de erro
                 Alert.alert(
-                    '📋 Código PIX',
+                    'Código PIX',
                     `Copie o código abaixo:\n\n${paymentData.qrCodeText}\n\nCole no seu app de pagamentos.`,
-                    [{ text: 'OK' }]
+                    [{ text: 'OK' }],
+                    { __skipFriendlyAlertPatch: true }
                 );
             }
         }
@@ -1970,12 +1970,12 @@ export default function WooviPaymentModal({
                             onPress={copyPixCode}
                             activeOpacity={0.88}
                             testID="payment-modal-copy-code-button"
-                            accessibilityLabel="Copiar código PIX"
+                            accessibilityLabel={pixCodeCopied ? 'Código PIX copiado' : 'Copiar código PIX'}
                         >
                             <Text style={[
                                 styles.primaryActionText,
                                 robotaxiLifecycleCard && styles.robotaxiActionText,
-                            ]}>Copiar código</Text>
+                            ]}>{pixCodeCopied ? 'Código copiado' : 'Copiar código'}</Text>
                         </LeafTouchable>
                     ) : null}
                     {robotaxiLifecycleCard ? (

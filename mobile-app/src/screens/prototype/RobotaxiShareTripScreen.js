@@ -179,7 +179,7 @@ export default function RobotaxiShareTripScreen({ navigation, route }) {
             onLayout={handlePanelLayout}
             eyebrow="Compartilhar"
             title="Acompanhar viagem"
-            subtitle="Envie um link para alguém ver ETA, destino e status sem acessar sua conta."
+            subtitle="Envie o link para alguém que tenha o app Leaf acompanhar sua viagem."
             fullScreen
             style={{
               paddingTop: insets.top + SURFACE_TOP_PADDING,
@@ -195,7 +195,7 @@ export default function RobotaxiShareTripScreen({ navigation, route }) {
           >
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
               <View style={styles.linkCard}>
-                <Text style={styles.linkLabel}>Link público da viagem</Text>
+                <Text style={styles.linkLabel}>Link da viagem</Text>
                 <Text style={styles.linkText} numberOfLines={2}>
                   {publicLink}
                 </Text>

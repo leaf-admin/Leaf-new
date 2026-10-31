@@ -522,7 +522,9 @@ function resolveCanonicalOperationalInterruptionSettlement(receipt = {}) {
       refundStatus,
     )
       ? "Reembolso pendente"
-      : "Reembolso estimado",
+      : ["REFUNDED", "REFUNDED_PARTIAL", "REFUNDED_FULL", "COMPLETED", "PROCESSED"].includes(refundStatus)
+        ? "Reembolso"
+        : "Reembolso estimado",
   };
 }
 

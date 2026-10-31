@@ -7161,6 +7161,7 @@ function buildDriverTripAssistModel(snapshot) {
     pickupAddress,
     destinationAddress,
     remainingMeters: displayRemainingMeters,
+    targetStraightLineMeters: pickupStraightLineMeters,
     remainingDistanceLabel,
     progressRatio,
     etaMinutes,
@@ -11200,6 +11201,10 @@ function attachSocketListeners() {
   };
 
   const handleDriverArrived = (payload) => {
+    // arrivedAtPickup also carries the server's refusal; only a success is an arrival.
+    if (payload?.success === false || payload?.error) {
+      return;
+    }
     const bookingId = String(
       payload?.bookingId ||
         payload?.rideId ||

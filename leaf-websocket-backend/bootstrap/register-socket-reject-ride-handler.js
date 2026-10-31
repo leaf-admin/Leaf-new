@@ -44,7 +44,11 @@ function registerSocketRejectRideHandler({
 
         try {
             // ✅ NOVO: Validação e sanitização de dados
-            const validation = validationService.validateEndpoint('rejectRide', data);
+            // Apps instalados enviam só rideId.
+            const validation = validationService.validateEndpoint('rejectRide', {
+                ...data,
+                bookingId: data?.bookingId || data?.rideId
+            });
 
             if (!validation.valid) {
                 const metadata = getSocketMetadata(socket);
