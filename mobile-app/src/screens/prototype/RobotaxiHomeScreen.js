@@ -10212,7 +10212,8 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   // meio do componente; quando a corrida aparecia como concluída depois do
   // primeiro render (app reaberto com o recibo pendente) o React quebrava com
   // "Rendered fewer hooks than expected" (motorista no Android, 18/10/2026).
-  if (shouldPresentCompletedReceipt) {
+  // A comemoração da promoção vive nesta tela e vem antes do recibo.
+  if (shouldPresentCompletedReceipt && !driverPromoCelebration) {
     return (
       <RobotaxiReceiptScreen
         navigation={navigation}
