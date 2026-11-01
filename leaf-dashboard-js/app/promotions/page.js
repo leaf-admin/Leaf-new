@@ -81,7 +81,11 @@ export default function PromotionsPage() {
       setRows(listResponse?.promotions || []);
       setStats(statsResponse?.stats || null);
       setRuntimeFlags(flagsResponse || null);
-      setIntroFeeReport(introFeeResponse);
+      // Resposta sem o contrato (ex.: backend antigo no meio de um deploy) não entra na tela.
+      if (introFeeResponse && !introFeeResponse.policy) {
+        setIntroFeeError("Acompanhamento da promoção indisponível no momento");
+      }
+      setIntroFeeReport(introFeeResponse?.policy ? introFeeResponse : null);
     } catch (err) {
       setError(err?.message || "Falha ao carregar promocoes");
     } finally {
