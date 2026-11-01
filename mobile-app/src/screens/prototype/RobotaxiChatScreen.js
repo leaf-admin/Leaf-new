@@ -146,8 +146,8 @@ export default function RobotaxiChatScreen({ navigation, route }) {
           sheetStyle={styles.sheetWrap}
         >
           <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            keyboardVerticalOffset={Math.max(0, insets.top - 4)}
+            behavior="padding"
+            keyboardVerticalOffset={Platform.OS === 'ios' ? Math.max(0, insets.top - 4) : 0}
             style={styles.keyboardAvoiding}
           >
             <PrototypeMenuSurface

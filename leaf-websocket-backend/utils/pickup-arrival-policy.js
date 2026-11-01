@@ -1,6 +1,6 @@
 const DEFAULT_PICKUP_TOLERANCE_METERS = Math.max(
   5,
-  Number.parseInt(process.env.PICKUP_ARRIVAL_TOLERANCE_METERS || '20', 10) || 20
+  Number.parseInt(process.env.PICKUP_ARRIVAL_TOLERANCE_METERS || '80', 10) || 80
 );
 
 function toFiniteNumber(value) {

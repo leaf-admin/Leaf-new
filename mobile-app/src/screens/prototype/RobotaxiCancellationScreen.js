@@ -323,7 +323,7 @@ export default function RobotaxiCancellationScreen({ navigation, route }) {
               <View style={styles.warningBox}>
                 <Text style={styles.warningText}>
                   {isPassengerCancellation && hasDriverOnTheWay
-                    ? 'O motorista já está a caminho, então pode haver taxa de cancelamento. O restante volta para o mesmo Pix e você vê os valores na próxima tela.'
+                    ? 'O motorista já foi acionado, então pode haver taxa de cancelamento. O restante volta para o mesmo Pix e você vê os valores na próxima tela.'
                     : 'Você pode pedir uma nova corrida logo depois, se precisar.'}
                 </Text>
               </View>

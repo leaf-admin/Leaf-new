@@ -1,4 +1,5 @@
 const PaymentService = require('../services/payment-service');
+const ReceiptService = require('../services/receipt-service');
 const ridePersistenceService = require('../services/ride-persistence-service');
 const pricingH3ReadModelService = require('../services/pricing-h3-read-model-service');
 const { isRiderEarlyEndEnabled } = require('../utils/ride-lifecycle-feature-flags');
@@ -121,6 +122,40 @@ function registerSocketEndTripEarlyHandler({
               await eventBus.publish({
                 eventType: 'ride.completed',
                 data: event
+              });
+            }
+
+            try {
+              const receiptService = new ReceiptService();
+              await receiptService.generateAndSaveReceipt(bookingId, {
+                ...bookingSnapshot,
+                bookingId,
+                driverId: driverId || bookingSnapshot?.driverId,
+                customerId: resultCustomerId || customerId,
+                finalPrice: finalFare,
+                finalFare,
+                fareBreakdown,
+                financialBreakdown: paymentDistribution || null,
+                paymentDistribution,
+                completionType: 'EARLY_ENDED_BY_RIDER',
+                settlement,
+                financialSnapshot: result.data?.financialSnapshot || null,
+                financialSnapshotSource: result.data?.financialSnapshot ? 'backend_final' : null,
+                authoritativeSnapshot: Boolean(result.data?.financialSnapshot),
+                distance,
+                distanceKm: distance,
+                duration,
+                durationSeconds: duration,
+                endLocation,
+                endTime: new Date().toISOString(),
+                completedAt: new Date().toISOString(),
+                status: 'COMPLETED'
+              });
+            } catch (receiptError) {
+              logStructured('warn', 'Erro ao gerar recibo do encerramento pelo passageiro', {
+                bookingId,
+                eventType: 'endTripEarlyByRider',
+                error: receiptError.message
               });
             }
 

@@ -80,7 +80,7 @@ const PATTERN_RULES = [
   [/rate[_\s-]?limit|muitas tentativas|too many requests/i, FRIENDLY_BY_CODE.RATE_LIMIT_EXCEEDED],
   [/geofence|fora da area|nao opera nesta regiao|out of coverage/i, FRIENDLY_BY_CODE.OUT_OF_COVERAGE],
   [/payment not confirmed|pagamento nao confirmado/i, FRIENDLY_BY_CODE.PAYMENT_NOT_CONFIRMED],
-  [/pix|payment|pagamento/i, 'Não foi possível processar o pagamento via Pix. Tente novamente.'],
+  [/(?:pix|payment|pagamento).*(?:fail|falh|erro|error|negad|recus|invalid|inv[aá]lid)|(?:fail|falh|erro|error|negad|recus).*(?:pix|payment|pagamento)/i, 'Não foi possível processar o pagamento via Pix. Tente novamente.'],
   [/otp|codigo invalido|invalid code|verification code/i, FRIENDLY_BY_CODE.INVALID_OTP],
   [/unauthorized|token expired|sessao expirada|401/i, FRIENDLY_BY_CODE.UNAUTHORIZED],
   [/forbidden|403|permission denied|sem permissao/i, FRIENDLY_BY_CODE.PERMISSION_DENIED],

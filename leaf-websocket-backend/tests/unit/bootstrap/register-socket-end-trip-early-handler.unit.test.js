@@ -14,6 +14,11 @@ jest.mock('../../../services/pricing-h3-read-model-service', () => ({
   clearBookingSnapshot: jest.fn().mockResolvedValue(undefined)
 }));
 
+const mockGenerateAndSaveReceipt = jest.fn().mockResolvedValue({ success: true });
+jest.mock('../../../services/receipt-service', () => jest.fn().mockImplementation(() => ({
+  generateAndSaveReceipt: mockGenerateAndSaveReceipt
+})));
+
 jest.mock('../../../utils/ride-lifecycle-feature-flags', () => ({
   isRiderEarlyEndEnabled: jest.fn(() => true)
 }));
@@ -112,6 +117,10 @@ describe('registerSocketEndTripEarlyHandler', () => {
     });
     await new Promise((resolve) => setImmediate(resolve));
 
+    expect(mockGenerateAndSaveReceipt).toHaveBeenCalledWith(
+      'booking-1',
+      expect.objectContaining({ bookingId: 'booking-1', completionType: 'EARLY_ENDED_BY_RIDER' })
+    );
     expect(EndRideEarlyByRiderCommand).toHaveBeenCalledWith(
       expect.objectContaining({
         bookingId: 'booking-1',

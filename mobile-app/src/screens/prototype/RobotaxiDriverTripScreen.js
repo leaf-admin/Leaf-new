@@ -2015,7 +2015,7 @@ export default function RobotaxiDriverTripScreen({ navigation, route }) {
                 label="Reportar"
                 icon="warning-outline"
                 tone="danger"
-                onPress={() => navigation.navigate("RobotaxiPrototypeSupport", driverSupportContext)}
+                onPress={() => navigation.navigate("RobotaxiPrototypeSupport", { ...driverSupportContext, initialTopicId: "safety" })}
                 style={styles.lifecycleSecondaryActionFull}
                 testID="driver-trip-report-button"
               />

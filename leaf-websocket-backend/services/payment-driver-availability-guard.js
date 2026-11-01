@@ -5,6 +5,8 @@ const {
   getPaymentAvailabilityRadiusKm
 } = require('../utils/dispatch-config');
 
+const AVAILABILITY_PROFILE_TIMEOUT_MS = 1500;
+
 const DEFAULT_RADIUS_KM = getPaymentAvailabilityRadiusKm();
 const DEFAULT_LIMIT = getPaymentAvailabilityLimit();
 const ELIGIBLE_DRIVER_GEO_KEY = process.env.ELIGIBLE_DRIVER_GEO_KEY || 'driver_locations_eligible';
@@ -279,7 +281,8 @@ async function hasPaymentEligibleDriver({
       offlineOrIneligible: 0,
       socketUnreachable: 0,
       preferenceMismatch: 0,
-      categoryMismatch: 0
+      categoryMismatch: 0,
+      profileUnavailable: 0
     };
     for (const driverEntry of nearbyDrivers) {
       const driverId = Array.isArray(driverEntry) ? driverEntry[0] : driverEntry;
@@ -342,8 +345,13 @@ async function hasPaymentEligibleDriver({
         driverId,
         carType,
         driverData,
-        { allowCachedActivation: true }
+        // One check per request, off the GPS path: it can wait longer than dispatch.
+        { allowCachedActivation: true, profileTimeoutMs: AVAILABILITY_PROFILE_TIMEOUT_MS }
       );
+      if (categoryEligibility?.code === 'DRIVER_PROFILE_UNAVAILABLE') {
+        rejections.profileUnavailable += 1;
+        continue;
+      }
       if (!categoryEligibility?.eligible) {
         rejections.categoryMismatch += 1;
         continue;

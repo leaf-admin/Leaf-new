@@ -585,7 +585,12 @@ function DriverLiveRideOverlay({
       if (normalizedStatus === "started") {
         // Ending far from the destination is allowed, but it is a deliberate
         // act: the driver states why, and the passenger is asked about it.
-        const earlyEnd = await confirmDriverEarlyEnd(driverTripAssist?.remainingMeters);
+        // The route can run to a U-turn while the car is already at the door.
+        const earlyEnd = await confirmDriverEarlyEnd(
+          [driverTripAssist?.remainingMeters, driverTripAssist?.targetStraightLineMeters]
+            .filter(Number.isFinite)
+            .reduce((nearest, meters) => Math.min(nearest, meters), Infinity),
+        );
         if (earlyEnd?.cancelled) {
           return;
         }

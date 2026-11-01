@@ -153,6 +153,8 @@ import { resolveHomeQuoteFailurePresentation } from './home/homeQuoteFailurePres
 import { useLiveRouteTiming } from './liveRouteTiming';
 import { leafButtonMetrics } from '../../components/prototype/LeafRideUI';
 
+const HOME_AVAILABILITY_RETRY_MS = 15000;
+
 // Telas empilhadas por cima da Início de onde uma oferta nova traz o motorista de volta.
 const OFFER_RETURNS_HOME_FROM_ROUTES = new Set([
   'RobotaxiMenuTripHistory',
@@ -3110,6 +3112,27 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     homeBackendQuoteKey,
     homeDriverAvailabilityRefreshing,
     homeSelectedCategoryId,
+    refreshSelectedHomeDriverAvailability,
+    selectedHomeBackendQuoteReady,
+    selectedHomeDriverUnavailable,
+  ]);
+
+  // A driver can come online while the passenger waits on this screen.
+  useEffect(() => {
+    if (!selectedHomeBackendQuoteReady || !selectedHomeDriverUnavailable) {
+      return undefined;
+    }
+
+    const interval = setInterval(() => {
+      refreshSelectedHomeDriverAvailability().catch((error) => {
+        Logger.warn(
+          '[RobotaxiHomeScreen] Falha ao revalidar disponibilidade',
+          error?.message || error,
+        );
+      });
+    }, HOME_AVAILABILITY_RETRY_MS);
+    return () => clearInterval(interval);
+  }, [
     refreshSelectedHomeDriverAvailability,
     selectedHomeBackendQuoteReady,
     selectedHomeDriverUnavailable,
