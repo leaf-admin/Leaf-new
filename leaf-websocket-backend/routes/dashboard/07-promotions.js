@@ -6,10 +6,12 @@ const {
   authenticateJWT,
   logger,
   promotionService,
+  redisPool,
   requireAdminMutationsEnabled,
   requireRole,
   router
 } = require('./shared');
+const { getDriverIntroFeeReport } = require('../../services/driver-intro-fee-report-service');
 
 /**
  * Criar nova promoção
@@ -82,6 +84,25 @@ router.get('/api/promotions', async (req, res) => {
 
   } catch (error) {
     logger.error('❌ Erro ao listar promoções:', error);
+    res.status(500).json({
+      error: 'Erro interno do servidor',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * Acompanhamento da promoção das primeiras corridas do motorista (somente leitura)
+ * GET /api/promotions/driver-intro-fee
+ */
+router.get('/api/promotions/driver-intro-fee', async (req, res) => {
+  try {
+    await redisPool.ensureConnection?.();
+    const report = await getDriverIntroFeeReport({ redis: redisPool.getConnection() });
+    res.json(report);
+
+  } catch (error) {
+    logger.error('❌ Erro ao buscar acompanhamento da promoção:', error);
     res.status(500).json({
       error: 'Erro interno do servidor',
       message: error.message
