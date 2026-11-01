@@ -28,11 +28,10 @@ fi
 
 SSH_OPTS=(
   -i "$CONTABO_KEY"
-  -o StrictHostKeyChecking=no
-  -o UserKnownHostsFile=/dev/null
+  -o StrictHostKeyChecking=yes
   -o ConnectTimeout=15
 )
-RSYNC_SSH="ssh -i \"$CONTABO_KEY\" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15"
+RSYNC_SSH="ssh -i \"$CONTABO_KEY\" -o StrictHostKeyChecking=yes -o ConnectTimeout=15"
 remote() { ssh "${SSH_OPTS[@]}" "$VPS_USER@$CONTABO_HOST" "$@"; }
 
 echo "[dashboard-deploy] Local validation"
