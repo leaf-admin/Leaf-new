@@ -105,7 +105,7 @@ function ManeuverGlyph({ type, color: glyphColor }) {
 }
 
 const BANNER_TOP_OFFSET = 70;
-const BANNER_FALLBACK_HEIGHT = 144;
+const BANNER_FALLBACK_HEIGHT = 116;
 const BANNER_MAP_GAP = 12;
 
 export default function LeafNativeNavigationBanner({
@@ -114,9 +114,11 @@ export default function LeafNativeNavigationBanner({
   navigationModel = null,
   onOpenNavigation,
   onHide,
+  // Trip card in Detalhes: the two together would leave almost no map.
+  suppressed = false,
 }) {
   const isOffRoute = navigationModel?.isOffRoute === true;
-  const isVisible = Boolean(navigationModel?.isVisible) && !isOffRoute;
+  const isVisible = Boolean(navigationModel?.isVisible) && !isOffRoute && !suppressed;
 
   // The map keeps the car and route below the banner, so the occlusion must be
   // the banner's real bottom edge: its height grows with a two-line instruction.
@@ -139,11 +141,6 @@ export default function LeafNativeNavigationBanner({
   }
 
   const title = navigationModel.currentInstruction;
-  const subtitle = navigationModel.hasArrived && navigationModel.arrivalHint
-    ? navigationModel.arrivalHint
-    : `${navigationModel.maneuverDistanceLabel} até ${
-        navigationModel.maneuverDistanceTargetLabel || 'o destino'
-      }`;
   const maneuverType = navigationModel.hasArrived && !isOffRoute
     ? 'arrived'
     : resolveManeuverType(title, isOffRoute, navigationModel.maneuver);
@@ -171,35 +168,26 @@ export default function LeafNativeNavigationBanner({
             <Text style={styles.distance} numberOfLines={1}>{mainDistance}</Text>
             <Text style={styles.title} numberOfLines={2}>{title}</Text>
           </View>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Ocultar navegação LEAF"
-            onPress={onHide}
-            style={styles.hideButton}
-          >
-            <Ionicons name="close" size={18} color={color.text.secondary} />
-          </Pressable>
-        </View>
-        <View style={styles.footer}>
-          <View style={styles.summary}>
-            <Text style={styles.subtitle} numberOfLines={2}>{subtitle}</Text>
-            {!navigationModel.hasArrived ? (
-              <Text style={styles.metaDistance} numberOfLines={2}>
-                {navigationModel.remainingDistanceLabel}{navigationModel.etaLabel ? ` · ${navigationModel.etaLabel}` : ''}
-              </Text>
-            ) : null}
-          </View>
-          {typeof onOpenNavigation === 'function' ? (
+          <View style={styles.sideActions}>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Navegar com Waze ou Google Maps"
-              onPress={onOpenNavigation}
-              style={styles.navigationButton}
+              accessibilityLabel="Ocultar navegação LEAF"
+              onPress={onHide}
+              style={styles.hideButton}
             >
-              <Text style={styles.navigationButtonText}>Abrir navegador</Text>
-              <Ionicons name="open-outline" size={15} color={color.accent.primary} />
+              <Ionicons name="close" size={18} color={color.text.secondary} />
             </Pressable>
-          ) : null}
+            {typeof onOpenNavigation === 'function' ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Navegar com Waze ou Google Maps"
+                onPress={onOpenNavigation}
+                style={styles.navigationButton}
+              >
+                <Ionicons name="open-outline" size={18} color={color.accent.primary} />
+              </Pressable>
+            ) : null}
+          </View>
         </View>
       </View>
     </View>
@@ -263,51 +251,21 @@ const styles = StyleSheet.create({
     lineHeight: 33,
     color: color.accent.primary,
   },
-  subtitle: {
-    ...leafTypography.regular,
-    fontSize: 12,
-    lineHeight: 17,
-    color: color.text.secondary,
-  },
-  footer: {
-    marginTop: 10,
-    paddingTop: 8,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: color.border.separator,
-    flexDirection: 'row',
+  sideActions: {
+    alignSelf: 'flex-start',
     alignItems: 'center',
-    gap: 8,
-    flexWrap: 'wrap',
-  },
-  summary: {
-    flexGrow: 1,
-    flexBasis: 120,
-    minWidth: 0,
-  },
-  metaDistance: {
-    ...leafTypography.regular,
-    fontSize: 12,
-    lineHeight: 17,
-    color: color.text.primary,
   },
   navigationButton: {
-    minHeight: 44,
-    paddingHorizontal: 10,
+    width: 44,
+    height: 44,
     borderRadius: 14,
     backgroundColor: color.surface.activeSoft,
-    flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-  },
-  navigationButtonText: {
-    ...leafTypography.semiBold,
-    fontSize: 12,
-    color: color.accent.primary,
+    justifyContent: 'center',
   },
   hideButton: {
     width: 44,
     height: 44,
-    alignSelf: 'flex-start',
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 22,

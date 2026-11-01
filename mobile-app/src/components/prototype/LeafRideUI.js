@@ -619,12 +619,12 @@ export function LeafMetricRow({ metrics = [], style }) {
 
 // `dense`: one line per stop, no captions. For the default (compact) ride card,
 // where the map needs the room; the expanded card keeps the captioned layout.
-export function LeafJourneyRoute({ origin, destination, originTestID, destinationTestID, style, testID, dense = false }) {
+export function LeafJourneyRoute({ origin, destination, originTestID, destinationTestID, style, testID, dense = false, showOrigin = true, showDestination = true }) {
   const valueStyle = dense ? styles.journeyRouteValueDense : styles.journeyRouteValue;
   const stopStyle = dense ? styles.journeyRouteStopDense : styles.journeyRouteStop;
   return (
     <View style={[styles.journeyRoute, dense && styles.journeyRouteDense, style]} testID={testID}>
-      <View style={stopStyle}>
+      {showOrigin ? <View style={stopStyle}>
         <View style={[styles.journeyRouteMarker, dense && styles.journeyRouteMarkerDense]} accessible={false} />
         <View style={styles.journeyRouteCopy}>
           {dense ? null : <Text style={styles.journeyRouteLabel}>Embarque</Text>}
@@ -637,9 +637,9 @@ export function LeafJourneyRoute({ origin, destination, originTestID, destinatio
             {origin || 'Embarque não informado'}
           </Text>
         </View>
-      </View>
-      {dense ? null : <View style={styles.journeyRouteHairline} />}
-      <View style={stopStyle}>
+      </View> : null}
+      {dense || !showOrigin || !showDestination ? null : <View style={styles.journeyRouteHairline} />}
+      {showDestination ? <View style={stopStyle}>
         <View style={[styles.journeyRouteMarker, styles.journeyRouteDestination, dense && styles.journeyRouteMarkerDense]} accessible={false} />
         <View style={styles.journeyRouteCopy}>
           {dense ? null : <Text style={styles.journeyRouteLabel}>Destino</Text>}
@@ -652,7 +652,7 @@ export function LeafJourneyRoute({ origin, destination, originTestID, destinatio
             {destination || 'Destino não informado'}
           </Text>
         </View>
-      </View>
+      </View> : null}
     </View>
   );
 }

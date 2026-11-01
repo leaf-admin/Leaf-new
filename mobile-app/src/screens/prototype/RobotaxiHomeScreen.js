@@ -2092,6 +2092,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const connectionAutomationExecutionRef = useRef('');
   const connectionAutomationTimersRef = useRef([]);
   const [homeCardHeight, setHomeCardHeight] = useState(HOME_CARD_FALLBACK_HEIGHT);
+  const [driverTripCardExpanded, setDriverTripCardExpanded] = useState(false);
   const [homeCardTop, setHomeCardTop] = useState(null);
   const [homePickupPickerVisible, setHomePickupPickerVisible] = useState(false);
   const [homePickupSearchActive, setHomePickupSearchActive] = useState(false);
@@ -10490,6 +10491,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
             navigationModel={leafNativeNavigationModel}
             onOpenNavigation={handleOpenDriverNavigation}
             onHide={handleHideLeafNativeNavigation}
+            suppressed={driverTripCardExpanded}
           />
         ) : null}
 
@@ -10663,6 +10665,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
               insetsBottom={insets.bottom}
               bottomOffset={driverLiveRideBottomOffset}
               onCardLayout={handleDriverLiveRideCardLayout}
+              onTripExpandedChange={setDriverTripCardExpanded}
               driverOffers={driverOffers}
               driverActiveRide={driverActiveRide}
               driverTripMeta={driverTripMeta}

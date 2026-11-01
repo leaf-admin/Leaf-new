@@ -290,8 +290,7 @@ describe("DriverLiveRideOverlay", () => {
       <DriverLiveRideOverlay {...props} driverActiveRide={{ ...ride, status: "accepted" }} bookingStatus="accepted" />,
     );
     expect(accepted.getByTestId("driver-live-trip-preferences")).toBeTruthy();
-    expect(accepted.getByText("Ar mais fresco")).toBeTruthy();
-    expect(accepted.getByText("Prefere silêncio")).toBeTruthy();
+    expect(accepted.getByText("Ar mais fresco · Prefere silêncio")).toBeTruthy();
     accepted.unmount();
 
     const started = render(
