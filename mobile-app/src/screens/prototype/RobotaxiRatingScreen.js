@@ -158,6 +158,7 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
   const awaitingAirConditioningAnswer = reviewerType === "passenger" && airConditioningOk === null;
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [secondaryActionsVisible, setSecondaryActionsVisible] = useState(false);
+  const [commentVisible, setCommentVisible] = useState(false);
   const qaAutoSubmitStartedRef = useRef(false);
   const sheetBottom =
     SHEET_BOTTOM_OFFSET + robotaxiLifecycleMetrics.cardBottomGap + insets.bottom;
@@ -494,7 +495,13 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
               })}
             </View>
 
-            <View style={styles.tagsWrap}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              style={styles.tagsScroll}
+              contentContainerStyle={styles.tagsRow}
+            >
               {quickTags.map((tag) => {
                 const active = selectedTags.includes(tag);
                 return (
@@ -516,26 +523,41 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
                   </LeafTouchable>
                 );
               })}
-            </View>
+            </ScrollView>
 
-            <TextInput
-              value={comment}
-              onChangeText={setComment}
-              placeholder={
-                reviewerType === "driver"
-                  ? "Comentário opcional sobre o passageiro"
-                  : "Comentário opcional"
-              }
-              placeholderTextColor={color.text.muted}
-              style={styles.input}
-              multiline
-              accessibilityLabel={
-                reviewerType === "driver"
-                  ? "Comentário sobre o passageiro"
-                  : "Comentário sobre a viagem"
-              }
-              accessibilityHint="Comentário opcional."
-            />
+            {commentVisible || comment ? (
+              <TextInput
+                value={comment}
+                onChangeText={setComment}
+                placeholder={
+                  reviewerType === "driver"
+                    ? "Comentário opcional sobre o passageiro"
+                    : "Comentário opcional"
+                }
+                placeholderTextColor={color.text.muted}
+                style={styles.input}
+                multiline
+                autoFocus={commentVisible}
+                accessibilityLabel={
+                  reviewerType === "driver"
+                    ? "Comentário sobre o passageiro"
+                    : "Comentário sobre a viagem"
+                }
+                accessibilityHint="Comentário opcional."
+              />
+            ) : (
+              <LeafTouchable
+                style={styles.addCommentButton}
+                activeOpacity={0.86}
+                onPress={() => setCommentVisible(true)}
+                testID="rating-add-comment-button"
+                accessibilityRole="button"
+                accessibilityLabel="Adicionar comentário"
+              >
+                <Ionicons name="add" size={18} color={color.text.secondary} />
+                <Text style={styles.addCommentText}>Adicionar comentário</Text>
+              </LeafTouchable>
+            )}
 
             {reviewerType === "passenger" ? (
               <View style={styles.airConditioningCard}>
@@ -716,12 +738,26 @@ const styles = StyleSheet.create({
     justifyContent: "flex-start",
     gap: 12,
   },
-  tagsWrap: {
+  tagsScroll: {
     marginTop: 18,
+    flexGrow: 0,
+  },
+  tagsRow: {
     flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "flex-start",
     gap: 8,
+  },
+  addCommentButton: {
+    marginTop: 4,
+    minHeight: 44,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  addCommentText: {
+    color: color.text.secondary,
+    ...leafTypography.medium,
+    fontSize: 15,
+    lineHeight: 20,
   },
   tagChip: {
     minHeight: 44,

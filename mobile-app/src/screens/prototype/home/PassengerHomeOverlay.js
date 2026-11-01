@@ -40,7 +40,7 @@ const TEXT_MUTED = "#767676";
 // same scaled constants, keeping map occlusion consistent.
 const ACCESSIBILITY_FONT_SCALE = Math.max(1, PixelRatio.getFontScale());
 const HOME_CARD_HEIGHT = Math.ceil(142 * ACCESSIBILITY_FONT_SCALE);
-const HOME_CATEGORY_ROUTE_SUMMARY_HEIGHT = Math.ceil(112 * ACCESSIBILITY_FONT_SCALE);
+const HOME_CATEGORY_ROUTE_SUMMARY_HEIGHT = Math.ceil(106 * ACCESSIBILITY_FONT_SCALE);
 const HOME_SEARCH_ACTIVE_CARD_HEIGHT = Math.ceil(92 * ACCESSIBILITY_FONT_SCALE);
 const HOME_CARD_HORIZONTAL_INSET = 24;
 const HOME_CARD_RADIUS = 28;
@@ -50,9 +50,9 @@ const HOME_CARD_PADDING_BOTTOM = 18;
 const HOME_STACK_GAP = 18;
 const HOME_PROMO_CARD_HEIGHT = Math.ceil(188 * ACCESSIBILITY_FONT_SCALE);
 // Sized for the type scale (17 pt rows) plus the floating card's bottom padding.
-const HOME_CATEGORY_CARD_HEIGHT = Math.ceil(346 * ACCESSIBILITY_FONT_SCALE);
+const HOME_CATEGORY_CARD_HEIGHT = Math.ceil(316 * ACCESSIBILITY_FONT_SCALE);
 const HOME_CATEGORY_BREAKDOWN_CARD_HEIGHT = Math.ceil(478 * ACCESSIBILITY_FONT_SCALE);
-const HOME_CATEGORY_CARD_PADDING_BOTTOM = 20;
+const HOME_CATEGORY_CARD_PADDING_BOTTOM = 16;
 const HOME_SEARCH_DROPDOWN_MIN_HEIGHT = Math.ceil(72 * ACCESSIBILITY_FONT_SCALE);
 const HOME_SEARCH_DROPDOWN_MAX_HEIGHT = Math.ceil(168 * ACCESSIBILITY_FONT_SCALE);
 const HOME_SEARCH_DROPDOWN_ROW_HEIGHT = Math.ceil(56 * ACCESSIBILITY_FONT_SCALE);
@@ -1590,12 +1590,12 @@ export function PassengerHomeOverlaySkeleton({
 export default memo(PassengerHomeOverlay);
 
 const styles = StyleSheet.create({
-  categorySheetHandle: { width: 32, height: 3, borderRadius: 2, backgroundColor: '#E5E5E5', alignSelf: 'center', marginBottom: 14 },
-  leafCategoryRow: { minHeight: 58, paddingLeft: 12, paddingVertical: 8, flexDirection: 'row', alignItems: 'center', gap: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#E5E5E5' },
+  categorySheetHandle: { width: 32, height: 3, borderRadius: 2, backgroundColor: '#E5E5E5', alignSelf: 'center', marginBottom: 8 },
+  leafCategoryRow: { minHeight: 54, paddingLeft: 12, paddingVertical: 6, flexDirection: 'row', alignItems: 'center', gap: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#E5E5E5' },
   leafCategoryMarker: { position: 'absolute', left: 0, width: 3, height: 30, borderRadius: 2, backgroundColor: '#1A330E', zIndex: 2 },
   leafCategoryCopy: { flex: 1, minWidth: 0, gap: 2 },
-  leafCategoryName: { ...leafTypography.bold, fontSize: 20, lineHeight: 26, letterSpacing: -0.3, color: '#222222' },
-  leafCategoryDetail: { ...leafTypography.regular, fontSize: 15, lineHeight: 26, color: '#6A6A6A' },
+  leafCategoryName: { ...leafTypography.bold, fontSize: 20, lineHeight: 22, letterSpacing: -0.3, color: '#222222' },
+  leafCategoryDetail: { ...leafTypography.regular, fontSize: 15, lineHeight: 19, color: '#6A6A6A' },
   // Fixed width: the footnote changes with selection; a content-sized column
   // reflowed the description and shifted every row below it.
   leafCategoryValue: { width: 128, alignItems: 'flex-end', gap: 2 },
@@ -1624,7 +1624,7 @@ const styles = StyleSheet.create({
     lineHeight: 16,
     marginTop: 6,
   },
-  leafCategoryPrice: { ...leafTypography.semiBold, fontSize: 17, lineHeight: 26, fontVariant: ['tabular-nums'], color: '#222222' },
+  leafCategoryPrice: { ...leafTypography.semiBold, fontSize: 17, lineHeight: 22, fontVariant: ['tabular-nums'], color: '#222222' },
   leafCategoryBreakdownMuted: { opacity: 0.35 },
   leafCategoryBreakdown: { minHeight: 40, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   homeStack: {
@@ -2297,7 +2297,7 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   categoryConfirmButton: {
-    marginTop: 18,
+    marginTop: 12,
     minHeight: leafButtonMetrics.height,
     borderRadius: 12,
     alignItems: "center",
@@ -2430,8 +2430,7 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     color: "rgba(17,33,12,0.70)",
     textAlign: "center",
-    marginTop: 10,
-    marginBottom: 2,
+    marginTop: 6,
     paddingHorizontal: 8,
   },
   fareBreakdownRouteDetail: {
