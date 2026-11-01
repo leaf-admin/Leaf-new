@@ -1,5 +1,6 @@
 jest.mock('../../../services/rating-service', () => ({
   submitRating: jest.fn(),
+  submitAirConditioningFeedback: jest.fn(),
   getTripRatings: jest.fn(),
   getUserRatings: jest.fn(),
   hasUserRatedTrip: jest.fn()
@@ -166,6 +167,38 @@ describe('registerSocketRatingHandler scope guards', () => {
       expect.objectContaining({
         code: 'RIDE_SCOPE_DENIED'
       })
+    );
+  });
+
+  it('records the air conditioning answer for the ride passenger', async () => {
+    ratingService.submitAirConditioningFeedback.mockResolvedValue({
+      success: true,
+      tripId: 'ride_1',
+      airConditioningOk: true
+    });
+    const { handlers, socket } = createHarness();
+
+    await handlers.submitAirConditioning({ tripId: 'ride_1', airConditioningOk: true });
+
+    expect(ratingService.submitAirConditioningFeedback).toHaveBeenCalledWith(
+      { tripId: 'ride_1', airConditioningOk: true },
+      expect.objectContaining({ socketUserId: 'passenger_1', socketUserType: 'passenger' })
+    );
+    expect(socket.emit).toHaveBeenCalledWith(
+      'airConditioningSubmitted',
+      expect.objectContaining({ success: true, tripId: 'ride_1' })
+    );
+  });
+
+  it('does not let the driver answer the air conditioning question', async () => {
+    const { handlers, socket } = createHarness({ userId: 'driver_1', userType: 'driver' });
+
+    await handlers.submitAirConditioning({ tripId: 'ride_1', airConditioningOk: true });
+
+    expect(ratingService.submitAirConditioningFeedback).not.toHaveBeenCalled();
+    expect(socket.emit).toHaveBeenCalledWith(
+      'airConditioningSubmitted',
+      expect.objectContaining({ success: false })
     );
   });
 

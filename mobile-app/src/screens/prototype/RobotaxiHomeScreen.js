@@ -9979,11 +9979,20 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       driverActiveRide?.id ||
       '',
   ).trim();
+  // Oferta valendo passa na frente do fim de corrida: o card da oferta fica na Início e
+  // o recibo volta se o motorista recusar.
+  const driverOfferDeadlineMs = driverLiveOffer ? resolveDriverOfferDeadlineMs(driverLiveOffer, Date.now()) : NaN;
+  const driverOfferPreemptsReceipt = Boolean(
+    isDriverRole &&
+      driverLiveOfferInstance &&
+      !(Number.isFinite(driverOfferDeadlineMs) && driverOfferDeadlineMs <= Date.now()),
+  );
   const shouldPresentCompletedReceipt = Boolean(
     isHomeRoute &&
       normalizedBookingStatus === 'completed' &&
       completedReceiptBookingId &&
-      (isDriverRole || lastReceipt?.id),
+      (isDriverRole || lastReceipt?.id) &&
+      !driverOfferPreemptsReceipt,
   );
 
 

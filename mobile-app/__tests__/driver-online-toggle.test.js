@@ -1226,8 +1226,55 @@ describe('driver online toggle', () => {
     );
 
     expect(screen.getByTestId('driver-receipt-screen')).toBeTruthy();
-    expect(screen.getByTestId('driver-receipt-rate-passenger-button')).toBeTruthy();
+    expect(screen.getByTestId('ride-closing-card')).toBeTruthy();
     expect(screen.queryByTestId('driver-home-toggle-online')).toBeNull();
+  });
+
+  it('puts a live offer in front of the end-of-ride card', () => {
+    const receipt = {
+      id: 'booking_done',
+      authoritativeSnapshot: true,
+      financialSnapshotSource: 'backend_final',
+      fare: 25,
+      finalFare: 25,
+      driverNetAmount: 21.34,
+      totalFees: 3.66,
+      paymentMethod: 'pix',
+      driverId: 'driver_1',
+      passengerId: 'customer_1',
+      passengerName: 'Passenger Test',
+    };
+    usePrototypeRideRuntime.mockReturnValue(
+      buildDriverRuntime({
+        bookingStatus: 'completed',
+        driverActiveRide: null,
+        driverTripAssist: { status: '' },
+        profileUid: 'driver_1',
+        tripHistory: [receipt],
+        lastReceipt: receipt,
+        driverOffers: [{
+          bookingId: 'booking_next',
+          id: 'booking_next',
+          pickupAddress: '1540 Mission St, San Francisco',
+          dropoffAddress: '1 Ferry Building, San Francisco',
+          estimatedDriverNetAmount: 15.01,
+          pricingSnapshotLocked: true,
+          payout: 'R$ 15,01',
+        }],
+        dismissCompletedReceipt: jest.fn(),
+        recoverCompletedReceipt: jest.fn(),
+      })
+    );
+
+    const screen = render(
+      <RobotaxiHomeScreen
+        navigation={{ navigate: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() }}
+        route={{ params: {} }}
+      />
+    );
+
+    expect(screen.queryByTestId('ride-closing-card')).toBeNull();
+    expect(screen.queryByTestId('driver-receipt-screen')).toBeNull();
   });
 
   it('routes terminal no-driver passenger home sync to the no-drivers surface', async () => {

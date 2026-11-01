@@ -28,6 +28,8 @@ import { formatTripDateLabel, resolveTripAddressLabel } from "./tripAddressPrese
 import { PrototypeMenuCloseButton } from "../../components/prototype/PrototypeMenuSurface";
 import robotaxiPrototypeTokens from "../../components/design-system/robotaxiPrototypeTokens";
 import { usePrototypeMapOcclusion } from "./prototypeMapOcclusion";
+import RideClosingCard from "./RideClosingCard";
+import { submitTripAirConditioning, submitTripRating } from "./tripRatingSubmission";
 import { usePrototypeRideRuntime } from "./prototypeRideRuntime";
 import { formatVehicleDisplayText } from "../../utils/vehicleDisplayText";
 import {
@@ -51,6 +53,7 @@ import {
 const RECEIPT_ROUTE_EDGE_PADDING = { top: 28, right: 28, bottom: 28, left: 28 };
 const { color } = robotaxiPrototypeTokens;
 const SHEET_TOP_OFFSET = 8;
+const TICKET_DOTS = "· ".repeat(90);
 const SHEET_BOTTOM_OFFSET = 8;
 const FALLBACK_CARD_HEIGHT = 420;
 const receiptMapStyle = [
@@ -685,6 +688,7 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
     dismissCompletedReceipt,
     recoverCompletedReceipt,
     reportIncident,
+    markTripRating,
   } =
     usePrototypeRideRuntime();
   const insets = useSafeAreaInsets();
@@ -692,7 +696,9 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
   const { height: windowHeight } = useWindowDimensions();
   const [cardHeight, setCardHeight] = useState(FALLBACK_CARD_HEIGHT);
   const [showFeeBreakdown, setShowFeeBreakdown] = useState(false);
-  const [receiptOptionsVisible, setReceiptOptionsVisible] = useState(false);
+  // Vindo da corrida, o recibo começa como card sobre o mapa e expande para o cupom.
+  const [fullReceiptOpen, setFullReceiptOpen] = useState(false);
+  const [closingDetailsOpened, setClosingDetailsOpened] = useState(false);
   // Waze/Maps aberto nesta corrida: o recibo do motorista oferece fechar a navegação.
   const [openExternalNavigation, setOpenExternalNavigation] = useState(null);
   useEffect(() => {
@@ -795,6 +801,7 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
   const isDriverView = viewerRole === "driver";
   const compactDriverLayout = isDriverView && windowHeight <= 920;
   const hasSelectedReceipt = Boolean(selected?.id);
+  const closingActive = fromTrip && hasSelectedReceipt && !fullReceiptOpen;
   const resolvedGrossAmount = Math.max(0, resolveTripGrossAmount(selected));
   const hasReceiptFinancialContract = hasBackendFinalReceiptFinancialContract(
     selected,
@@ -1618,10 +1625,17 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
   const fitReceiptRoute = (mapView) => {
     if (!mapView?.fitToCoordinates || routePreviewCoordinates.length < 2) return;
     mapView.fitToCoordinates(routePreviewCoordinates, {
-      edgePadding: RECEIPT_ROUTE_EDGE_PADDING,
+      edgePadding: closingActive
+        ? { ...RECEIPT_ROUTE_EDGE_PADDING, top: insets.top + 28, bottom: cardHeight + 40 }
+        : RECEIPT_ROUTE_EDGE_PADDING,
       animated: false,
     });
   };
+
+  // O card muda de altura a cada etapa: a rota continua visível acima dele.
+  useEffect(() => {
+    if (closingActive) fitReceiptRoute(cleanMapRef.current);
+  }, [cardHeight, closingActive]);
 
   const renderCleanMap = () => {
     if (routePreviewRegion && routePreviewCoordinates.length >= 2) {
@@ -1747,19 +1761,53 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
     testID,
     valueTestID,
   }) => (
-    <View style={styles.receiptCleanValueRow} testID={testID}>
-      <View style={styles.receiptCleanValueCopy}>
-        <Text style={[styles.receiptCleanValueTitle, muted && styles.receiptCleanValueTitleMuted]}>{title}</Text>
-        {subtitle ? <Text style={styles.receiptCleanValueSubtitle}>{subtitle}</Text> : null}
+    <View testID={testID}>
+      <View style={styles.ticketRow}>
+        <Text style={[styles.ticketRowTitle, muted && styles.receiptCleanValueTitleMuted]}>{title}</Text>
+        <Text style={styles.ticketLeader} numberOfLines={1} ellipsizeMode="clip" importantForAccessibility="no" accessibilityElementsHidden>
+          {TICKET_DOTS}
+        </Text>
+        <Text
+          style={[styles.ticketRowValue, muted && styles.receiptCleanValueAmountMuted]}
+          numberOfLines={1}
+          testID={valueTestID}
+        >
+          {value}
+        </Text>
       </View>
-      <Text
-        style={[styles.receiptCleanValueAmount, muted && styles.receiptCleanValueAmountMuted]}
-        testID={valueTestID}
-      >
-        {value}
-      </Text>
+      {subtitle ? <Text style={styles.ticketRowNote}>{subtitle}</Text> : null}
     </View>
   );
+
+  const renderTicketDots = () => (
+    <Text style={styles.ticketDivider} numberOfLines={1} ellipsizeMode="clip" importantForAccessibility="no" accessibilityElementsHidden>
+      {TICKET_DOTS}
+    </Text>
+  );
+
+  const buildClosingValueRows = () => {
+    if (isDriverView) {
+      return [
+        { label: "Pago pelo passageiro", value: totalAmountLabel },
+        { label: "Pedágio repassado", value: formatReceiptMoney(tollAmount), testID: "driver-closing-toll-row" },
+        { label: "Taxas Leaf", value: `− ${formatReceiptMoney(finalTotalFees)}`, testID: "driver-closing-fees-row" },
+      ];
+    }
+    if (showPassengerOperationalSettlement) {
+      return [
+        { label: "Pix pago original", value: formatCurrency(operationalInterruptionSettlement.originalPaidAmount) },
+        {
+          label: operationalInterruptionSettlement.refundLabel,
+          value: formatCurrency(operationalInterruptionSettlement.refundAmount),
+        },
+      ];
+    }
+    return [
+      { label: "Corrida", value: formatReceiptMoney(passengerRideSubtotal) },
+      { label: "Pedágio", value: formatReceiptMoney(tollAmount), testID: "passenger-closing-toll-row" },
+      { label: "Taxa Leaf", value: formatReceiptMoney(finalTotalFees), testID: "passenger-closing-fees-row" },
+    ];
+  };
 
   const renderCleanRecentHistory = () => {
     if (!isDriverView || driverRecentHistory.length === 0) {
@@ -1793,6 +1841,81 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
     );
   };
 
+  const submitClosingRating = ({ rating, selectedOptions, comment }) =>
+    submitTripRating({
+      tripId: selected?.id,
+      reviewerId: profile?.uid,
+      reviewerType: isDriverView ? "driver" : "passenger",
+      targetUserId: isDriverView ? selected?.passengerId : passengerRatingTargetDriverId,
+      rating,
+      comment,
+      selectedOptions,
+      markTripRating,
+    });
+
+  const answerClosingAirConditioning = (airConditioningOk) =>
+    submitTripAirConditioning({ tripId: selected?.id, airConditioningOk, markTripRating });
+
+  if (closingActive) {
+    const closingDateLabel = formatTripDateLabel(selected?.date || selected?.completedAt || selected?.createdAt);
+    const closingRating = isDriverView
+      ? { rated: driverRatingSubmitted, canRate: canDriverRatePassenger, targetName: selected?.passengerName }
+      : { rated: passengerRatingSubmitted, canRate: canPassengerRateDriver, targetName: passengerRatingTargetDriverName };
+    const closingTargetFirstName = /^(motorista|passageiro) leaf$/i.test(String(closingRating.targetName || "").trim())
+      ? ""
+      : String(closingRating.targetName || "").trim().split(/\s+/)[0];
+    const closingAmountCaption = isDriverView
+      ? hasDriverNetAmount ? "Corrida concluída · Líquido" : driverReceiptAmountLabel
+      : showPassengerOperationalSettlement
+        ? "Corrida concluída · Valor final"
+        : `Corrida concluída · ${receiptPaymentPill}`;
+    const closingAmount = isDriverView
+      ? hasDriverNetAmount ? `+ ${driverReceivedAmount}` : "--"
+      : showPassengerOperationalSettlement
+        ? formatCurrency(operationalInterruptionSettlement.finalAmount)
+        : receiptTotalLabel;
+
+    return (
+      <PrototypeScreenTransition direction="up">
+        <View
+          style={styles.closingContainer}
+          testID={isDriverView ? "driver-receipt-screen" : "passenger-receipt-screen"}
+          accessibilityLabel={isDriverView ? "Recibo do motorista" : "Recibo do passageiro"}
+          accessibilityElementsHidden={!isScreenFocused}
+          importantForAccessibility={isScreenFocused ? "auto" : "no-hide-descendants"}
+          pointerEvents={isScreenFocused ? "auto" : "none"}
+        >
+          <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
+          {routePreviewRegion && routePreviewCoordinates.length >= 2 ? (
+            <View style={StyleSheet.absoluteFill} testID="receipt-route-snapshot">{renderCleanMap()}</View>
+          ) : null}
+          <RideClosingCard
+            isDriver={isDriverView}
+            amountCaption={closingAmountCaption}
+            amount={closingAmount}
+            amountTestID={isDriverView ? "driver-closing-amount" : "passenger-closing-amount"}
+            tripSummary={[dropoffLocation.title, tripDistanceLabel, tripDurationLabel].filter(Boolean).join(" · ")}
+            dateLabel={closingDateLabel}
+            targetFirstName={closingTargetFirstName}
+            pickupTitle={pickupLocation.title}
+            dropoffTitle={dropoffLocation.title}
+            valueRows={buildClosingValueRows()}
+            canRate={closingRating.canRate}
+            airConditioningAnswered={typeof selected?.airConditioningOk === "boolean"}
+            rated={closingRating.rated}
+            detailsOpened={closingDetailsOpened}
+            onAnswerAirConditioning={answerClosingAirConditioning}
+            onSubmitRating={submitClosingRating}
+            onOpenDetails={() => setClosingDetailsOpened(true)}
+            onOpenFullReceipt={() => setFullReceiptOpen(true)}
+            onDone={handleDismiss}
+            onLayout={handleCardLayout}
+          />
+        </View>
+      </PrototypeScreenTransition>
+    );
+  }
+
   return (
     <PrototypeScreenTransition direction="up">
       <View
@@ -1805,8 +1928,8 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
       >
         <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
         <View style={[styles.receiptPageHeader, { paddingTop: insets.top + 20 }]}>
-          <LeafTouchable style={styles.receiptPageBack} activeOpacity={0.76} onPress={handleDismiss}
-            testID={closeButtonTestId} accessibilityRole="button" accessibilityLabel="Voltar ao mapa" accessibilityHint="Fecha o recibo e retorna ao mapa.">
+          <LeafTouchable style={styles.receiptPageBack} activeOpacity={0.76} onPress={fullReceiptOpen ? () => setFullReceiptOpen(false) : handleDismiss}
+            testID={closeButtonTestId} accessibilityRole="button" accessibilityLabel={fullReceiptOpen ? "Voltar ao resumo" : "Voltar ao mapa"} accessibilityHint={fullReceiptOpen ? "Volta ao resumo da corrida." : "Fecha o recibo e retorna ao mapa."}>
             <Ionicons name="arrow-back" size={20} color="#222222" />
           </LeafTouchable><Text style={styles.receiptPageContext}>Sua viagem</Text>
         </View>
@@ -1819,33 +1942,33 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
           onLayout={handleCardLayout}
         >
           <View style={styles.receiptCleanSheet}>
-            {isDriverView && hasDriverNetAmount ? (
-              // Driver finish: what they earned is the hero, then the details.
-              <View style={styles.driverFinishHero} testID="driver-receipt-finish-hero">
-                <View style={styles.driverFinishCheck}>
-                  <Ionicons name="checkmark" size={26} color="#FFFFFF" />
-                </View>
-                <Text style={styles.driverFinishLabel}>Corrida concluída</Text>
-                <Text style={styles.driverFinishAmount} numberOfLines={1} adjustsFontSizeToFit>
-                  + {driverReceivedAmount}
-                </Text>
-                <Text style={styles.receiptCleanRowSubtitle}>{formatTripDateLabel(selected?.date || selected?.completedAt || selected?.createdAt)}</Text>
-              </View>
-            ) : (
-              <View style={styles.receiptLead}>
-                <View style={{ flex: 1, gap: 9 }}><Text style={styles.receiptLeadTitle}>Recibo da viagem</Text>
-                  <Text style={styles.receiptCleanRowSubtitle}>{formatTripDateLabel(selected?.date || selected?.completedAt || selected?.createdAt)}</Text></View>
-                <LeafObjectIcon name="activity" size={48} />
-              </View>
-            )}
-            {/* Without coordinates there is nothing to draw: a slim note instead of
-                a quarter-screen empty block. */}
-            {routePreviewRegion && routePreviewCoordinates.length >= 2
-              ? <View style={styles.receiptSnapshot} testID="receipt-route-snapshot">{renderCleanMap()}</View>
-              : <View style={styles.receiptRouteUnavailable} testID="receipt-route-snapshot" accessibilityLabel="Rota desta viagem não disponível">
-                  <Ionicons name="map-outline" size={18} color="#6A6A6A" />
-                  <Text style={styles.receiptRouteUnavailableText}>Mapa da rota indisponível para esta viagem</Text>
-                </View>}
+            {/* Cupom: valor primeiro, depois trajeto, composição e dados da corrida. */}
+            <View style={styles.ticketCaptionRow}>
+              <Text style={styles.ticketCaption}>
+                {isDriverView
+                  ? driverReceiptAmountLabel
+                  : showPassengerOperationalSettlement
+                    ? "Pix pago original"
+                    : "Total pago"}
+              </Text>
+              <Text style={styles.ticketCaption}>·</Text>
+              <Text style={styles.ticketCaption}>{receiptPaymentPill}</Text>
+            </View>
+            <Text
+              style={styles.ticketAmount}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              testID={showPassengerOperationalSettlement
+                ? "passenger-receipt-original-paid-amount"
+                : undefined}
+            >
+              {isDriverView
+                ? hasDriverNetAmount ? `+ ${driverReceivedAmount}` : "--"
+                : showPassengerOperationalSettlement
+                  ? formatCurrency(operationalInterruptionSettlement.originalPaidAmount)
+                  : receiptTotalLabel}
+            </Text>
+            <Text style={styles.ticketMeta}>{formatTripDateLabel(selected?.date || selected?.completedAt || selected?.createdAt)}</Text>
             {receiptNeedsRecovery ? (
               <View
                 style={styles.receiptRecoveryCard}
@@ -1872,87 +1995,28 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
               </View>
             ) : null}
 
-            {renderCleanRouteRow({
-              label: "Origem",
-              title: pickupLocation.title,
-              subtitle: pickupLocation.subtitle,
-              topDivider: true,
-            })}
-
-            {renderCleanRouteRow({
-              label: "Destino",
-              title: dropoffLocation.title,
-              subtitle: dropoffLocation.subtitle,
-              topDivider: false,
-            })}
-
-            <View style={styles.receiptCleanDivider} />
-
-            <View style={styles.receiptCleanMetrics}>
-              <View style={styles.receiptCleanMetricCell}>
-                <Text style={styles.receiptCleanMetricValue}>{tripDistanceLabel}</Text>
-                <Text style={styles.receiptCleanMetricLabel}>rodados</Text>
-              </View>
-              <View style={styles.receiptCleanMetricCell}>
-                <Text style={styles.receiptCleanMetricValue}>{tripDurationLabel}</Text>
-                <Text style={styles.receiptCleanMetricLabel}>tempo</Text>
-              </View>
-              <View style={styles.receiptCleanMetricCell}>
-                <Text style={styles.receiptCleanMetricValue}>
-                  {formatReceiptMoney(tollAmount)}
-                </Text>
-                <Text style={styles.receiptCleanMetricLabel}>pedágio</Text>
-              </View>
-            </View>
-
-            <View style={styles.receiptCleanTotalRow}>
-              <View>
-                <Text style={styles.receiptCleanTotalLabel}>
-                  {isDriverView
-                    ? driverReceiptAmountLabel
-                    : showPassengerOperationalSettlement
-                      ? "Pix pago original"
-                      : "Total pago"}
-                </Text>
-                <Text
-                  style={styles.receiptCleanTotalValue}
-                  testID={showPassengerOperationalSettlement
-                    ? "passenger-receipt-original-paid-amount"
-                    : undefined}
-                >
-                  {showPassengerOperationalSettlement
-                    ? formatCurrency(operationalInterruptionSettlement.originalPaidAmount)
-                    : receiptTotalLabel}
-                </Text>
-              </View>
-              <View style={styles.receiptCleanPillColumn}>
-                <View style={styles.receiptCleanPill}>
-                  <Text style={styles.receiptCleanPillText}>{receiptPaymentPill}</Text>
-                </View>
-              </View>
-            </View>
-
-            <View style={styles.receiptCleanDivider} />
-            <Text style={styles.receiptCleanSectionTitle}>Pagamento</Text>
+            {renderTicketDots()}
+            <Text style={styles.ticketStop} numberOfLines={2}>{pickupLocation.title}</Text>
+            {pickupLocation.subtitle ? <Text style={styles.ticketStopSub} numberOfLines={2}>{pickupLocation.subtitle}</Text> : null}
+            <Text style={styles.ticketStop} numberOfLines={2}>{dropoffLocation.title}</Text>
+            {dropoffLocation.subtitle ? <Text style={styles.ticketStopSub} numberOfLines={2}>{dropoffLocation.subtitle}</Text> : null}
+            {renderTicketDots()}
 
             <View style={styles.receiptCleanValueBlock}>
               {isDriverView ? (
                 <>
                   {renderCleanValueRow({
                     title: "Valor da corrida",
-                    subtitle: "Total pago pelo passageiro",
                     value: totalAmountLabel,
                   })}
                   {renderCleanValueRow({
                     title: "Pedágio",
-                    subtitle: "Repassado integralmente",
                     value: formatReceiptMoney(tollAmount),
                     testID: "driver-receipt-toll-row",
                     valueTestID: "driver-receipt-toll-amount",
                   })}
                   {renderCleanValueRow({
                     title: "Taxas Leaf",
-                    subtitle: "Operacional e processamento antes do repasse",
                     value: formatReceiptMoney(finalTotalFees),
                     muted: true,
                     testID: "driver-receipt-fees-row",
@@ -1960,9 +2024,7 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                   })}
                   {renderCleanValueRow({
                     title: "Repasse Leaf",
-                    subtitle: hasDriverNetAmount
-                      ? "Líquido desta corrida"
-                      : "Aguardando dados de repasse",
+                    subtitle: hasDriverNetAmount ? undefined : "Aguardando dados de repasse",
                     value: driverReceivedAmount,
                   })}
                 </>
@@ -1992,21 +2054,18 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                   <>
                     {renderCleanValueRow({
                       title: "Corrida",
-                      subtitle: "Trajeto e serviço",
                       value: formatReceiptMoney(passengerRideSubtotal),
                       testID: "passenger-receipt-subtotal-row",
                       valueTestID: "passenger-receipt-subtotal-amount",
                     })}
                     {renderCleanValueRow({
                       title: "Pedágio",
-                      subtitle: "Incluso no total pago",
                       value: formatReceiptMoney(tollAmount),
                       testID: "passenger-receipt-toll-row",
                       valueTestID: "passenger-receipt-toll-amount",
                     })}
                     {renderCleanValueRow({
                       title: "Taxa Leaf",
-                      subtitle: "Inclusa no total pago",
                       value: formatReceiptMoney(finalTotalFees),
                       testID: "passenger-receipt-fees-row",
                       valueTestID: "passenger-receipt-fees-amount",
@@ -2016,21 +2075,24 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
               )}
             </View>
 
-            <View style={styles.receiptCleanDivider} />
-            <Text style={styles.receiptCleanSectionTitle}>{isDriverView ? "Passageiro" : "Motorista"}</Text>
-            {renderCleanAvatarRow({
-              topDivider: false,
-              marker: receiptPersonName.slice(0, 1).toUpperCase(),
-              title: receiptPersonName,
-              subtitle: receiptVehicleLabel,
-              subtitleTestID: !isDriverView
-                ? "passenger-receipt-vehicle-model-color"
-                : undefined,
-              right: receiptPlateLabel,
-              rightTestID: !isDriverView
-                ? "passenger-receipt-vehicle-plate"
-                : undefined,
-            })}
+            {renderTicketDots()}
+            {renderCleanValueRow({ title: "Distância", value: tripDistanceLabel })}
+            {renderCleanValueRow({ title: "Tempo", value: tripDurationLabel })}
+            {renderCleanValueRow({ title: isDriverView ? "Passageiro" : "Motorista", value: receiptPersonName })}
+            {!isDriverView ? (
+              <>
+                {renderCleanValueRow({
+                  title: "Veículo",
+                  value: receiptVehicleLabel,
+                  valueTestID: "passenger-receipt-vehicle-model-color",
+                })}
+                {renderCleanValueRow({
+                  title: "Placa",
+                  value: receiptPlateLabel,
+                  valueTestID: "passenger-receipt-vehicle-plate",
+                })}
+              </>
+            ) : null}
 
             {isDriverView ? (
               <>
@@ -2048,67 +2110,6 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
               </View>
             )}
 
-            <View style={styles.receiptCleanActions}>
-              {!isDriverView ? (
-                <LeafTouchable
-                  style={styles.receiptCleanMoreOptionsButton}
-                  activeOpacity={0.86}
-                  accessible
-                  accessibilityRole="button"
-                  accessibilityLabel={receiptOptionsVisible ? "Ocultar opções" : "Mais opções"}
-                  accessibilityState={{ expanded: receiptOptionsVisible }}
-                  testID="passenger-receipt-more-options-button"
-                  onPress={() => setReceiptOptionsVisible((visible) => !visible)}
-                >
-                  <Text style={styles.receiptCleanMoreOptionsText}>
-                    {receiptOptionsVisible ? "Ocultar opções" : "Mais opções"}
-                  </Text>
-                </LeafTouchable>
-              ) : null}
-
-              <LeafTouchable
-                style={[
-                  styles.receiptCleanPrimaryButton,
-                  isDriverView && styles.receiptCleanPrimaryButtonFull,
-                  receiptPrimaryDisabled && styles.receiptCleanPrimaryButtonDisabled,
-                ]}
-                activeOpacity={0.86}
-                disabled={receiptPrimaryDisabled}
-                accessible
-                accessibilityRole="button"
-                accessibilityState={{ disabled: receiptPrimaryDisabled }}
-                testID={isDriverView ? "driver-receipt-rate-passenger-button" : "passenger-receipt-rate-trip-button"}
-                accessibilityLabel={ratingButtonLabel}
-                onPress={isDriverView ? openDriverReceiptRating : openPassengerReceiptRating}
-                onAccessibilityTap={isDriverView ? openDriverReceiptRating : openPassengerReceiptRating}
-              >
-                <Text style={styles.receiptCleanPrimaryButtonText}>{ratingButtonLabel}</Text>
-              </LeafTouchable>
-            </View>
-
-            {!isDriverView && receiptOptionsVisible ? (
-              <LeafTouchable
-                style={styles.receiptCleanSecondaryButton}
-                activeOpacity={0.86}
-                accessible
-                accessibilityRole="button"
-                accessibilityLabel="Reportar problema com a viagem"
-                accessibilityHint="Abre o suporte para informar um problema de cobrança."
-                testID="passenger-receipt-report-issue-button"
-                onPress={() =>
-                  navigation.navigate("RobotaxiPrototypeSupport", {
-                    fromReceipt: true,
-                    initialTopicId: "billing",
-                    receipt: selected,
-                    bookingId: selected?.bookingId || selected?.id,
-                    source: "receipt",
-                    bookingStatus: "completed",
-                  })
-                }
-              >
-                <Text style={styles.receiptCleanSecondaryButtonText}>Reportar problema</Text>
-              </LeafTouchable>
-            ) : null}
             {selected?.id ? <View style={styles.receiptReference}>
               <Text style={styles.receiptCleanRowSubtitle}>Referência</Text><Text selectable numberOfLines={1} ellipsizeMode="middle" accessibilityLabel={`Referência da corrida ${selected.id}`} style={styles.receiptReferenceValue}>{selected.id}</Text>
             </View> : null}
@@ -2127,8 +2128,53 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                 style={{ marginTop: 20 }}
               />
             ) : null}
-            {/* Secondary: "Avaliar corrida" is the primary action on this screen. */}
-            <LeafButton label="Concluir" tone="secondary" onPress={handleDismiss} testID="receipt-done-button" style={{ marginTop: isDriverView && openExternalNavigation ? 10 : 20 }} />
+            {!isDriverView ? (
+              <LeafTouchable
+                style={styles.ticketLink}
+                activeOpacity={0.76}
+                accessible
+                accessibilityRole="button"
+                accessibilityLabel="Problema com esta corrida"
+                accessibilityHint="Abre o suporte para informar um problema de cobrança."
+                testID="passenger-receipt-report-issue-button"
+                onPress={() =>
+                  navigation.navigate("RobotaxiPrototypeSupport", {
+                    fromReceipt: true,
+                    initialTopicId: "billing",
+                    receipt: selected,
+                    bookingId: selected?.bookingId || selected?.id,
+                    source: "receipt",
+                    bookingStatus: "completed",
+                  })
+                }
+              >
+                <Text style={styles.ticketLinkText}>Problema com esta corrida</Text>
+              </LeafTouchable>
+            ) : null}
+            {/* Vindo da corrida, a nota já foi pedida no card. */}
+            {!fromTrip ? (
+              <View style={styles.receiptCleanActions}>
+                <LeafTouchable
+                  style={[
+                    styles.receiptCleanPrimaryButton,
+                    styles.receiptCleanPrimaryButtonFull,
+                    receiptPrimaryDisabled && styles.receiptCleanPrimaryButtonDisabled,
+                  ]}
+                  activeOpacity={0.86}
+                  disabled={receiptPrimaryDisabled}
+                  accessible
+                  accessibilityRole="button"
+                  accessibilityState={{ disabled: receiptPrimaryDisabled }}
+                  testID={isDriverView ? "driver-receipt-rate-passenger-button" : "passenger-receipt-rate-trip-button"}
+                  accessibilityLabel={ratingButtonLabel}
+                  onPress={isDriverView ? openDriverReceiptRating : openPassengerReceiptRating}
+                  onAccessibilityTap={isDriverView ? openDriverReceiptRating : openPassengerReceiptRating}
+                >
+                  <Text style={styles.receiptCleanPrimaryButtonText}>{ratingButtonLabel}</Text>
+                </LeafTouchable>
+              </View>
+            ) : null}
+            <LeafButton label="Concluir" tone="secondary" onPress={handleDismiss} testID="receipt-done-button" style={{ marginTop: 10 }} />
           </View>
         </ScrollView>
       </View>
@@ -3174,6 +3220,103 @@ const styles = StyleSheet.create({
   receiptCleanContainer: {
     flex: 1,
     backgroundColor: "#FFFFFF",
+  },
+  closingContainer: {
+    flex: 1,
+    backgroundColor: "#DCE3DA",
+  },
+  ticketCaptionRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 4,
+  },
+  ticketCaption: {
+    ...leafTypography.medium,
+    fontSize: 13,
+    lineHeight: 18,
+    color: "#5F665B",
+  },
+  ticketAmount: {
+    ...leafTypography.bold,
+    marginTop: 2,
+    fontSize: 34,
+    lineHeight: 40,
+    letterSpacing: -0.4,
+    color: "#111410",
+    fontVariant: ["tabular-nums"],
+  },
+  ticketMeta: {
+    ...leafTypography.regular,
+    fontSize: 14,
+    lineHeight: 20,
+    color: "#5F665B",
+  },
+  ticketDivider: {
+    ...leafTypography.regular,
+    marginVertical: 10,
+    fontSize: 14,
+    lineHeight: 18,
+    letterSpacing: 1,
+    color: "#C9CEC5",
+  },
+  ticketStop: {
+    ...leafTypography.medium,
+    fontSize: 15,
+    lineHeight: 22,
+    color: "#111410",
+  },
+  ticketStopSub: {
+    ...leafTypography.regular,
+    marginBottom: 8,
+    fontSize: 13,
+    lineHeight: 18,
+    color: "#5F665B",
+  },
+  ticketRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    minHeight: 28,
+  },
+  ticketRowTitle: {
+    ...leafTypography.regular,
+    fontSize: 15,
+    lineHeight: 22,
+    color: "#111410",
+  },
+  ticketLeader: {
+    ...leafTypography.regular,
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 16,
+    letterSpacing: 1,
+    color: "#D6D9D6",
+  },
+  ticketRowNote: {
+    ...leafTypography.regular,
+    marginBottom: 4,
+    fontSize: 13,
+    lineHeight: 18,
+    color: "#5F665B",
+  },
+  ticketRowValue: {
+    ...leafTypography.semiBold,
+    flexShrink: 1,
+    fontSize: 15,
+    lineHeight: 22,
+    color: "#111410",
+    fontVariant: ["tabular-nums"],
+  },
+  ticketLink: {
+    minHeight: 44,
+    marginTop: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  ticketLinkText: {
+    ...leafTypography.medium,
+    fontSize: 14,
+    color: "#5F665B",
   },
   receiptCleanMapLayer: {
     position: "absolute",
