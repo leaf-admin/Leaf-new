@@ -2127,6 +2127,10 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     </View>
   );
 
+  const remainingDistanceText = distanceLabel && distanceLabel !== '--'
+    ? `${distanceLabel} ${/^1\s/.test(distanceLabel) ? 'restante' : 'restantes'}`
+    : 'Em rota';
+
   const renderCompactTripCard = () => (
     <View
       testID="passenger-trip-compact-summary"
@@ -2148,7 +2152,8 @@ export default function RobotaxiTripScreen({ navigation, route }) {
             title={compactArrivalTime && compactArrivalTime !== '--'
               ? `Chegada ${arrivalClockLabel ? 'às' : 'em'} ${compactArrivalTime}`
               : 'Em viagem'}
-            subtitle={compactEtaValue && compactEtaValue !== '--' ? `${compactEtaValue} restantes` : null}
+            subtitle={compactEtaValue && compactEtaValue !== '--' ? `${compactEtaValue} · ${remainingDistanceText}` : remainingDistanceText}
+            subtitleTestID={passengerCardFieldTestIDs.distance_remaining}
             value={fareLabel}
             valueLabel={vehicle}
             titleTestID={passengerCardFieldTestIDs.eta_final}
@@ -2170,16 +2175,6 @@ export default function RobotaxiTripScreen({ navigation, route }) {
               progressKey={liveRouteKey || 'passenger-trip-route'}
               fillTestID={passengerCardFieldTestIDs.route_progress}
             />
-            <View style={styles.startedProgressMetaRow}>
-              <Text style={styles.startedProgressMetaLabel}>Você está a caminho</Text>
-              <Text
-                style={styles.startedProgressMetaValue}
-                numberOfLines={1}
-                testID={passengerCardFieldTestIDs.distance_remaining}
-              >
-                {distanceLabel && distanceLabel !== '--' ? `${distanceLabel} ${/^1\s/.test(distanceLabel) ? 'restante' : 'restantes'}` : 'Em rota'}
-              </Text>
-            </View>
           </View>
           <RobotaxiLifecycleIdentity
             initial={driverInitial}
@@ -3372,7 +3367,7 @@ const styles = StyleSheet.create({
     gap: 8
   },
   startedActionDockCompact: {
-    marginTop: 16
+    marginTop: 12
   },
   startedActionDockExpanded: {
     marginTop: 14,
@@ -3746,26 +3741,6 @@ const styles = StyleSheet.create({
   },
   startedProgressTrack: {
     marginTop: 12,
-  },
-  startedProgressMetaRow: {
-    marginTop: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  startedProgressMetaLabel: {
-    flex: 1,
-    color: leafRideColors.secondary,
-    ...leafTypography.regular,
-    fontSize: 13,
-    lineHeight: 16,
-  },
-  startedProgressMetaValue: {
-    color: leafRideColors.text,
-    ...leafTypography.semiBold,
-    fontSize: 13,
-    lineHeight: 16,
   },
   tripRouteMeta: {
     marginTop: 8,
