@@ -1864,6 +1864,8 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
     const closingTargetFirstName = /^(motorista|passageiro) leaf$/i.test(String(closingRating.targetName || "").trim())
       ? ""
       : String(closingRating.targetName || "").trim().split(/\s+/)[0];
+    // "Botafogo Praia Shopping - Praia de Botafogo - Botafogo": no card basta o nome.
+    const closingDropoffTitle = String(dropoffLocation.title || "").split(" - ")[0];
     const closingAmountCaption = isDriverView
       ? hasDriverNetAmount ? "Corrida concluída · Líquido" : driverReceiptAmountLabel
       : showPassengerOperationalSettlement
@@ -1894,11 +1896,11 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
             amountCaption={closingAmountCaption}
             amount={closingAmount}
             amountTestID={isDriverView ? "driver-closing-amount" : "passenger-closing-amount"}
-            tripSummary={[dropoffLocation.title, tripDistanceLabel, tripDurationLabel].filter(Boolean).join(" · ")}
+            tripSummary={[closingDropoffTitle, tripDistanceLabel, tripDurationLabel].filter(Boolean).join(" · ")}
             dateLabel={closingDateLabel}
             targetFirstName={closingTargetFirstName}
             pickupTitle={pickupLocation.title}
-            dropoffTitle={dropoffLocation.title}
+            dropoffTitle={closingDropoffTitle}
             valueRows={buildClosingValueRows()}
             canRate={closingRating.canRate}
             airConditioningAnswered={typeof selected?.airConditioningOk === "boolean"}
