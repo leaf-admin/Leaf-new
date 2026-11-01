@@ -2101,12 +2101,9 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     else setIsTripPeek(true);
   };
   const handlePassengerTripSheetStep = () => {
+    // Expanded has no back button: a tap on the handle returns to the summary.
     if (isTripPeek) setIsTripPeek(false);
-    else if (!isTripExpanded) setIsTripExpanded(true);
-    else {
-      setIsTripExpanded(false);
-      setIsTripPeek(true);
-    }
+    else setIsTripExpanded(!isTripExpanded);
   };
 
   const renderPassengerPeekCard = () => (
@@ -2309,15 +2306,6 @@ export default function RobotaxiTripScreen({ navigation, route }) {
 
   const renderExpandedTripCard = () => (
     <View testID="passenger-trip-expanded-summary">
-      <RobotaxiLifecycleDisclosure
-        expanded
-        onPress={() => setIsTripExpanded(false)}
-        label="Mais opções"
-        expandedLabel="Voltar ao resumo"
-        testID="passenger-trip-collapse-button"
-        accessibilityLabel="Voltar ao resumo da viagem"
-      />
-
       <RobotaxiLifecycleSection>
         <RobotaxiLifecycleSummary
           eyebrow={isStarted ? 'EM VIAGEM' : isArrived ? 'MOTORISTA CHEGOU' : 'MOTORISTA A CAMINHO'}

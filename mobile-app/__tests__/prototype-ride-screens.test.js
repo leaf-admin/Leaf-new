@@ -2514,9 +2514,8 @@ describe('prototype ride screens', () => {
     expect(screen.queryByLabelText('Cancelar corrida')).toBeNull();
 
     fireEvent.press(screen.getByTestId('passenger-trip-accepted-more-options-button'));
-    expect(screen.getByTestId('passenger-trip-collapse-button').props.accessibilityLabel).toBe(
-      'Voltar ao resumo da viagem',
-    );
+    expect(screen.queryByTestId('passenger-trip-collapse-button')).toBeNull();
+    expect(screen.getByTestId('passenger-trip-expanded-summary')).toBeTruthy();
     expect(screen.getByLabelText('SOS')).toBeTruthy();
     expect(screen.getByTestId('ride-card-field-passenger-passenger_driver_accepted-vehicle_type')).toHaveTextContent(/Leaf Plus/);
     expect(
@@ -3299,13 +3298,15 @@ describe('prototype ride screens', () => {
       })
     );
 
-    expect(screen.getByTestId('passenger-trip-collapse-button').props.accessibilityLabel).toBe(
-      'Voltar ao resumo da viagem',
-    );
     expect(screen.getByLabelText('Falar no chat')).toBeTruthy();
     expect(screen.getByLabelText('Compartilhar viagem')).toBeTruthy();
     expect(screen.getByLabelText('Alterar destino')).toBeTruthy();
     expect(screen.getByLabelText('Encerrar corrida')).toBeTruthy();
+
+    // No back button in the expanded card: the handle returns to the summary.
+    fireEvent.press(screen.getByTestId('passenger-trip-sheet-handle'));
+    expect(screen.queryByTestId('passenger-trip-expanded-summary')).toBeNull();
+    expect(screen.getByTestId('passenger-trip-more-actions-button')).toBeTruthy();
   });
 
   it('hydrates accepted passenger vehicle and pickup ETA from active ride aliases', () => {
@@ -6029,7 +6030,7 @@ describe('prototype ride screens', () => {
       goBack: jest.fn(),
     };
     const receipt = buildReceiptRuntime().lastReceipt;
-    const { getByTestId, getByLabelText, getByPlaceholderText } = render(
+    const { getByTestId, getByLabelText, getByPlaceholderText, queryByPlaceholderText } = render(
       <RobotaxiRatingScreen
         navigation={navigation}
         route={{
@@ -6082,6 +6083,8 @@ describe('prototype ride screens', () => {
     expect(airConditioningNo.props.accessibilityState).toEqual({ checked: false });
     expect(getByTestId('passenger-rating-submit-button').props.accessibilityLabel)
       .toBe('Enviar avaliação');
+    expect(queryByPlaceholderText('Comentário opcional')).toBeNull();
+    fireEvent.press(getByTestId('rating-add-comment-button'));
     expect(getByPlaceholderText('Comentário opcional').props.accessibilityLabel)
       .toBe('Comentário sobre a viagem');
 
