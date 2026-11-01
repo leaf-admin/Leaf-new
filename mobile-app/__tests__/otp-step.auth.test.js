@@ -131,6 +131,34 @@ describe('OTPStep', () => {
     });
   });
 
+  test('reads the invalid code answer from the error the http client rejects with', async () => {
+    const apiClient = require('../src/services/httpClient');
+    apiClient.post.mockRejectedValueOnce(Object.assign(new Error('Não foi possível concluir esta ação agora.'), {
+      status: 400,
+      originalError: { response: { status: 400, data: { code: 'OTP_INVALID', error: 'Código inválido.' } } },
+    }));
+
+    const { getByTestId } = render(
+      <OTPStep
+        phoneNumber="+5521999999999"
+        confirmation={{ isCustomOtp: true, channel: 'whatsapp', verificationId: 'vid_test' }}
+        onVerified={jest.fn()}
+        onBack={jest.fn()}
+      />,
+    );
+
+    await fillOtp(getByTestId, '123456');
+
+    await waitFor(() => {
+      expect(Alert.alert).toHaveBeenCalledWith(
+        'Código não confirmado',
+        'Código inválido. Verifique o código recebido pelo WhatsApp e tente novamente.',
+        undefined,
+        undefined,
+      );
+    });
+  });
+
   test('shows the backend message when the WhatsApp code is locked after too many attempts', async () => {
     const apiClient = require('../src/services/httpClient');
     apiClient.post.mockRejectedValueOnce({

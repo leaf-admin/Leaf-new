@@ -274,7 +274,10 @@ const OTPStep = ({ phoneNumber, confirmation, onVerified, onBack, progressMeta }
             let errorMessage = 'Código inválido. Verifique e tente novamente.';
 
             // The Leaf backend answers in Portuguese (invalid, expired, too many attempts).
-            const rawMessage = error?.response?.data?.error || error.message;
+            // The http client keeps that answer only on originalError.
+            const rawMessage = error?.originalError?.response?.data?.error
+                || error?.response?.data?.error
+                || error.message;
             if (rawMessage) {
                 if (rawMessage.includes('invalid') || rawMessage.includes('inválido')) {
                     errorMessage = `Código inválido. Verifique o código recebido pelo ${otpChannelLabel} e tente novamente.`;
