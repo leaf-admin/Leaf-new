@@ -14,6 +14,12 @@ import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import LeafTouchable from "../../components/design-system/LeafTouchable";
 import leafTypography from "../../components/prototype/LeafTypography";
+import {
+  RobotaxiLifecycleButton,
+  RobotaxiLifecycleCard,
+  RobotaxiLifecycleSummary,
+  robotaxiLifecycleMetrics,
+} from "../../components/prototype/RobotaxiLifecycleUI";
 import robotaxiPrototypeTokens from "../../components/design-system/robotaxiPrototypeTokens";
 import { useHapticFeedback } from "../../hooks/useHapticFeedback";
 
@@ -27,7 +33,6 @@ const DRIVER_LOW_RATING_TAGS = [
   "Comportamento",
   "Cuidado com o veículo",
 ];
-const CARD_SIDE_GAP = 12;
 const CARD_TOP_RESERVE = 72;
 
 // Etapas do fim de corrida: "air" (só passageiro), "rate" e "details". O recibo completo
@@ -40,23 +45,6 @@ export function resolveInitialClosingStage({ isDriver, airConditioningAnswered, 
 
 function animateNextLayout() {
   LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-}
-
-function CardButton({ label, onPress, primary, disabled, testID, accessibilityLabel }) {
-  return (
-    <LeafTouchable
-      style={[styles.button, primary ? styles.buttonPrimary : styles.buttonSecondary, disabled && styles.buttonDisabled]}
-      activeOpacity={0.86}
-      disabled={disabled}
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel={accessibilityLabel || label}
-      accessibilityState={{ disabled: Boolean(disabled) }}
-      testID={testID}
-    >
-      <Text style={[styles.buttonText, primary && styles.buttonTextPrimary]}>{label}</Text>
-    </LeafTouchable>
-  );
 }
 
 export default function RideClosingCard({
@@ -163,40 +151,36 @@ export default function RideClosingCard({
   const lowRatingTags = isDriver ? DRIVER_LOW_RATING_TAGS : PASSENGER_LOW_RATING_TAGS;
   const cardMaxHeight = Math.max(320, windowHeight - insets.top - CARD_TOP_RESERVE);
 
-  const renderAmount = () => (
-    <>
-      <Text style={styles.caption}>{amountCaption}</Text>
-      <Text style={styles.amount} numberOfLines={1} adjustsFontSizeToFit testID={amountTestID}>
-        {amount}
-      </Text>
-    </>
+  const renderAmount = (subtitle) => (
+    <RobotaxiLifecycleSummary
+      eyebrow={amountCaption}
+      title={amount}
+      hero
+      subtitle={subtitle}
+      titleTestID={amountTestID}
+    />
   );
 
   const renderAirStage = () => (
     <View testID="closing-air-conditioning-stage">
-      <Text style={styles.caption}>Corrida concluída</Text>
-      <Text style={styles.question}>O ar ficou ligado a corrida toda?</Text>
+      <RobotaxiLifecycleSummary eyebrow="Corrida concluída" title="O ar ficou ligado a corrida toda?" />
       <View
-        style={styles.answers}
-        accessibilityRole="radiogroup"
+        style={styles.actions}
         accessibilityLabel="O ar-condicionado ficou ligado durante toda a corrida?"
       >
         {[
           { value: true, label: "Sim", spoken: "Sim, o ar-condicionado ficou ligado", testID: "closing-air-conditioning-yes" },
           { value: false, label: "Não", spoken: "Não, o ar-condicionado não ficou ligado", testID: "closing-air-conditioning-no" },
         ].map((option) => (
-          <LeafTouchable
+          <RobotaxiLifecycleButton
             key={option.label}
-            style={[styles.answer, busy && styles.buttonDisabled]}
-            activeOpacity={0.86}
+            label={option.label}
+            style={styles.action}
             disabled={busy}
             onPress={() => answerAirConditioning(option.value)}
-            accessibilityRole="radio"
             accessibilityLabel={option.spoken}
             testID={option.testID}
-          >
-            <Text style={styles.answerText}>{option.label}</Text>
-          </LeafTouchable>
+          />
         ))}
       </View>
       {airError ? (
@@ -221,8 +205,7 @@ export default function RideClosingCard({
 
   const renderRateStage = () => (
     <View testID="closing-rate-stage">
-      {renderAmount()}
-      <Text style={styles.meta} numberOfLines={2}>{tripSummary}</Text>
+      {renderAmount(tripSummary)}
       {canRate ? (
         <>
           <View style={styles.divider} />
@@ -298,15 +281,17 @@ export default function RideClosingCard({
         </Text>
       ) : null}
       <View style={styles.actions}>
-        <CardButton
+        <RobotaxiLifecycleButton
           label="Ver recibo"
+          style={styles.action}
           disabled={busy}
           onPress={() => leaveRating(openDetails)}
           testID="closing-view-receipt-button"
         />
-        <CardButton
+        <RobotaxiLifecycleButton
           label={busy ? "Enviando" : "Concluir"}
-          primary
+          tone="primary"
+          style={styles.action}
           disabled={busy}
           onPress={() => leaveRating(onDone)}
           testID="receipt-done-button"
@@ -339,8 +324,19 @@ export default function RideClosingCard({
         </View>
       ))}
       <View style={styles.actions}>
-        <CardButton label="Recibo completo" onPress={onOpenFullReceipt} testID="closing-full-receipt-button" />
-        <CardButton label="Concluir" primary onPress={onDone} testID="receipt-done-button" />
+        <RobotaxiLifecycleButton
+          label="Recibo completo"
+          style={styles.action}
+          onPress={onOpenFullReceipt}
+          testID="closing-full-receipt-button"
+        />
+        <RobotaxiLifecycleButton
+          label="Concluir"
+          tone="primary"
+          style={styles.action}
+          onPress={onDone}
+          testID="receipt-done-button"
+        />
       </View>
     </View>
   );
@@ -349,15 +345,14 @@ export default function RideClosingCard({
     <KeyboardAvoidingView
       pointerEvents="box-none"
       behavior={Platform.OS === "ios" ? "padding" : undefined}
-      style={[styles.wrap, { bottom: Math.max(CARD_SIDE_GAP, insets.bottom) }]}
+      style={[styles.wrap, { bottom: robotaxiLifecycleMetrics.cardBottomGap + insets.bottom }]}
     >
-      <View
+      <RobotaxiLifecycleCard
         style={[styles.card, { maxHeight: cardMaxHeight }]}
         onLayout={onLayout}
         testID="ride-closing-card"
         accessibilityLabel={isDriver ? "Fim da corrida do motorista" : "Fim da corrida do passageiro"}
       >
-        {stage === "air" ? null : <View style={styles.handle} />}
         <ScrollView
           bounces={false}
           keyboardShouldPersistTaps="handled"
@@ -367,7 +362,7 @@ export default function RideClosingCard({
           {stage === "rate" ? renderRateStage() : null}
           {stage === "details" ? renderDetailsStage() : null}
         </ScrollView>
-      </View>
+      </RobotaxiLifecycleCard>
     </KeyboardAvoidingView>
   );
 }
@@ -375,87 +370,22 @@ export default function RideClosingCard({
 const styles = StyleSheet.create({
   wrap: {
     position: "absolute",
-    left: CARD_SIDE_GAP,
-    right: CARD_SIDE_GAP,
+    left: 0,
+    right: 0,
   },
   card: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 28,
-    paddingTop: 10,
-    paddingHorizontal: 20,
-    paddingBottom: 14,
-    shadowColor: "#0B120A",
-    shadowOpacity: 0.16,
-    shadowRadius: 24,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 10,
-  },
-  handle: {
-    alignSelf: "center",
-    width: 32,
-    height: 3,
-    borderRadius: 2,
-    backgroundColor: "#E5E5E5",
-    marginBottom: 12,
-  },
-  caption: {
-    ...leafTypography.medium,
-    fontSize: 13,
-    lineHeight: 18,
-    color: "#5F665B",
-  },
-  amount: {
-    ...leafTypography.bold,
-    fontSize: 34,
-    lineHeight: 40,
-    letterSpacing: -0.4,
-    color: "#111410",
-    fontVariant: ["tabular-nums"],
-  },
-  meta: {
-    ...leafTypography.regular,
-    fontSize: 14,
-    lineHeight: 20,
-    color: "#5F665B",
+    marginHorizontal: robotaxiLifecycleMetrics.cardHorizontalMargin,
   },
   divider: {
-    height: 1,
-    backgroundColor: "#EDEFEA",
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: color.border.subtle,
     marginVertical: 12,
-  },
-  question: {
-    ...leafTypography.semiBold,
-    marginTop: 6,
-    fontSize: 22,
-    lineHeight: 28,
-    color: "#111410",
-  },
-  answers: {
-    flexDirection: "row",
-    gap: 10,
-    marginTop: 20,
-    marginBottom: 6,
-  },
-  answer: {
-    flex: 1,
-    height: 64,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: "#D6D9D6",
-    borderRadius: 14,
-    backgroundColor: "#FFFFFF",
-  },
-  answerText: {
-    ...leafTypography.semiBold,
-    fontSize: 17,
-    color: "#111410",
   },
   prompt: {
     ...leafTypography.semiBold,
     fontSize: 15,
     lineHeight: 20,
-    color: "#111410",
+    color: color.text.primary,
   },
   lowRatingPrompt: {
     marginTop: 12,
@@ -478,38 +408,42 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   tag: {
-    height: 44,
-    paddingHorizontal: 12,
+    minHeight: 44,
+    paddingHorizontal: 10,
+    alignItems: "center",
     justifyContent: "center",
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#E5E5E5",
-    backgroundColor: "#F5F5F5",
+    borderColor: color.border.subtle,
+    backgroundColor: color.surface.secondary,
   },
   tagActive: {
-    borderColor: "#1A330E",
-    backgroundColor: "#F1F5EE",
+    borderColor: color.border.strong,
+    backgroundColor: color.surface.activeSoft,
   },
   tagText: {
     ...leafTypography.medium,
-    fontSize: 14,
-    color: "#5F665B",
+    fontSize: 13,
+    lineHeight: 18,
+    color: color.text.secondary,
   },
   tagTextActive: {
-    color: "#111410",
+    color: color.text.primary,
   },
   input: {
     ...leafTypography.regular,
     minHeight: 48,
     maxHeight: 96,
     marginTop: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     borderWidth: 1,
-    borderColor: "#E5E5E5",
+    borderColor: color.border.subtle,
     borderRadius: 12,
+    backgroundColor: "#F5F5F5",
     fontSize: 15,
-    color: "#111410",
+    lineHeight: 20,
+    color: color.text.primary,
     textAlignVertical: "top",
   },
   errorText: {
@@ -517,7 +451,7 @@ const styles = StyleSheet.create({
     marginTop: 10,
     fontSize: 13,
     lineHeight: 18,
-    color: "#D7153A",
+    color: color.feedback.danger,
   },
   linkButton: {
     minHeight: 44,
@@ -527,38 +461,15 @@ const styles = StyleSheet.create({
   linkText: {
     ...leafTypography.medium,
     fontSize: 14,
-    color: "#5F665B",
+    color: color.text.secondary,
   },
   actions: {
     flexDirection: "row",
     gap: 10,
-    marginTop: 12,
+    marginTop: 14,
   },
-  button: {
+  action: {
     flex: 1,
-    height: 50,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 12,
-  },
-  buttonPrimary: {
-    backgroundColor: "#252525",
-  },
-  buttonSecondary: {
-    borderWidth: 1,
-    borderColor: "#D6D9D6",
-    backgroundColor: "#FFFFFF",
-  },
-  buttonDisabled: {
-    opacity: 0.55,
-  },
-  buttonText: {
-    ...leafTypography.semiBold,
-    fontSize: 15,
-    color: "#111410",
-  },
-  buttonTextPrimary: {
-    color: "#FFFFFF",
   },
   detailsHeader: {
     flexDirection: "row",
@@ -574,7 +485,7 @@ const styles = StyleSheet.create({
     paddingBottom: 6,
     fontSize: 13,
     lineHeight: 18,
-    color: "#5F665B",
+    color: color.text.secondary,
     textAlign: "right",
   },
   stop: {
@@ -587,19 +498,19 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: "#222222",
+    backgroundColor: color.text.primary,
   },
   stopSquare: {
     width: 8,
     height: 8,
     borderRadius: 2,
-    backgroundColor: "#222222",
+    backgroundColor: color.text.primary,
   },
   stopText: {
     ...leafTypography.medium,
     flex: 1,
     fontSize: 15,
-    color: "#111410",
+    color: color.text.primary,
   },
   valueRow: {
     flexDirection: "row",
@@ -612,12 +523,12 @@ const styles = StyleSheet.create({
     ...leafTypography.regular,
     flexShrink: 1,
     fontSize: 15,
-    color: "#111410",
+    color: color.text.primary,
   },
   valueAmount: {
     ...leafTypography.semiBold,
     fontSize: 15,
-    color: "#111410",
+    color: color.text.primary,
     fontVariant: ["tabular-nums"],
   },
 });
