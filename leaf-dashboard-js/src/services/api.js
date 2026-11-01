@@ -992,6 +992,10 @@ class LeafApiService {
     return this.request("/promotions/stats");
   }
 
+  async getDriverIntroFeeReport() {
+    return this.request("/promotions/driver-intro-fee");
+  }
+
   async applyPromotion(promotionId, driverId) {
     return this.request(`/promotions/${promotionId}/apply/${driverId}`, {
       method: "POST",
