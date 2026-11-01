@@ -694,12 +694,19 @@ class ReceiptService {
 
         let durationMinutes;
 
-        // Prioridade para duração explícita quando disponível
+        // Tempo real da corrida vem primeiro; routeDurationSecs é estimativa da rota.
+        const hasRealTripWindow = Boolean(
+            (rideData.tripStartTime || rideData.startedAt || rideData.startTime) &&
+            (rideData.endTime || rideData.completedAt || rideData.endDate) &&
+            endTime.getTime() > startTime.getTime()
+        );
         const explicitSeconds = Number(rideData.durationSeconds || rideData.routeDurationSecs || rideData.tripDurationSecs);
         const explicitMinutes = Number(rideData.durationMinutes || rideData.tripDurationMinutes);
         const fallbackDuration = Number(rideData.duration);
 
-        if (Number.isFinite(explicitSeconds) && explicitSeconds >= 0) {
+        if (hasRealTripWindow) {
+            durationMinutes = Math.round((endTime.getTime() - startTime.getTime()) / (1000 * 60));
+        } else if (Number.isFinite(explicitSeconds) && explicitSeconds >= 0) {
             durationMinutes = Math.round(explicitSeconds / 60);
         } else if (Number.isFinite(explicitMinutes) && explicitMinutes >= 0) {
             durationMinutes = Math.round(explicitMinutes);

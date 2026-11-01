@@ -50,12 +50,12 @@ describe('approved first 25 destination completions policy', () => {
   });
 
   it.each([850, 1000, 1001, 2500, 2501, 5000, 7500, 10000])(
-    'charges 99 cents plus the unchanged Pix fee on a %i-cent ride', (fare) => {
+    'charges 99 cents in total, Pix included, on a %i-cent ride', (fare) => {
       const base = buildRideFinancialContract({ passengerPaidCents: fare });
       const promoted = buildRideFinancialContract({ passengerPaidCents: fare, driverIntroFee: context(24) });
-      expect(promoted.leafOperationalFeeCents).toBe(99);
+      expect(promoted.leafOperationalFeeCents).toBe(99 - base.paymentIntermediationFeeCents);
       expect(promoted.paymentIntermediationFeeCents).toBe(base.paymentIntermediationFeeCents);
-      expect(promoted.driverNetAmountCents).toBe(fare - 99 - base.paymentIntermediationFeeCents);
+      expect(promoted.driverNetAmountCents).toBe(fare - 99);
       expect(promoted.balanced).toBe(true);
       expect(promoted.feePolicy.driverIntroFee).toEqual(context(24));
     }
@@ -73,16 +73,16 @@ describe('approved first 25 destination completions policy', () => {
     context(25);
     expect(Object.isFrozen(acceptedContext)).toBe(true);
     expect(buildRideFinancialContract({ passengerPaidCents: 7500, driverIntroFee: acceptedContext }))
-      .toMatchObject({ leafOperationalFeeCents: 99, driverNetAmountCents: 7341 });
+      .toMatchObject({ leafOperationalFeeCents: 39, paymentIntermediationFeeCents: 60, driverNetAmountCents: 7401 });
   });
 
   it('preserves the accepted policy through serialization and final snapshot validation', () => {
     const driverIntroFee = JSON.parse(JSON.stringify(context(24)));
     const snapshot = buildAuthoritativeFinancialSnapshot({
       passengerPaidCents: 7500,
-      operationalFeeCents: 99,
+      operationalFeeCents: 39,
       paymentIntermediationFeeCents: 60,
-      driverNetAmountCents: 7341,
+      driverNetAmountCents: 7401,
       driverIntroFee
     });
     expect(validateAuthoritativeFinancialSnapshot(JSON.parse(JSON.stringify(snapshot))))
@@ -112,17 +112,48 @@ describe('approved first 25 destination completions policy', () => {
     })).toMatchObject({
       passengerPaidCents: 10000,
       driverTollPassThroughCents: 2000,
-      leafOperationalFeeCents: 99,
+      leafOperationalFeeCents: 19,
       paymentIntermediationFeeCents: 80,
       subscriptionRetainedFeeCents: 300,
-      driverNetAmountCents: 9521,
+      driverNetAmountCents: 9601,
       balanced: true
     });
   });
 
   it('preserves existing clamps for a fare smaller than the approved fee', () => {
     expect(buildRideFinancialContract({ passengerPaidCents: 80, driverIntroFee: context(0) }))
-      .toMatchObject({ leafOperationalFeeCents: 80, paymentIntermediationFeeCents: 0, driverNetAmountCents: 0, balanced: true });
+      .toMatchObject({ leafOperationalFeeCents: 30, paymentIntermediationFeeCents: 50, driverNetAmountCents: 0, balanced: true });
+  });
+
+  it('keeps the whole promotional fee at R$ 0,99 with Pix included', () => {
+    expect(buildRideFinancialContract({ passengerPaidCents: 3000, driverIntroFee: context(0) }))
+      .toMatchObject({ leafOperationalFeeCents: 49, paymentIntermediationFeeCents: 50, retainedTotalCents: 99, driverNetAmountCents: 2901, balanced: true });
+  });
+
+  it('lets Leaf absorb the Pix cost that exceeds the promotional fee', () => {
+    const contract = buildRideFinancialContract({ passengerPaidCents: 20000, driverIntroFee: context(0) });
+    expect(contract).toMatchObject({ leafOperationalFeeCents: 0, paymentIntermediationFeeCents: 99, driverNetAmountCents: 19901, balanced: true });
+    expect(contract.feePolicy).toMatchObject({ requestedPaymentIntermediationFeeCents: 160, paymentIntermediationFeeClamped: true });
+  });
+
+  it('keeps the Pix cost on the toll inside the promotional fee', () => {
+    expect(buildRideFinancialContract({ passengerPaidCents: 10000, tollFeeCents: 2000, driverIntroFee: context(0) }))
+      .toMatchObject({ leafOperationalFeeCents: 19, paymentIntermediationFeeCents: 80, driverTollPassThroughCents: 2000, driverNetAmountCents: 9901, balanced: true });
+  });
+
+  it('honors the Pix-separate terms of a ride accepted before the change', () => {
+    const { paymentFeeIncluded, ...accepted } = context(24);
+    const driverIntroFee = JSON.parse(JSON.stringify(accepted));
+    expect(buildRideFinancialContract({ passengerPaidCents: 7500, driverIntroFee }))
+      .toMatchObject({ leafOperationalFeeCents: 99, paymentIntermediationFeeCents: 60, driverNetAmountCents: 7341, balanced: true });
+    const snapshot = buildAuthoritativeFinancialSnapshot({
+      passengerPaidCents: 7500,
+      operationalFeeCents: 99,
+      paymentIntermediationFeeCents: 60,
+      driverNetAmountCents: 7341,
+      driverIntroFee
+    });
+    expect(validateAuthoritativeFinancialSnapshot(snapshot)).toMatchObject({ valid: true });
   });
 
   it('rejects an unknown policy instead of applying a free-form fee override', () => {

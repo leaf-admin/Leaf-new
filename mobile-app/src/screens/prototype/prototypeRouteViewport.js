@@ -40,6 +40,103 @@ export function buildPickupMapCamera({ coordinate, zoom, height, markerCenterY, 
   };
 }
 
+// The car keeps this spot in every ride state: three quarters down the window
+// between the top overlays and the card, with the route ahead above it.
+export const DRIVER_RIDE_CAR_ANCHOR_RATIO = 0.75;
+const METERS_PER_DEGREE_LATITUDE = 111320;
+const METERS_PER_POINT_AT_ZOOM_ZERO = 156543.03392;
+
+// Rotates the map so the far end of the route points up, then zooms until the
+// whole route fits around the fixed car. A north-up fit can't do both: the car
+// lands wherever the route's direction puts it.
+export function buildDriverRideCamera({
+  car,
+  coordinates,
+  mapWidth,
+  mapHeight,
+  top = 0,
+  bottom = 0,
+  anchorRatio = DRIVER_RIDE_CAR_ANCHOR_RATIO,
+  sidePadding = 48,
+  edgePadding = 16,
+  // Only ~220 pt of map are left between the banner and the pickup card.
+  minVisibleHeight = 120,
+  minZoom = 9,
+  // From about 16.5 Google's Android base map shades built-up blocks dark grey.
+  maxZoom = 15.8,
+  nativeSafeArea = {},
+  previousHeading = null,
+  headingDeadbandDegrees = 10,
+  minHeadingDistanceMeters = 80,
+} = {}) {
+  const points = (Array.isArray(coordinates) ? coordinates : []).filter(isFiniteRouteCoordinate);
+  if (!isFiniteRouteCoordinate(car) || !points.length ||
+      !(Number(mapWidth) > 0) || !(Number(mapHeight) > 0)) {
+    return null;
+  }
+  const latitudeScale = Math.cos(car.latitude * Math.PI / 180);
+  const offsets = points.map((point) => ({
+    east: (point.longitude - car.longitude) * METERS_PER_DEGREE_LATITUDE * latitudeScale,
+    north: (point.latitude - car.latitude) * METERS_PER_DEGREE_LATITUDE,
+  }));
+  const farthest = offsets.reduce((best, offset) => (
+    Math.hypot(offset.east, offset.north) > Math.hypot(best.east, best.north) ? offset : best
+  ), { east: 0, north: 0 });
+  const lastHeading = Number.isFinite(previousHeading) ? previousHeading : null;
+  // Near the end of the route the bearing swings with every GPS fix.
+  const routeHeading = Math.hypot(farthest.east, farthest.north) >= minHeadingDistanceMeters
+    ? (Math.atan2(farthest.east, farthest.north) * 180 / Math.PI + 360) % 360
+    : lastHeading ?? 0;
+  const headingChange = lastHeading === null
+    ? Infinity
+    : Math.abs(((routeHeading - lastHeading) % 360 + 540) % 360 - 180);
+  const heading = headingChange < headingDeadbandDegrees ? lastHeading : routeHeading;
+
+  const headingRadians = heading * Math.PI / 180;
+  const sine = Math.sin(headingRadians);
+  const cosine = Math.cos(headingRadians);
+  let ahead = 0;
+  let behind = 0;
+  let side = 0;
+  offsets.forEach(({ east, north }) => {
+    const forward = north * cosine + east * sine;
+    ahead = Math.max(ahead, forward);
+    behind = Math.max(behind, -forward);
+    side = Math.max(side, Math.abs(east * cosine - north * sine));
+  });
+
+  const windowTop = Math.min(Math.max(0, Number(top) || 0), mapHeight - minVisibleHeight);
+  const windowBottom = Math.max(
+    windowTop + minVisibleHeight,
+    mapHeight - Math.max(0, Number(bottom) || 0),
+  );
+  const anchorY = windowTop + (windowBottom - windowTop) * anchorRatio;
+  const metersPerPointNeeded = Math.max(
+    ahead / Math.max(1, anchorY - windowTop - edgePadding),
+    behind / Math.max(1, windowBottom - anchorY - edgePadding),
+    side / Math.max(1, mapWidth / 2 - sidePadding),
+    Number.MIN_VALUE,
+  );
+  const zoom = Math.min(maxZoom, Math.max(
+    minZoom,
+    Math.log2(METERS_PER_POINT_AT_ZOOM_ZERO * latitudeScale / metersPerPointNeeded),
+  ));
+  const metersPerPoint = METERS_PER_POINT_AT_ZOOM_ZERO * latitudeScale / 2 ** zoom;
+  const nativeCenterY = mapHeight / 2 +
+    (Math.max(0, Number(nativeSafeArea.top) || 0) - Math.max(0, Number(nativeSafeArea.bottom) || 0)) / 2;
+  const centerAheadMeters = (anchorY - nativeCenterY) * metersPerPoint;
+  return {
+    center: {
+      latitude: car.latitude + centerAheadMeters * cosine / METERS_PER_DEGREE_LATITUDE,
+      longitude: car.longitude +
+        centerAheadMeters * sine / (METERS_PER_DEGREE_LATITUDE * latitudeScale),
+    },
+    zoom,
+    heading,
+    pitch: 0,
+  };
+}
+
 export function buildOverlaySheetViewportMetrics({
   windowHeight,
   topOcclusion = 0,

@@ -47,9 +47,9 @@ describe('ReceiptService financial snapshot', () => {
     const service = createReceiptService();
     const financial = service.calculateFinancialBreakdown({ driver: 'driver_1', finalFare: 85, finalPrice: 85, tollFee: 15, financialSnapshot: { driverIntroFee } });
     expect(financial.totalPaid.amount).toBe(85);
-    expect(financial.breakdown.operationalCost.amount).toBe(0.99);
+    expect(financial.breakdown.operationalCost.amount).toBe(0.31);
     expect(financial.breakdown.wooviFee.amount).toBe(0.68);
-    expect(financial.breakdown.driverAmount.amount).toBe(83.33);
+    expect(financial.breakdown.driverAmount.amount).toBe(84.01);
   });
 
   it('preserves the final backend fee breakdown instead of recalculating it', () => {
@@ -144,7 +144,7 @@ describe('ReceiptService financial snapshot', () => {
     expect(receipt.financial.totals.tollPassThrough).toBeCloseTo(15, 2);
   });
 
-  it('keeps receipt distance in kilometers and route duration in minutes', async () => {
+  it('keeps receipt distance in kilometers and real trip duration in minutes', async () => {
     const service = createReceiptService();
 
     const receipt = await service.generateReceipt('ride_backend_route_metrics', {
@@ -162,9 +162,22 @@ describe('ReceiptService financial snapshot', () => {
       formatted: '27.10 km',
       unit: 'km',
     });
-    expect(receipt.trip.duration).toBe(33);
-    expect(receipt.trip.durationFormatted).toBe('33min');
+    expect(receipt.trip.duration).toBe(20);
+    expect(receipt.trip.durationFormatted).toBe('20min');
     expect(receipt.payment.method).toBe('PIX');
+  });
+
+  it('uses the route estimate only when the ride has no real start time', async () => {
+    const service = createReceiptService();
+    const { tripStartTime, ...rideWithoutStart } = finalRideData;
+
+    const receipt = await service.generateReceipt('ride_without_start_time', {
+      ...rideWithoutStart,
+      routeDurationSecs: 1980,
+      payment_mode: 'pix',
+    });
+
+    expect(receipt.trip.duration).toBe(33);
   });
 
   it('rejects receipt generation without a backend final source', async () => {

@@ -27,7 +27,11 @@ import interactiveNotificationService from "../../services/InteractiveNotificati
 import { isRideGoneOnServerError } from "./rideServerErrors";
 import {
   buildNightSurchargeNotice,
+  buildNightSurchargeSchedule,
+  cancelOrphanNightSurchargeNotifications,
+  claimNightSurchargeNotice,
   isNightSurchargeActive,
+  NIGHT_SURCHARGE_NOTIFICATION_ID,
   nextNightSurchargeTransition,
 } from "./nightSurchargeNotice";
 import prototypeDriverTripAssistantService, {
@@ -6583,6 +6587,23 @@ function resolveCompletedTripDistanceKm({
   return 0;
 }
 
+export function resolveCompletedReceiptDurationMin({
+  settledDurationSecs,
+  actualDurationSecs,
+  plannedDurationMinutes,
+}) {
+  const realDurationSecs = [settledDurationSecs, actualDurationSecs].find(
+    (value) =>
+      value !== null &&
+      value !== undefined &&
+      Number.isFinite(Number(value)) &&
+      Number(value) >= 0,
+  );
+  return realDurationSecs === undefined
+    ? plannedDurationMinutes
+    : Math.max(1, Math.round(Number(realDurationSecs) / 60));
+}
+
 function resolveCompletedTripDurationMin({
   payloadDurationSeconds,
   runtimeDurationMinutes,
@@ -7144,6 +7165,7 @@ function buildDriverTripAssistModel(snapshot) {
     pickupAddress,
     destinationAddress,
     remainingMeters: displayRemainingMeters,
+    targetStraightLineMeters: pickupStraightLineMeters,
     remainingDistanceLabel,
     progressRatio,
     etaMinutes,
@@ -11183,6 +11205,10 @@ function attachSocketListeners() {
   };
 
   const handleDriverArrived = (payload) => {
+    // arrivedAtPickup also carries the server's refusal; only a success is an arrival.
+    if (payload?.success === false || payload?.error) {
+      return;
+    }
     const bookingId = String(
       payload?.bookingId ||
         payload?.rideId ||
@@ -11913,10 +11939,11 @@ function attachSocketListeners() {
       Number.isFinite(settledDistanceKm) &&
       settledDistanceKm >= 0;
     const distance = hasSettledTrip ? settledDistanceKm : plannedDistance;
-    const durationMinutes =
-      hasSettledTrip && Number.isFinite(settledDurationSecs) && settledDurationSecs >= 0
-        ? Math.max(1, Math.round(settledDurationSecs / 60))
-        : plannedDurationMinutes;
+    const durationMinutes = resolveCompletedReceiptDurationMin({
+      settledDurationSecs: hasSettledTrip ? settledDurationSecs : null,
+      actualDurationSecs: payload?.actualDurationSecs,
+      plannedDurationMinutes,
+    });
 
     const receipt = {
       pickupAddress: resolveCompletedReceiptPickupLabel(payload, runtimeState),
@@ -15581,6 +15608,7 @@ async function requestPrototypeRide(profile, payload) {
       bookingId: runtimeState.activeBookingId || null,
       status: "REQUESTING",
       estimatedFare: Number.isFinite(fare) ? fare : 0,
+      paymentAmount: paymentAmountInCents / 100,
       ...(routeDistanceKm !== null ? { routeDistanceKm } : {}),
       ...(routeDurationSecs !== null
         ? { routeDurationSecs: Math.max(60, Math.round(routeDurationSecs)) }
@@ -17184,8 +17212,11 @@ async function loadPrototypeChatSession(profile, options = {}) {
     const loadedMessages = Array.isArray(messagesResponse?.messages)
       ? messagesResponse.messages
       : [];
+    // Messages held in memory belong to the ride that loaded them.
     const mergedMessages = mergeChatMessages(
-      runtimeState.chatMessages,
+      runtimeState.activeChatBookingId === bookingId
+        ? runtimeState.chatMessages
+        : [],
       loadedMessages,
     );
 
@@ -20972,39 +21003,33 @@ export function usePrototypeRideRuntime(options = null) {
 
   // Adicional noturno: o motorista online é avisado quando começa e quando termina
   // (cartão na tela, central de notificações e notificação local para quem está com o
-  // app em segundo plano). Ao ficar online durante o período, um lembrete.
+  // app em segundo plano). Ao ficar online durante o período, um lembrete. Cada aviso
+  // sai uma vez por noite.
   useEffect(() => {
     if (!isRuntimeEffectOwner || !driverOnlinePresenceUid) {
       return undefined;
     }
     let timer = null;
-    let scheduledNotificationId = null;
     let cancelled = false;
     const announce = (kind) => {
-      const notice = buildNightSurchargeNotice(kind);
-      showDriverTransientCard({ type: notice.type, title: notice.title, message: notice.message });
-      appendRuntimeNotification(
-        createRuntimeNotification({ title: notice.title, message: notice.message, kind: "system", scope: "driver" }),
-      );
+      claimNightSurchargeNotice(kind, AsyncStorage)
+        .then((claimed) => {
+          if (!claimed || cancelled) return;
+          const notice = buildNightSurchargeNotice(kind);
+          showDriverTransientCard({ type: notice.type, title: notice.title, message: notice.message });
+          appendRuntimeNotification(
+            createRuntimeNotification({ title: notice.title, message: notice.message, kind: "system", scope: "driver" }),
+          );
+        })
+        .catch(() => {});
     };
     const scheduleNext = () => {
       const next = nextNightSurchargeTransition(new Date());
       const delayMs = Math.max(1000, next.at.getTime() - Date.now());
       // setTimeout de JS pode atrasar com o app parado; a notificação local cobre esse caso.
       try {
-        const Notifications = require("expo-notifications");
-        const notice = buildNightSurchargeNotice(next.kind);
-        Notifications.scheduleNotificationAsync({
-          content: { title: notice.title, body: notice.message, data: { type: notice.type } },
-          trigger: { type: "date", date: next.at },
-        })
-          .then((id) => {
-            if (cancelled) {
-              Notifications.cancelScheduledNotificationAsync(id).catch(() => {});
-            } else {
-              scheduledNotificationId = id;
-            }
-          })
+        require("expo-notifications")
+          .scheduleNotificationAsync(buildNightSurchargeSchedule(next))
           .catch(() => {});
       } catch (_error) {
         // sem notificações locais neste ambiente
@@ -21014,7 +21039,6 @@ export function usePrototypeRideRuntime(options = null) {
         if (AppState.currentState === "active") {
           announce(next.kind);
         }
-        scheduledNotificationId = null;
         scheduleNext();
       }, Math.min(delayMs, 2 ** 31 - 1));
     };
@@ -21026,17 +21050,22 @@ export function usePrototypeRideRuntime(options = null) {
         announce("active");
       }
     }, openedRecently ? 14000 : 1200);
+    try {
+      cancelOrphanNightSurchargeNotifications(require("expo-notifications")).catch(() => {});
+    } catch (_error) {
+      // sem notificações locais neste ambiente
+    }
     scheduleNext();
     return () => {
       cancelled = true;
       clearTimeout(timer);
       clearTimeout(activeReminder);
-      if (scheduledNotificationId) {
-        try {
-          require("expo-notifications").cancelScheduledNotificationAsync(scheduledNotificationId).catch(() => {});
-        } catch (_error) {
-          // sem notificações locais neste ambiente
-        }
+      try {
+        require("expo-notifications")
+          .cancelScheduledNotificationAsync(NIGHT_SURCHARGE_NOTIFICATION_ID)
+          .catch(() => {});
+      } catch (_error) {
+        // sem notificações locais neste ambiente
       }
     };
   }, [isRuntimeEffectOwner, driverOnlinePresenceUid]);

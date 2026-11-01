@@ -424,6 +424,7 @@ function DriverLiveRideOverlay({
   insetsBottom = 0,
   bottomOffset = 0,
   onCardLayout,
+  onTripExpandedChange,
   driverOffers = [],
   driverActiveRide = null,
   driverTripMeta = null,
@@ -585,7 +586,12 @@ function DriverLiveRideOverlay({
       if (normalizedStatus === "started") {
         // Ending far from the destination is allowed, but it is a deliberate
         // act: the driver states why, and the passenger is asked about it.
-        const earlyEnd = await confirmDriverEarlyEnd(driverTripAssist?.remainingMeters);
+        // The route can run to a U-turn while the car is already at the door.
+        const earlyEnd = await confirmDriverEarlyEnd(
+          [driverTripAssist?.remainingMeters, driverTripAssist?.targetStraightLineMeters]
+            .filter(Number.isFinite)
+            .reduce((nearest, meters) => Math.min(nearest, meters), Infinity),
+        );
         if (earlyEnd?.cancelled) {
           return;
         }
@@ -969,6 +975,11 @@ function DriverLiveRideOverlay({
       : normalizedActiveStatus === "arrived"
         ? "No ponto"
         : "Aguardando no embarque";
+  // Passenger comfort, set before the request: shown on the way to pickup.
+  const showTripPreferences =
+    !isOperationalInterrupted &&
+    (normalizedActiveStatus === "accepted" || normalizedActiveStatus === "arrived") &&
+    ridePreferenceItems.length > 0;
   const tripStatusMessage =
     ["accepted", "started"].includes(normalizedActiveStatus)
       ? ""
@@ -978,6 +989,11 @@ function DriverLiveRideOverlay({
     setIsTripPeek(false);
     setIsTripExpanded(false);
   }, [activeRide?.bookingId, activeRide?.id, normalizedActiveStatus]);
+
+  useEffect(() => {
+    onTripExpandedChange?.(isTripExpanded);
+    return () => onTripExpandedChange?.(false);
+  }, [isTripExpanded, onTripExpandedChange]);
 
   const handleAcceptExtension = useCallback(async () => {
     if (
@@ -1187,9 +1203,12 @@ function DriverLiveRideOverlay({
           initial={passengerInitial}
           photoUri={passengerPhotoUri}
           name={passengerLabel}
-          meta={lifecyclePassengerMeta}
+          meta={showTripPreferences
+            ? ridePreferenceItems.map((item) => item.label).join(" · ")
+            : lifecyclePassengerMeta}
           style={styles.lifecycleTripIdentity}
           testID="driver-live-passenger-identity"
+          fieldTestIDs={showTripPreferences ? { meta: "driver-live-trip-preferences" } : undefined}
         />
 
         <View style={styles.lifecycleTripMetricRow}>
@@ -1201,23 +1220,6 @@ function DriverLiveRideOverlay({
             />
           ))}
         </View>
-        {/* Passenger comfort, set before the request: shown on the way to pickup. */}
-        {!isOperationalInterrupted &&
-        (normalizedActiveStatus === "accepted" || normalizedActiveStatus === "arrived") &&
-        ridePreferenceItems.length > 0 ? (
-          <View
-            style={styles.tripPreferenceRow}
-            testID="driver-live-trip-preferences"
-            accessibilityLabel={`Preferências do passageiro: ${ridePreferenceItems.map((item) => item.label).join(", ")}`}
-          >
-            {ridePreferenceItems.map((item) => (
-              <View key={item.key} style={styles.tripPreferenceChip}>
-                <Ionicons name={item.icon} size={14} color="#1A330E" />
-                <Text style={styles.tripPreferenceChipText} numberOfLines={1}>{item.label}</Text>
-              </View>
-            ))}
-          </View>
-        ) : null}
         {boardingWaitHint ? (
           <Text style={styles.boardingWaitHint} testID="driver-live-boarding-wait-hint">
             {boardingWaitHint}
@@ -1585,6 +1587,7 @@ function DriverLiveRideOverlay({
             <Pressable
               onPress={handleTripSheetStep}
               style={styles.lifecycleHandleArea}
+              hitSlop={{ top: 12, bottom: 12 }}
               accessibilityRole="adjustable"
               accessibilityLabel="Altura do cartão da corrida"
               accessibilityHint="Toque para alternar entre resumo, padrão e detalhes"
@@ -1599,7 +1602,7 @@ function DriverLiveRideOverlay({
             bounces={false}
             nestedScrollEnabled
             showsVerticalScrollIndicator={isTripExpanded}
-            style={{ maxHeight: Math.max(1, offerCardMaxHeight - cardBottomPadding - 40 - DRIVER_TRIP_ACTIONS_HEIGHT), flexGrow: 0 }}
+            style={{ maxHeight: Math.max(1, offerCardMaxHeight - cardBottomPadding - 28 - DRIVER_TRIP_ACTIONS_HEIGHT), flexGrow: 0 }}
             contentContainerStyle={styles.scrollContent}
           >
             {isTripExpanded ? renderLifecycleExpandedTripCard() : renderCompactTripCard()}
@@ -2168,28 +2171,7 @@ function DriverLiveRideOverlay({
 export default memo(DriverLiveRideOverlay);
 
 const styles = StyleSheet.create({
-  tripPreferenceRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-    marginTop: 10,
-  },
-  tripPreferenceChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    height: 30,
-    paddingHorizontal: 12,
-    borderRadius: 15,
-    backgroundColor: "#F1F5EE",
-  },
-  tripPreferenceChipText: {
-    ...leafTypography.medium,
-    fontSize: 13,
-    lineHeight: 18,
-    color: "#1A330E",
-  },
-  lifecycleHandleArea: { height: 30, alignItems: 'center', justifyContent: 'flex-start' },
+  lifecycleHandleArea: { height: 18, alignItems: 'center', justifyContent: 'flex-start' },
   lifecycleHandle: { width: 32, height: 3, borderRadius: 2, backgroundColor: '#E5E5E5' },
   lifecycleJourneyRoute: { marginTop: 16 },
   offerHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
@@ -2198,7 +2180,7 @@ const styles = StyleSheet.create({
   offerTimerPillExpired: { backgroundColor: '#FBECEE' },
   offerTimerText: { ...leafTypography.semiBold, fontSize: 13, color: '#1A330E', fontVariant: ['tabular-nums'] },
   offerTimerTextExpired: { color: '#8A1F2B' },
-  offerFareRow: { marginTop: 10, flexDirection: 'row', alignItems: 'baseline', gap: 8 },
+  offerFareRow: { marginTop: 6, flexDirection: 'row', alignItems: 'baseline', gap: 8 },
   offerFareValue: { ...leafTypography.semiBold, fontSize: compactSize(30, 26), lineHeight: compactSize(36, 31), color: '#111410', fontVariant: ['tabular-nums'] },
   offerFareSignal: {
     alignSelf: "flex-start",
@@ -2244,9 +2226,9 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
   offerTollText: { ...leafTypography.medium, fontSize: 12, lineHeight: 16, color: "#1A330E", flexShrink: 1 },
-  offerMetricRow: { marginTop: 12, marginBottom: 2 },
-  offerRoute: { marginTop: 12 },
-  offerActions: { marginTop: 14, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  offerMetricRow: { marginTop: 8, paddingTop: 8 },
+  offerRoute: { marginTop: 8, paddingVertical: 2 },
+  offerActions: { marginTop: 10, flexDirection: 'row', alignItems: 'center', gap: 10 },
   offerAction: { width: '100%', minWidth: 0, paddingHorizontal: 12 },
   offerAcceptWrap: { flex: 1, minWidth: 0 },
   offerDeclineButton: { width: leafButtonMetrics.height, height: leafButtonMetrics.height, borderRadius: leafButtonMetrics.radius, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F2F3F0' },
@@ -2279,7 +2261,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 12,
     borderRadius: 28,
     paddingHorizontal: 20,
-    paddingTop: 18,
+    paddingTop: 14,
     backgroundColor: color.bg.panelSolid,
     shadowColor: '#0B120A',
     shadowOpacity: 0.18,
@@ -2299,11 +2281,11 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   lifecycleTripIdentity: {
-    marginTop: 14,
+    marginTop: 10,
   },
   lifecycleTripMetricRow: {
-    marginTop: 14,
-    paddingTop: 12,
+    marginTop: 10,
+    paddingTop: 10,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: color.border.subtle,
     flexDirection: "row",
@@ -2361,7 +2343,7 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   lifecycleTripActionStack: {
-    marginTop: 16,
+    marginTop: 12,
     gap: 10,
   },
   offerPassengerRow: {
@@ -2387,11 +2369,10 @@ const styles = StyleSheet.create({
   },
   lifecycleTripActionRow: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "stretch",
   },
   lifecycleTripMoreButton: {
     width: 54,
-    height: 54,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: "#E5E5E5",
@@ -2407,7 +2388,7 @@ const styles = StyleSheet.create({
     paddingBottom: 2,
   },
   offerPassengerIdentity: {
-    marginTop: 14,
+    marginTop: 8,
   },
   offerRouteSummary: {
     marginTop: 14,

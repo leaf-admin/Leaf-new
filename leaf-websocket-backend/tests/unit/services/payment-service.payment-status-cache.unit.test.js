@@ -1041,7 +1041,7 @@ describe('PaymentService financial rules', () => {
     });
     const cents = service.calculateNetAmount(10000, 2000, 300, { driverIntroFee });
     const reais = service.calculateFareBreakdownFromReais(100, 20, { subscriptionRetainedFeeCents: 300, driverIntroFee });
-    expect(cents.operationalFee).toBe(count < 25 ? 99 : 240);
+    expect(cents.operationalFee).toBe(count < 25 ? 19 : 240);
     expect(reais.operationalFee * 100).toBe(cents.operationalFee);
     expect(reais.driverNetAmount * 100).toBeCloseTo(cents.netAmount, 6);
     expect(reais.paymentIntermediationFee).toBe(0.8);
@@ -1915,7 +1915,7 @@ describe('PaymentService financial rules', () => {
     });
 
     expect(calculateNetAmount).toHaveBeenCalledWith(800, 0, 0, { driverIntroFee });
-    expect(result).toMatchObject({ success: true, retainedFees: { operationalFee: 99 } });
+    expect(result).toMatchObject({ success: true, retainedFees: { operationalFee: 49, wooviFee: 50 } });
   });
 
   it('rejects legacy settlement when the stored intro fee belongs to another driver', async () => {

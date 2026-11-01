@@ -44,6 +44,7 @@ const {
 } = require('./shared');
 
 const driverListData = require('../../services/dashboard-driver-list-data');
+const ratingService = require('../../services/rating-service');
 const { toView } = require('../../services/native-record-view');
 const adminReadBudget = require('../../utils/admin-read-budget');
 
@@ -290,6 +291,21 @@ router.get('/api/drivers/complete', authenticateJWT, requireRole(DASHBOARD_OPERA
       error: 'Erro interno do servidor',
       message: error.message
     });
+  }
+}));
+
+/**
+ * Respostas dos passageiros sobre o ar-condicionado nas corridas do motorista
+ * GET /api/drivers/:driverId/air-conditioning
+ */
+router.get('/api/drivers/:driverId/air-conditioning', authenticateJWT, requireRole(DASHBOARD_OPERATION_ROLES), adminReadBudget.rateLimiter, adminReadBudget.run(async (req, res) => {
+  try {
+    const root = req.query?.scope === 'sandbox' ? 'sandbox_bookings' : 'bookings';
+    const summary = await ratingService.getDriverAirConditioningSummary(req.params.driverId, { root });
+    return res.json({ success: true, summary });
+  } catch (error) {
+    logError(error, 'Erro ao buscar respostas do ar-condicionado', { driverId: req.params.driverId });
+    return res.status(500).json({ success: false, error: 'Não foi possível carregar as respostas' });
   }
 }));
 

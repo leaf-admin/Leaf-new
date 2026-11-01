@@ -558,10 +558,10 @@ describe('driver-notification-dispatcher timeout cleanup', () => {
     });
     expect(await dispatcher.notifyDriver('driver_1', 'booking_123', { bookingId: 'booking_123' })).toBe(true);
     const payload = emit.mock.calls.find(([name]) => name === 'newRideRequest')[1];
-    expect(payload).toMatchObject({ driverIntroFee: context, estimatedOperationalFee: 0.99, estimatedTollFee: 10 });
+    expect(payload).toMatchObject({ driverIntroFee: context, estimatedOperationalFee: 0.49, estimatedTollFee: 10 });
     expect(payload.estimatedDriverNetAmount).toBeGreaterThan(50);
     const reservationCall = redis.multi.mock.results.flatMap(({ value }) => value.set.mock.calls).find(([key]) => key === 'offer_reservation:booking_123:driver_1');
-    expect(JSON.parse(reservationCall[1])).toMatchObject({ driverIntroFee: context, estimatedFareSnapshot: { estimatedOperationalFee: 0.99, estimatedDriverNetAmount: payload.estimatedDriverNetAmount } });
+    expect(JSON.parse(reservationCall[1])).toMatchObject({ driverIntroFee: context, estimatedFareSnapshot: { estimatedOperationalFee: 0.49, estimatedDriverNetAmount: payload.estimatedDriverNetAmount } });
   });
 
   it('releases the offer lock if the driver history cannot determine the fee', async () => {

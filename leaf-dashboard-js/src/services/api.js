@@ -540,6 +540,11 @@ class LeafApiService {
     });
   }
 
+  async getDriverAirConditioning(driverId, context = {}) {
+    const scope = context.scope === "sandbox" ? "?scope=sandbox" : "";
+    return this.request(`/drivers/${encodeURIComponent(driverId)}/air-conditioning${scope}`);
+  }
+
   async getDriverComplete(driverId) {
     return this.request(`/drivers/${driverId}/complete`);
   }
@@ -1039,6 +1044,10 @@ class LeafApiService {
     return this.request(`/waitlist/landing/list${suffix ? `?${suffix}` : ""}`);
   }
 
+  async getInvestorLeads() {
+    return this.request("/waitlist/investor-leads");
+  }
+
   async updateLandingWaitlistStatus(leadId, status, notes = "") {
     return this.request(`/waitlist/landing/${encodeURIComponent(leadId)}/status`, {
       method: "PATCH",
@@ -1240,6 +1249,41 @@ class LeafApiService {
       method: "POST",
       body: JSON.stringify({ subject, description, category, priority, userInfo, metadata }),
     }, context);
+  }
+
+  async getSupportSavedReplies(context = {}) {
+    return this.requestSupport("/support/tools/saved-replies", {}, context);
+  }
+
+  async saveSupportSavedReply(shortcut, message, context = {}) {
+    return this.requestSupport("/support/tools/saved-replies", {
+      method: "POST",
+      body: JSON.stringify({ shortcut, message }),
+    }, context);
+  }
+
+  async deleteSupportSavedReply(shortcut, context = {}) {
+    return this.requestSupport(`/support/tools/saved-replies/${encodeURIComponent(shortcut)}`, {
+      method: "DELETE",
+    }, context);
+  }
+
+  async getSupportChatNotes(userId, context = {}) {
+    this.assertOperationalSupportChatScope(context);
+    return this.request(`/support/tools/chat-notes/${encodeURIComponent(userId)}`);
+  }
+
+  async addSupportChatNote(userId, message, context = {}) {
+    this.assertOperationalSupportChatScope(context);
+    return this.request(`/support/tools/chat-notes/${encodeURIComponent(userId)}`, {
+      method: "POST",
+      body: JSON.stringify({ message }),
+    });
+  }
+
+  async getSupportRide(rideId, context = {}) {
+    this.assertOperationalSupportChatScope(context);
+    return this.request(`/support/tools/rides/${encodeURIComponent(rideId)}`);
   }
 
   async getChatHistory(userId, limit = 50, { includeArchived = true, scope = "operational" } = {}) {

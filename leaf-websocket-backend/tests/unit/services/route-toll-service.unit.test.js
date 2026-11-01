@@ -1,4 +1,5 @@
 const {
+  decodePolyline,
   estimateRouteTollsFromCoordinates,
   estimateRouteTollsFromPolyline,
   resolveTollFeeFromPricingPayload,
@@ -7,10 +8,11 @@ const {
   summarizeTollCrossings,
   TOLL_PLAZAS,
 } = require('../../../services/route-toll-service');
+const tollRoutes = require('./fixtures/toll-routes.json');
 
 describe('route-toll-service', () => {
   test('detecta Linha Amarela quando a polyline cruza a praca P09', () => {
-    const result = estimateRouteTollsFromPolyline('nuujC~|kgG_|B_|B_|B_|B', {
+    const result = estimateRouteTollsFromPolyline(tollRoutes.linhaAmarelaWestbound, {
       now: new Date('2026-06-26T12:00:00.000Z'),
     });
 
@@ -36,12 +38,170 @@ describe('route-toll-service', () => {
 
   test('resolve pedágio por geometria antes do fallback tollFee do payload', () => {
     const result = resolveTollFeeFromPricingPayload({
-      routePolyline: 'nuujC~|kgG_|B_|B_|B_|B',
+      routePolyline: tollRoutes.linhaAmarelaWestbound,
       tollFee: 99,
     });
 
     expect(result.tollFee).toBe(4);
     expect(result.source).toBe('leaf_toll_catalog');
+  });
+
+  describe('cotação perto de praça com posição conferida', () => {
+    const now = new Date('2026-10-31T12:00:00.000Z');
+
+    test('não cobra a P10 numa rota curta que passa a 1 km da praça (estudo de 2026-10-31)', () => {
+      const result = estimateRouteTollsFromPolyline(tollRoutes.pastorinhasToPauDaFome, { now });
+
+      expect(result.tollFee).toBe(0);
+      expect(result.tolls).toEqual([]);
+    });
+
+    test.each([
+      ['sul', tollRoutes.transolimpicaSouthbound, 'p10b_transolimpica'],
+      ['norte', tollRoutes.transolimpicaNorthbound, 'p10a_transolimpica'],
+    ])('cobra uma vez a rota que cruza a P10 no sentido %s', (_direction, polyline, tollId) => {
+      const result = estimateRouteTollsFromPolyline(polyline, { now });
+
+      expect(result.tolls.map((toll) => toll.id)).toEqual([tollId]);
+      expect(result.tollFee).toBe(9.95);
+    });
+
+    test.each([
+      ['oeste', tollRoutes.linhaAmarelaWestbound],
+      ['leste', tollRoutes.linhaAmarelaEastbound],
+    ])('cobra e confirma a travessia da Linha Amarela no sentido %s', (_direction, polyline) => {
+      const result = estimateRouteTollsFromPolyline(polyline, { now });
+
+      expect(result.tolls.map((toll) => toll.id)).toEqual(['p09_linha_amarela']);
+      expect(result.tollFee).toBe(4);
+      expect(findCrossedTolls(decodePolyline(polyline)).map((toll) => toll.id)).toEqual(['p09_linha_amarela']);
+    });
+
+    test('não cobra nem conta travessia da P09 numa rota do Méier fora da Linha Amarela', () => {
+      const result = estimateRouteTollsFromPolyline(tollRoutes.meierNearOldP09Point, { now });
+
+      expect(result.tollFee).toBe(0);
+      expect(findCrossedTolls(decodePolyline(tollRoutes.meierNearOldP09Point))).toEqual([]);
+    });
+
+    test('praça sem posição conferida mantém a tolerância geral de 2 km', () => {
+      const plaza = TOLL_PLAZAS.find((toll) => toll.id === 'p17_mage');
+      const result = estimateRouteTollsFromCoordinates([
+        { latitude: plaza.lat + 0.015, longitude: plaza.lng - 0.01 },
+        { latitude: plaza.lat + 0.015, longitude: plaza.lng + 0.01 },
+      ], { now });
+
+      expect(result.tolls.map((toll) => toll.id)).toEqual(['p17_mage']);
+    });
+
+    test.each([
+      ['Bangu', -22.89, -43.5],
+      ['Campo Grande', -22.9, -43.6],
+      ['Santa Cruz', -22.91, -43.7],
+      ['Nova Iguaçu', -22.752, -43.5],
+    ])('não cobra as posições antigas sem praça real em %s', (_area, latitude, longitude) => {
+      const result = estimateRouteTollsFromCoordinates([
+        { latitude: latitude - 0.01, longitude },
+        { latitude: latitude + 0.01, longitude },
+      ], { now });
+
+      expect(result.tolls).toEqual([]);
+      expect(result.tollFee).toBe(0);
+    });
+
+    test.each([
+      ['sul', tollRoutes.transolimpicaThroughSouthbound, ['p10d_transolimpica', 'p10b_transolimpica']],
+      ['norte', tollRoutes.transolimpicaThroughNorthbound, ['p10a_transolimpica', 'p10c_transolimpica']],
+    ])('cobra as duas praças da Transolímpica no sentido %s', (_direction, polyline, tollIds) => {
+      const result = estimateRouteTollsFromPolyline(polyline, { now });
+
+      expect(result.tolls.map((toll) => toll.id).sort()).toEqual([...tollIds].sort());
+      expect(result.tollFee).toBe(19.9);
+      expect(findCrossedTolls(decodePolyline(polyline))).toHaveLength(2);
+    });
+
+    test('duas praças diferentes contam na mesma janela de passagem', () => {
+      const at = 1792481675018;
+      const merged = mergeTollCrossings(
+        [{ id: 'p10d_transolimpica', amount: 9.95, at }],
+        [{ id: 'p10b_transolimpica', amount: 9.95, at: at + 120000 }]
+      );
+
+      expect(summarizeTollCrossings({ tollCrossingsTracked: true, tollCrossings: merged }).crossedTollFee).toBe(19.9);
+    });
+
+    test('a Ponte cobra só no sentido Região dos Lagos', () => {
+      const toNiteroi = estimateRouteTollsFromPolyline(tollRoutes.ponteTowardNiteroi, { now });
+      const toRio = estimateRouteTollsFromPolyline(tollRoutes.ponteTowardRio, { now });
+
+      expect(toNiteroi.tolls.map((toll) => toll.id)).toEqual(['p08_ponte_rio_niteroi']);
+      expect(toNiteroi.tollFee).toBe(6.6);
+      expect(findCrossedTolls(decodePolyline(tollRoutes.ponteTowardNiteroi))).toHaveLength(1);
+      expect(toRio.tollFee).toBe(0);
+      expect(findCrossedTolls(decodePolyline(tollRoutes.ponteTowardRio))).toEqual([]);
+    });
+
+    test('todas as praças dentro da área de destino têm posição conferida', () => {
+      const insideDestinationBounds = TOLL_PLAZAS.filter((toll) =>
+        toll.lat >= -23.0823 && toll.lat <= -22.7423 && toll.lng >= -43.7958 && toll.lng <= -43.0990
+      );
+
+      expect(insideDestinationBounds.length).toBeGreaterThan(0);
+      expect(insideDestinationBounds.filter((toll) => !toll.positionVerified)).toEqual([]);
+    });
+
+    test('a geometria da rota vale mais que um tollFee antigo guardado na rota', () => {
+      const result = resolveTollFeeFromPricingPayload({
+        routePolyline: tollRoutes.pastorinhasToPauDaFome,
+        routeDetails: { tollFee: 9.95 },
+      });
+
+      expect(result.tollFee).toBe(0);
+      expect(result.source).toBe('leaf_toll_catalog');
+    });
+
+    test('sem geometria, ainda usa o tollFee informado', () => {
+      const result = resolveTollFeeFromPricingPayload({ routeDetails: { tollFee: 4 } });
+
+      expect(result.tollFee).toBe(4);
+      expect(result.source).toBe('payload_toll_fee_fallback');
+    });
+  });
+
+  describe('tarifa de moto', () => {
+    const now = new Date('2026-10-31T12:00:00.000Z');
+
+    test.each(['leaf_moto', 'Leaf Moto', 'type_moto'])('cota R$ 4,00 na Transolímpica para %s', (carType) => {
+      const result = resolveTollFeeFromPricingPayload({
+        routePolyline: tollRoutes.transolimpicaSouthbound,
+        vehicleTollClass: carType,
+      });
+
+      expect(result.tollFee).toBe(4);
+    });
+
+    test('moto é isenta na Linha Amarela, sem cair no tollFee guardado na rota', () => {
+      const result = resolveTollFeeFromPricingPayload({
+        routePolyline: tollRoutes.linhaAmarelaWestbound,
+        routeDetails: { tollFee: 4 },
+        vehicleTollClass: 'leaf_moto',
+      });
+
+      expect(result.tollFee).toBe(0);
+      expect(result.tolls.map((toll) => toll.id)).toEqual(['p09_linha_amarela']);
+    });
+
+    test('cota R$ 3,30 na Ponte e R$ 8,00 nas duas praças da Transolímpica', () => {
+      expect(estimateRouteTollsFromPolyline(tollRoutes.ponteTowardNiteroi, { now, vehicleType: 'leaf_moto' }).tollFee).toBe(3.3);
+      expect(estimateRouteTollsFromPolyline(tollRoutes.transolimpicaThroughSouthbound, { now, vehicleType: 'leaf_moto' }).tollFee).toBe(8);
+    });
+
+    test('carro segue na tarifa de carro', () => {
+      expect(estimateRouteTollsFromPolyline(tollRoutes.transolimpicaSouthbound, {
+        now,
+        vehicleType: 'leaf_plus',
+      }).tollFee).toBe(9.95);
+    });
   });
 
   describe('crossing detection for the executed trip', () => {
@@ -129,9 +289,9 @@ describe('route-toll-service', () => {
 
   describe('praça de duas cabines (P06/P07 Viúva Graça)', () => {
     const throughPlaza = [
-      { latitude: -22.74, longitude: -43.49 },
-      { latitude: -22.7525, longitude: -43.5005 },
-      { latitude: -22.765, longitude: -43.51 },
+      { latitude: -22.7145, longitude: -43.72 },
+      { latitude: -22.7151, longitude: -43.7307 },
+      { latitude: -22.7157, longitude: -43.74 },
     ];
 
     test('a rota estimada cobra uma cabine só', () => {

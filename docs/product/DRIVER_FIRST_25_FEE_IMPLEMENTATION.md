@@ -2,7 +2,7 @@
 
 ## Objetivo e regra aprovada
 
-Issue #405. Em 22/10/2026, Izaak aprovou R$ 0,99 da Leaf, com o custo Pix separado, nas primeiras 25 corridas concluídas no destino desde o cadastro. Cancelamentos e antecipações não consomem vagas. Vale para todos os motoristas, inclusive já cadastrados, sem término. Depois da 25ª, vale a tabela atual: R$ 0,79 / R$ 0,99 / R$ 1,49 / 3%, conforme a faixa.
+Issue #405. Em 22/10/2026, Izaak aprovou R$ 0,99 da Leaf, com o custo Pix separado, nas primeiras 25 corridas concluídas no destino desde o cadastro. **Em 31/10/2026, Izaak mudou a regra: durante a promoção, os R$ 0,99 são o total da corrida, com o Pix incluso.** O contrato separa os centavos em Pix e Leaf (R$ 0,50 + R$ 0,49 até R$ 62,50). Quando o Pix passa de R$ 0,99 (corridas acima de R$ 123,75), a Leaf absorve a diferença, registrada em `requestedPaymentIntermediationFeeCents`. O `policyId` não mudou porque identifica os contadores; contexto aceito antes da mudança, sem `paymentFeeIncluded`, segue com Pix separado. Cancelamentos e antecipações não consomem vagas. Vale para todos os motoristas, inclusive já cadastrados, sem término. Depois da 25ª, vale a tabela atual: R$ 0,79 / R$ 0,99 / R$ 1,49 / 3%, conforme a faixa.
 
 Não há reprecificação passada, devolução de taxas antigas ou reinício da contagem na ativação. Na faixa de R$ 0,79, os R$ 0,99 aprovados representam aumento; a comunicação não pode prometer desconto em todas as corridas.
 

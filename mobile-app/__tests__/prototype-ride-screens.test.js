@@ -39,6 +39,20 @@ import {
 const mockGetBookingHistory = jest.fn();
 const mockGetCachedBookingHistory = jest.fn();
 
+// O fluxo do card tem testes próprios; aqui a tela abre direto no cupom.
+jest.mock('../src/screens/prototype/RideClosingCard', () => {
+  const { useEffect } = require("react");
+  return {
+    __esModule: true,
+    default: ({ onOpenFullReceipt }) => {
+      useEffect(() => {
+        onOpenFullReceipt();
+      }, [onOpenFullReceipt]);
+      return null;
+    },
+  };
+});
+
 jest.mock('../src/services/BookingHistoryService', () => ({
   __esModule: true,
   BOOKING_HISTORY_CACHE_TTL_MS: 30000,
@@ -1367,7 +1381,7 @@ describe('prototype ride screens', () => {
       />,
     );
 
-    expect(receiptScreen.getByTestId('driver-receipt-rate-passenger-button').props.accessibilityState).toEqual({ disabled: false });
+    expect(receiptScreen.getByTestId('driver-receipt-screen')).toBeTruthy();
   });
 
   it('passes passenger active ride context when opening chat during an active trip', () => {
@@ -2497,7 +2511,8 @@ describe('prototype ride screens', () => {
     expect(screen.getByText('Motorista a caminho')).toBeTruthy();
     expect(screen.getByText('Motorista Leaf')).toBeTruthy();
     expect(screen.getByText('LEF-2042')).toBeTruthy();
-    expect(screen.getByTestId('ride-card-field-passenger-passenger_driver_accepted-vehicle_type')).toHaveTextContent(/Leaf Plus/);
+    expect(screen.queryByTestId('ride-card-field-passenger-passenger_driver_accepted-vehicle_type')).toBeNull();
+    expect(screen.queryByTestId('ride-card-field-passenger-passenger_driver_accepted-fare')).toBeNull();
     expect(screen.getByText('Cor não informada')).toBeTruthy();
     expect(screen.getByText('8 km até o embarque')).toBeTruthy();
     expect(screen.getByTestId('ride-card-field-passenger-passenger_driver_accepted-pickup_address')).toHaveTextContent('Rua A, 10');
@@ -2513,10 +2528,10 @@ describe('prototype ride screens', () => {
     expect(screen.queryByLabelText('Cancelar corrida')).toBeNull();
 
     fireEvent.press(screen.getByTestId('passenger-trip-accepted-more-options-button'));
-    expect(screen.getByTestId('passenger-trip-collapse-button').props.accessibilityLabel).toBe(
-      'Voltar ao resumo da viagem',
-    );
+    expect(screen.queryByTestId('passenger-trip-collapse-button')).toBeNull();
+    expect(screen.getByTestId('passenger-trip-expanded-summary')).toBeTruthy();
     expect(screen.getByLabelText('SOS')).toBeTruthy();
+    expect(screen.getByTestId('ride-card-field-passenger-passenger_driver_accepted-vehicle_type')).toHaveTextContent(/Leaf Plus/);
     expect(
       screen.getByTestId(
         'ride-card-field-passenger-passenger_driver_accepted-destination_address',
@@ -3297,13 +3312,15 @@ describe('prototype ride screens', () => {
       })
     );
 
-    expect(screen.getByTestId('passenger-trip-collapse-button').props.accessibilityLabel).toBe(
-      'Voltar ao resumo da viagem',
-    );
     expect(screen.getByLabelText('Falar no chat')).toBeTruthy();
     expect(screen.getByLabelText('Compartilhar viagem')).toBeTruthy();
     expect(screen.getByLabelText('Alterar destino')).toBeTruthy();
     expect(screen.getByLabelText('Encerrar corrida')).toBeTruthy();
+
+    // No back button in the expanded card: the handle returns to the summary.
+    fireEvent.press(screen.getByTestId('passenger-trip-sheet-handle'));
+    expect(screen.queryByTestId('passenger-trip-expanded-summary')).toBeNull();
+    expect(screen.getByTestId('passenger-trip-more-actions-button')).toBeTruthy();
   });
 
   it('hydrates accepted passenger vehicle and pickup ETA from active ride aliases', () => {
@@ -3506,7 +3523,7 @@ describe('prototype ride screens', () => {
     const { getByTestId } = render(
       <RobotaxiReceiptScreen
         navigation={navigation}
-        route={{ params: { fromTrip: true } }}
+        route={{ params: { fromRating: true } }}
       />
     );
 
@@ -3749,7 +3766,7 @@ describe('prototype ride screens', () => {
       />
     );
 
-    fireEvent.press(getByTestId('passenger-receipt-back-to-map-button'));
+    fireEvent.press(getByTestId('receipt-done-button'));
 
     expect(dismissCompletedReceipt).toHaveBeenCalled();
     expect(navigation.navigate).toHaveBeenCalledWith('RobotaxiPrototype', expect.objectContaining({
@@ -3877,13 +3894,6 @@ describe('prototype ride screens', () => {
     expect(queryByText(/reconciliação/i)).toBeNull();
     expect(getAllByText('--').length).toBeGreaterThan(0);
 
-    const rateButton = getByTestId('passenger-receipt-rate-trip-button');
-    expect(rateButton.props.accessibilityState?.disabled).toBe(true);
-    fireEvent.press(rateButton);
-    expect(navigation.navigate).not.toHaveBeenCalledWith(
-      'RobotaxiPrototypeRating',
-      expect.any(Object)
-    );
 
     await waitFor(() => {
       expect(recoverCompletedReceipt).toHaveBeenCalledWith({
@@ -3984,7 +3994,6 @@ describe('prototype ride screens', () => {
     expect(getByText('Mercadão de Madureira')).toBeTruthy();
     expect(queryByText('R$ 27,50')).toBeNull();
     expect(queryByText('Origem local antiga')).toBeNull();
-    expect(getByTestId('passenger-receipt-rate-trip-button').props.accessibilityState?.disabled).toBe(false);
     expect(recoverCompletedReceipt).not.toHaveBeenCalled();
   });
 
@@ -4036,7 +4045,6 @@ describe('prototype ride screens', () => {
     expect(getByText('Av. das Americas, 4666')).toBeTruthy();
     expect(queryByTestId('receipt-recovery-state-card')).toBeNull();
     expect(queryByText('Recibo pendente')).toBeNull();
-    expect(getByTestId('passenger-receipt-rate-trip-button').props.accessibilityState?.disabled).toBe(false);
     expect(recoverCompletedReceipt).not.toHaveBeenCalled();
   });
 
@@ -4088,7 +4096,6 @@ describe('prototype ride screens', () => {
     expect(getByText('Av. das Americas, 4666')).toBeTruthy();
     expect(queryByTestId('receipt-recovery-state-card')).toBeNull();
     expect(queryByText('Recibo final indisponível')).toBeNull();
-    expect(getByTestId('passenger-receipt-rate-trip-button').props.accessibilityState?.disabled).toBe(false);
     expect(recoverCompletedReceipt).not.toHaveBeenCalled();
   });
 
@@ -4134,13 +4141,6 @@ describe('prototype ride screens', () => {
     expect(getAllByText('--').length).toBeGreaterThan(0);
     expect(queryByText('R$ 0,00')).toBeNull();
 
-    const rateButton = getByTestId('passenger-receipt-rate-trip-button');
-    expect(rateButton.props.accessibilityState?.disabled).toBe(true);
-    fireEvent.press(rateButton);
-    expect(navigation.navigate).not.toHaveBeenCalledWith(
-      'RobotaxiPrototypeRating',
-      expect.any(Object)
-    );
 
     await waitFor(() => {
       expect(recoverCompletedReceipt).toHaveBeenCalledWith({
@@ -4189,7 +4189,6 @@ describe('prototype ride screens', () => {
     expect(getByText('Recibo pendente')).toBeTruthy();
     expect(queryByText(/reconciliação/i)).toBeNull();
     expect(queryByText('R$ 38,40')).toBeNull();
-    expect(getByTestId('passenger-receipt-rate-trip-button').props.accessibilityState?.disabled).toBe(true);
 
     await waitFor(() => {
       expect(recoverCompletedReceipt).toHaveBeenCalledWith({
@@ -4218,7 +4217,7 @@ describe('prototype ride screens', () => {
       />
     );
 
-    fireEvent.press(getByTestId('passenger-receipt-back-to-map-button'));
+    fireEvent.press(getByTestId('receipt-done-button'));
 
     expect(dismissCompletedReceipt).toHaveBeenCalled();
     expect(navigation.navigate).toHaveBeenCalledWith('RobotaxiPrototype', expect.objectContaining({
@@ -4236,7 +4235,6 @@ describe('prototype ride screens', () => {
       <RobotaxiReceiptScreen navigation={navigation} route={{ params: {} }} />
     );
 
-    fireEvent.press(getByTestId('passenger-receipt-more-options-button'));
     fireEvent.press(getByTestId('passenger-receipt-report-issue-button'));
 
     expect(navigation.navigate).toHaveBeenCalledWith(
@@ -4349,7 +4347,7 @@ describe('prototype ride screens', () => {
     );
 
     expect(getByText('Corridas concluídas')).toBeTruthy();
-    expect(getByText('Viagens')).toBeTruthy();
+    expect(getByText('Corridas')).toBeTruthy();
     expect(getByText('Recibos, trajetos e valores líquidos em uma leitura direta.')).toBeTruthy();
     await waitFor(() => {
       expect(getByText('Partida: 1540 Mission St')).toBeTruthy();
@@ -4546,6 +4544,30 @@ describe('prototype ride screens', () => {
       expect(getByText('Praça Senador Salgado Filho, Centro')).toBeTruthy();
       expect(queryByText('Destino indisponivel')).toBeNull();
     });
+  });
+
+  it('shows the Pix amount paid on the search card even when the quote changed afterwards', () => {
+    usePrototypeRideRuntime.mockReturnValue(
+      buildPassengerRuntime({
+        bookingStatus: 'searching',
+        searchingElapsedSeconds: 12,
+        selectedFare: 23.9,
+        selectedVehicle: 'Leaf Plus',
+        selectedDestination: { name: 'Botafogo Praia Shopping' },
+        currentAddress: 'R. Prudente de Morais, 123',
+        activeBooking: { estimatedFare: 23.9, paymentAmount: 24.46 },
+        cancelRideSearch: jest.fn(),
+        lastError: '',
+      })
+    );
+
+    const navigation = { navigate: jest.fn(), replace: jest.fn(), canGoBack: jest.fn(() => false), goBack: jest.fn() };
+    const { getAllByText, queryByText } = render(
+      <RobotaxiDriverSearchScreen navigation={navigation} route={{ params: { selectedFare: 23.9 } }} />
+    );
+
+    expect(getAllByText('R$ 24,46').length).toBeGreaterThan(0);
+    expect(queryByText('R$ 23,90')).toBeNull();
   });
 
   it('renders the passenger search card with time progress, rotating status and route summary', () => {
@@ -6003,7 +6025,7 @@ describe('prototype ride screens', () => {
       goBack: jest.fn(),
     };
     const receipt = buildReceiptRuntime().lastReceipt;
-    const { getByTestId, getByLabelText, getByPlaceholderText } = render(
+    const { getByTestId, getByLabelText, getByPlaceholderText, queryByPlaceholderText } = render(
       <RobotaxiRatingScreen
         navigation={navigation}
         route={{
@@ -6056,6 +6078,8 @@ describe('prototype ride screens', () => {
     expect(airConditioningNo.props.accessibilityState).toEqual({ checked: false });
     expect(getByTestId('passenger-rating-submit-button').props.accessibilityLabel)
       .toBe('Enviar avaliação');
+    expect(queryByPlaceholderText('Comentário opcional')).toBeNull();
+    fireEvent.press(getByTestId('rating-add-comment-button'));
     expect(getByPlaceholderText('Comentário opcional').props.accessibilityLabel)
       .toBe('Comentário sobre a viagem');
 

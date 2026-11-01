@@ -123,7 +123,7 @@ describe('payment-driver-availability-guard', () => {
       'driver-1',
       'Leaf Plus',
       expect.objectContaining({ status: 'AVAILABLE' }),
-      { allowCachedActivation: true }
+      { allowCachedActivation: true, profileTimeoutMs: 1500 }
     );
   });
 
@@ -478,7 +478,7 @@ describe('payment-driver-availability-guard', () => {
       'driver-1',
       'Leaf Plus',
       expect.objectContaining({ status: 'AVAILABLE' }),
-      { allowCachedActivation: true }
+      { allowCachedActivation: true, profileTimeoutMs: 1500 }
     );
   });
 

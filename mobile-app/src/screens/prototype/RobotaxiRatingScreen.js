@@ -29,7 +29,7 @@ import robotaxiPrototypeTokens from "../../components/design-system/robotaxiProt
 import { usePrototypeMapOcclusion } from "./prototypeMapOcclusion";
 import { usePrototypeRideRuntime } from "./prototypeRideRuntime";
 import { useHapticFeedback } from "../../hooks/useHapticFeedback";
-import RatingService from "../../services/RatingService";
+import { submitTripAirConditioning, submitTripRating } from "./tripRatingSubmission";
 
 const { color, typography } = robotaxiPrototypeTokens;
 const SHEET_BOTTOM_OFFSET = 0;
@@ -84,29 +84,6 @@ function normalizeAutoBoolean(value, fallback = null) {
   return fallback;
 }
 
-function resolveSubmittedRatingValue(result, fallbackRating) {
-  const rawRating =
-    result?.rating && typeof result.rating === "object"
-      ? result.rating.rating
-      : result?.rating;
-  const numeric = Number(rawRating);
-  if (Number.isFinite(numeric) && numeric >= 1 && numeric <= 5) {
-    return numeric;
-  }
-  return fallbackRating;
-}
-
-function resolveSubmittedComment(result, fallbackComment) {
-  const rawComment =
-    result?.rating && typeof result.rating === "object"
-      ? result.rating.comment
-      : result?.comment;
-  if (typeof rawComment === "string") {
-    return rawComment.trim();
-  }
-  return fallbackComment.trim();
-}
-
 export default function RobotaxiRatingScreen({ navigation, route }) {
   const {
     activeRole,
@@ -153,11 +130,16 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
   const [selectedTags, setSelectedTags] = useState(() =>
     reviewerType === "driver" ? ["Pontualidade"] : ["Condução segura"],
   );
-  const [airConditioningOk, setAirConditioningOk] = useState(null);
+  // Already answered on the end-of-ride card: this screen does not ask again.
+  const airConditioningAnswered = typeof receipt?.airConditioningOk === "boolean";
+  const [airConditioningOk, setAirConditioningOk] = useState(
+    airConditioningAnswered ? receipt.airConditioningOk : null,
+  );
   // Required answer: keep the button disabled and say why instead of an alert after tapping.
   const awaitingAirConditioningAnswer = reviewerType === "passenger" && airConditioningOk === null;
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [secondaryActionsVisible, setSecondaryActionsVisible] = useState(false);
+  const [commentVisible, setCommentVisible] = useState(false);
   const qaAutoSubmitStartedRef = useRef(false);
   const sheetBottom =
     SHEET_BOTTOM_OFFSET + robotaxiLifecycleMetrics.cardBottomGap + insets.bottom;
@@ -303,41 +285,19 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
                 : [`Ar-condicionado: ${airConditioningOk ? "Sim" : "Não"}`]),
             ];
 
-      const submitResult = await RatingService.submitRating({
+      await submitTripRating({
         tripId,
-        userId: profile.uid,
         reviewerId: profile.uid,
         reviewerType,
-        userType: reviewerType,
         targetUserId,
-        ...(reviewerType === "driver"
-          ? { passengerId: targetUserId }
-          : { driverId: targetUserId }),
         rating,
-        comment: comment.trim(),
+        comment,
         selectedOptions,
-        tripData:
-          reviewerType === "driver"
-            ? { passengerId: targetUserId, passenger: targetUserId }
-            : { driverId: targetUserId, driver: targetUserId },
+        markTripRating,
       });
-      const committedRating = resolveSubmittedRatingValue(submitResult, rating);
-      const committedComment = resolveSubmittedComment(submitResult, comment);
-
-      markTripRating(
-        tripId,
-        reviewerType === "driver"
-          ? {
-              driverRatedPassengerAt: new Date().toISOString(),
-              driverRatedPassengerValue: committedRating,
-              driverRatedPassengerComment: committedComment,
-            }
-          : {
-              passengerRatedDriverAt: new Date().toISOString(),
-              passengerRatedDriverValue: committedRating,
-              passengerRatedDriverComment: committedComment,
-            },
-      );
+      if (reviewerType === "passenger" && !airConditioningAnswered) {
+        submitTripAirConditioning({ tripId, airConditioningOk, markTripRating }).catch(() => {});
+      }
 
       dismissCompletedReceipt();
       // Back home without an extra confirmation tap.
@@ -351,6 +311,7 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
       setIsSubmitting(false);
     }
   }, [
+    airConditioningAnswered,
     airConditioningOk,
     comment,
     dismissCompletedReceipt,
@@ -494,7 +455,13 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
               })}
             </View>
 
-            <View style={styles.tagsWrap}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              style={styles.tagsScroll}
+              contentContainerStyle={styles.tagsRow}
+            >
               {quickTags.map((tag) => {
                 const active = selectedTags.includes(tag);
                 return (
@@ -516,28 +483,43 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
                   </LeafTouchable>
                 );
               })}
-            </View>
+            </ScrollView>
 
-            <TextInput
-              value={comment}
-              onChangeText={setComment}
-              placeholder={
-                reviewerType === "driver"
-                  ? "Comentário opcional sobre o passageiro"
-                  : "Comentário opcional"
-              }
-              placeholderTextColor={color.text.muted}
-              style={styles.input}
-              multiline
-              accessibilityLabel={
-                reviewerType === "driver"
-                  ? "Comentário sobre o passageiro"
-                  : "Comentário sobre a viagem"
-              }
-              accessibilityHint="Comentário opcional."
-            />
+            {commentVisible || comment ? (
+              <TextInput
+                value={comment}
+                onChangeText={setComment}
+                placeholder={
+                  reviewerType === "driver"
+                    ? "Comentário opcional sobre o passageiro"
+                    : "Comentário opcional"
+                }
+                placeholderTextColor={color.text.muted}
+                style={styles.input}
+                multiline
+                autoFocus={commentVisible}
+                accessibilityLabel={
+                  reviewerType === "driver"
+                    ? "Comentário sobre o passageiro"
+                    : "Comentário sobre a viagem"
+                }
+                accessibilityHint="Comentário opcional."
+              />
+            ) : (
+              <LeafTouchable
+                style={styles.addCommentButton}
+                activeOpacity={0.86}
+                onPress={() => setCommentVisible(true)}
+                testID="rating-add-comment-button"
+                accessibilityRole="button"
+                accessibilityLabel="Adicionar comentário"
+              >
+                <Ionicons name="add" size={18} color={color.text.secondary} />
+                <Text style={styles.addCommentText}>Adicionar comentário</Text>
+              </LeafTouchable>
+            )}
 
-            {reviewerType === "passenger" ? (
+            {reviewerType === "passenger" && !airConditioningAnswered ? (
               <View style={styles.airConditioningCard}>
                 <Text style={styles.airConditioningTitle}>
                   O ar-condicionado permaneceu ligado durante toda a corrida?
@@ -716,12 +698,26 @@ const styles = StyleSheet.create({
     justifyContent: "flex-start",
     gap: 12,
   },
-  tagsWrap: {
+  tagsScroll: {
     marginTop: 18,
+    flexGrow: 0,
+  },
+  tagsRow: {
     flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "flex-start",
     gap: 8,
+  },
+  addCommentButton: {
+    marginTop: 4,
+    minHeight: 44,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  addCommentText: {
+    color: color.text.secondary,
+    ...leafTypography.medium,
+    fontSize: 15,
+    lineHeight: 20,
   },
   tagChip: {
     minHeight: 44,

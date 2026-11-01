@@ -115,6 +115,7 @@ const {
   resolveSyncedBookingStatus,
   hasRuntimeActiveRideContext,
   shouldPreserveActiveRideOnIdleSync,
+  resolveCompletedReceiptDurationMin,
   resolveCompletedReceiptRecoveryBookingId,
   hasBackendFinalRecoveredReceiptForBooking,
   buildRuntimeReceiptFromRecoveredReceipt,
@@ -330,6 +331,23 @@ describe('prototype ride runtime financial snapshot', () => {
     const payload = { success: true, source: 'explicit_sync', hasActiveRide: false, bookingId: null };
     expect(shouldPreserveActiveRideOnIdleSync({ source, payload, nowMs: 60_000, driverRideAssignedAtMs: 50_000 })).toBe(true);
     expect(shouldPreserveActiveRideOnIdleSync({ source, payload, nowMs: 200_000, driverRideAssignedAtMs: 50_000 })).toBe(false);
+  });
+
+  it('uses the real trip time on the final receipt and keeps the plan only as fallback', () => {
+    expect(resolveCompletedReceiptDurationMin({
+      actualDurationSecs: 483,
+      plannedDurationMinutes: 31,
+    })).toBe(8);
+    expect(resolveCompletedReceiptDurationMin({
+      settledDurationSecs: 600,
+      actualDurationSecs: 483,
+      plannedDurationMinutes: 31,
+    })).toBe(10);
+    expect(resolveCompletedReceiptDurationMin({
+      settledDurationSecs: null,
+      actualDurationSecs: null,
+      plannedDurationMinutes: 31,
+    })).toBe(31);
   });
 
   it('accepts explicit receipt recovery booking ids from route-only receipt screens', () => {

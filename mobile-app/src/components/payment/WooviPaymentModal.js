@@ -41,6 +41,8 @@ import {
 
 
 const { width, height } = Dimensions.get('window');
+// Padding de 6 no contêiner de 132: menor do que isso prejudica a leitura pelo banco.
+const ROBOTAXI_QR_SIZE = 120;
 const { color, typography, radius, spacing, elevation } = robotaxiPrototypeTokens;
 
 // Tempo de expiração: 5 minutos (300 segundos)
@@ -344,6 +346,8 @@ export default function WooviPaymentModal({
     
     // Refs
     const countdownIntervalRef = useRef(null);
+    const pixCopiedTimeoutRef = useRef(null);
+    const [pixCodeCopied, setPixCodeCopied] = useState(false);
     const paymentCheckIntervalRef = useRef(null);
     const timeoutRef = useRef(null);
     const paymentDataRef = useRef(null);
@@ -1400,19 +1404,17 @@ export default function WooviPaymentModal({
         if (paymentData?.qrCodeText) {
             try {
                 await Clipboard.setStringAsync(paymentData.qrCodeText);
-                // Mostra o código em um Alert para o usuário copiar manualmente
-                Alert.alert(
-                    '📋 Código PIX',
-                    `Copie o código abaixo:\n\n${paymentData.qrCodeText}\n\nCole no seu app de pagamentos.`,
-                    [{ text: 'OK' }]
-                );
+                setPixCodeCopied(true);
+                clearTimeout(pixCopiedTimeoutRef.current);
+                pixCopiedTimeoutRef.current = setTimeout(() => setPixCodeCopied(false), 2500);
             } catch (error) {
                 Logger.error('❌ Erro ao copiar código PIX:', error);
                 // Fallback: mostra o código mesmo em caso de erro
                 Alert.alert(
-                    '📋 Código PIX',
+                    'Código PIX',
                     `Copie o código abaixo:\n\n${paymentData.qrCodeText}\n\nCole no seu app de pagamentos.`,
-                    [{ text: 'OK' }]
+                    [{ text: 'OK' }],
+                    { __skipFriendlyAlertPatch: true }
                 );
             }
         }
@@ -1794,6 +1796,12 @@ export default function WooviPaymentModal({
             );
         }
 
+        // Card da corrida: QR menor e sempre visível, sem repetir o que o botão já diz.
+        const compactQr = robotaxiLifecycleCard
+            && paymentStatus !== 'confirmed'
+            && ((hasQrImage && !qrImageFailed) || hasQrText);
+        const hideCopyDetails = compactQr && hasQrText;
+
         return (
             <View
                 style={styles.paymentContainer}
@@ -1813,9 +1821,11 @@ export default function WooviPaymentModal({
                         >
                             Pagar com Pix
                         </Text>
-                        <SecurePaymentBadge style={styles.securePaymentBadge} color={PIX_SURFACE.muted} />
+                        {robotaxiLifecycleCard ? null : (
+                            <SecurePaymentBadge style={styles.securePaymentBadge} color={PIX_SURFACE.muted} />
+                        )}
                         <View
-                            style={styles.statusChip}
+                            style={robotaxiLifecycleCard ? styles.qaHiddenText : styles.statusChip}
                             testID="payment-modal-status"
                             accessibilityLabel={
                                 paymentStatus === 'confirmed'
@@ -1889,7 +1899,7 @@ export default function WooviPaymentModal({
                 </View>
 
                 <View
-                    style={styles.qrContainer}
+                    style={[styles.qrContainer, compactQr && styles.robotaxiQrContainer]}
                     testID="payment-modal-qr-container"
                     accessibilityLabel="QR Code PIX"
                 >
@@ -1906,7 +1916,7 @@ export default function WooviPaymentModal({
                     ) : hasQrImage && !qrImageFailed ? (
                         <Image
                             source={{ uri: paymentData.qrCodeImage }}
-                            style={styles.qrCodeImage}
+                            style={[styles.qrCodeImage, compactQr && styles.robotaxiQrCodeImage]}
                             resizeMode="contain"
                             testID="payment-modal-qr-image"
                             onError={() => setQrImageFailed(true)}
@@ -1914,7 +1924,7 @@ export default function WooviPaymentModal({
                     ) : hasQrText ? (
                         <QRCode
                             value={paymentData.qrCodeText}
-                            size={145}
+                            size={compactQr ? ROBOTAXI_QR_SIZE : 145}
                             backgroundColor="#FFFFFF"
                             color="#080A09"
                         />
@@ -1935,27 +1945,31 @@ export default function WooviPaymentModal({
                     )}
                 </View>
 
-                <Text style={styles.qrInstruction}>
-                    {hasQrImage || hasQrText
-                        ? 'Escaneie o QR Code ou copie o código PIX abaixo.'
-                        : hasPaymentLink
-                            ? 'Abra o link seguro da Woovi para pagar.'
-                            : 'O pagamento não está disponível para uso.'}
-                </Text>
+                {hideCopyDetails ? null : (
+                    <>
+                        <Text style={styles.qrInstruction}>
+                            {hasQrImage || hasQrText
+                                ? 'Escaneie o QR Code ou copie o código PIX abaixo.'
+                                : hasPaymentLink
+                                    ? 'Abra o link seguro da Woovi para pagar.'
+                                    : 'O pagamento não está disponível para uso.'}
+                        </Text>
 
-                <View
-                    style={styles.pixCopyField}
-                    testID="payment-modal-pix-code"
-                    accessibilityLabel={
-                        hasQrText
-                            ? 'Código PIX pronto para copiar'
-                            : 'Código PIX indisponível'
-                    }
-                >
-                    <Text style={styles.pixCodeText} numberOfLines={1}>
-                        {getPixSnippet()}
-                    </Text>
-                </View>
+                        <View
+                            style={styles.pixCopyField}
+                            testID="payment-modal-pix-code"
+                            accessibilityLabel={
+                                hasQrText
+                                    ? 'Código PIX pronto para copiar'
+                                    : 'Código PIX indisponível'
+                            }
+                        >
+                            <Text style={styles.pixCodeText} numberOfLines={1}>
+                                {getPixSnippet()}
+                            </Text>
+                        </View>
+                    </>
+                )}
 
                 <View style={[
                     styles.actionButtons,
@@ -1970,12 +1984,12 @@ export default function WooviPaymentModal({
                             onPress={copyPixCode}
                             activeOpacity={0.88}
                             testID="payment-modal-copy-code-button"
-                            accessibilityLabel="Copiar código PIX"
+                            accessibilityLabel={pixCodeCopied ? 'Código PIX copiado' : 'Copiar código PIX'}
                         >
                             <Text style={[
                                 styles.primaryActionText,
                                 robotaxiLifecycleCard && styles.robotaxiActionText,
-                            ]}>Copiar código</Text>
+                            ]}>{pixCodeCopied ? 'Código copiado' : 'Copiar código'}</Text>
                         </LeafTouchable>
                     ) : null}
                     {robotaxiLifecycleCard ? (
@@ -2351,6 +2365,15 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         marginTop: 26,
+    },
+    robotaxiQrContainer: {
+        width: ROBOTAXI_QR_SIZE + 12,
+        height: ROBOTAXI_QR_SIZE + 12,
+        marginTop: 14,
+    },
+    robotaxiQrCodeImage: {
+        width: ROBOTAXI_QR_SIZE,
+        height: ROBOTAXI_QR_SIZE,
     },
     qrUnavailable: {
         width: 150,

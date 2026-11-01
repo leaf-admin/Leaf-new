@@ -352,8 +352,23 @@ export default function RobotaxiSupportScreen({ navigation, route }) {
                   onPress={handleCallSupport}
                   testID="robotaxi-support-call-sac"
                   accessibilityLabel={`Ligar para o SAC da Leaf: ${AppConfig.support_phone_display}, atendimento 24 horas`}
-                  last
+                  last={!incidentIsPrimary}
                 />
+                {incidentIsPrimary ? (
+                  <PrototypeMenuRow
+                    icon="alert-circle-outline"
+                    title="Ligar para a polícia (190)"
+                    subtitle="Em caso de perigo imediato"
+                    onPress={() => {
+                      Linking.openURL('tel:190').catch(() => {
+                        Alert.alert('Não foi possível abrir a ligação', 'Disque 190 pelo telefone.');
+                      });
+                    }}
+                    testID="robotaxi-support-call-190"
+                    accessibilityLabel="Ligar para a polícia, 190"
+                    last
+                  />
+                ) : null}
               </PrototypeMenuSection>
 
               <PrototypeMenuSection title="Assuntos">

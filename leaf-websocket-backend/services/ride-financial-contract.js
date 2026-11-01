@@ -146,18 +146,23 @@ function buildRideFinancialContract({
   const tollPassThroughCents = clampCents(tollFeeCents, totalAmountCents);
   const grossFareCents = Math.max(0, totalAmountCents - tollPassThroughCents);
   const introFeeContext = normalizeDriverIntroFeeContext(driverIntroFee);
-  const operationalFee = introFeeContext?.eligible
-    ? { feeCents: introFeeContext.operationalFeeCents, feeType: introFeeContext.policyId }
-    : resolveOperationalFee(grossFareCents, policy);
-  const requestedOperationalFeeCents = toCents(operationalFee.feeCents);
-  const leafOperationalFeeCents = clampCents(requestedOperationalFeeCents, grossFareCents);
-  const remainingAfterOperationalFeeCents = Math.max(0, grossFareCents - leafOperationalFeeCents);
   // Woovi charges intermediation on the full passenger transaction, including toll.
   const requestedPaymentIntermediationFeeCents = toCents(resolvePaymentIntermediationFee(totalAmountCents, policy));
-  const paymentIntermediationFeeCents = clampCents(
-    requestedPaymentIntermediationFeeCents,
-    remainingAfterOperationalFeeCents
-  );
+  const promotionIncludesPaymentFee = introFeeContext?.eligible && introFeeContext.paymentFeeIncluded;
+  // The promotional total covers Pix first. Above the total, Leaf absorbs the rest,
+  // which stays visible in requestedPaymentIntermediationFeeCents.
+  const includedPaymentFeeCents = promotionIncludesPaymentFee
+    ? clampCents(requestedPaymentIntermediationFeeCents, clampCents(introFeeContext.operationalFeeCents, grossFareCents))
+    : 0;
+  const operationalFee = introFeeContext?.eligible
+    ? { feeCents: introFeeContext.operationalFeeCents - includedPaymentFeeCents, feeType: introFeeContext.policyId }
+    : resolveOperationalFee(grossFareCents, policy);
+  const requestedOperationalFeeCents = toCents(operationalFee.feeCents);
+  const leafOperationalFeeCents = clampCents(requestedOperationalFeeCents, grossFareCents - includedPaymentFeeCents);
+  const remainingAfterOperationalFeeCents = Math.max(0, grossFareCents - leafOperationalFeeCents);
+  const paymentIntermediationFeeCents = promotionIncludesPaymentFee
+    ? includedPaymentFeeCents
+    : clampCents(requestedPaymentIntermediationFeeCents, remainingAfterOperationalFeeCents);
   const requestedSubscriptionRetainedFeeCents = toCents(subscriptionRetainedFeeCents);
   const remainingBeforeSubscriptionCents = Math.max(
     0,
@@ -245,7 +250,8 @@ function buildAuthoritativeFinancialSnapshot({
   );
   const driverNetAmount = resolveRequiredCents(driverNetAmountCents, 'driverNetAmountCents');
   const introFeeContext = normalizeDriverIntroFeeContext(driverIntroFee);
-  if (introFeeContext?.eligible && operationalFee !== Math.min(introFeeContext.operationalFeeCents, passengerPaid - tollPassThrough)) {
+  const introFeeRetainedCents = operationalFee + (introFeeContext?.paymentFeeIncluded ? paymentIntermediationFee : 0);
+  if (introFeeContext?.eligible && introFeeRetainedCents !== Math.min(introFeeContext.operationalFeeCents, passengerPaid - tollPassThrough)) {
     const error = new Error('Tarifa Leaf final diverge da promoção aceita');
     error.code = 'DRIVER_INTRO_FEE_SNAPSHOT_MISMATCH';
     throw error;

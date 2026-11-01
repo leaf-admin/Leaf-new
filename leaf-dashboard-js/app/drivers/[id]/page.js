@@ -87,6 +87,21 @@ function DriverDetailContent({ id }) {
   const [busy, setBusy] = useState("");
   const [dialog, setDialog] = useState(null);
   const [reason, setReason] = useState("");
+  const [airConditioning, setAirConditioning] = useState(null);
+
+  useEffect(() => {
+    let active = true;
+    leafAPI.getDriverAirConditioning(id, kycRequestContext)
+      .then((response) => {
+        if (active) setAirConditioning(response?.summary || null);
+      })
+      .catch(() => {
+        if (active) setAirConditioning(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [id, kycRequestContext]);
 
   const load = useCallback(async () => {
     setError("");
@@ -290,6 +305,27 @@ function DriverDetailContent({ id }) {
             Revisão de identidade, configuração de veículo e anexos extras ficam em{" "}
             <Link href={`/drivers/${encodeURIComponent(id)}/documents${kycScope === "sandbox" ? "?kycScope=sandbox" : ""}`}>ferramentas avançadas</Link>.
           </p>
+        </Panel>
+
+        <Panel title="Ar-condicionado" subtitle="Resposta dos passageiros ao fim da corrida.">
+          {airConditioning?.answered ? (
+            <>
+              <dl className="driver-extracted driver-extracted-wide" data-testid="driver-air-conditioning-summary">
+                <div><dt>Respostas</dt><dd>{airConditioning.answered}</dd></div>
+                <div><dt>Ligado a corrida toda</dt><dd>{airConditioning.stayedOn}</dd></div>
+                <div><dt>Não ficou ligado</dt><dd>{airConditioning.turnedOff}</dd></div>
+              </dl>
+              {airConditioning.recentTurnedOff?.length ? (
+                <ul className="table-muted">
+                  {airConditioning.recentTurnedOff.map((item) => (
+                    <li key={item.tripId}>{formatDateTime(item.answeredAt)} · {item.tripId}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </>
+          ) : (
+            <p className="table-muted">Sem respostas ainda.</p>
+          )}
         </Panel>
       </section>
 

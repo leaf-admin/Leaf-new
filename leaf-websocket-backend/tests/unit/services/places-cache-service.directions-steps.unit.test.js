@@ -17,6 +17,7 @@ jest.mock('../../../utils/logger', () => ({
 }));
 
 describe('places-cache-service directions steps', () => {
+  const tollRoutes = require('./fixtures/toll-routes.json');
   const VALID_POLYLINE = '_p~iF~ps|U_ulLnnqC_mqNvxq`@';
   const VALID_LEG_POLYLINE = '_p~iF~ps|U_ulLnnqC';
   const originalFetch = global.fetch;
@@ -716,7 +717,7 @@ describe('places-cache-service directions steps', () => {
             duration: '1200s',
             staticDuration: '900s',
             polyline: {
-              encodedPolyline: 'nuujC~|kgG_|B_|B_|B_|B',
+              encodedPolyline: tollRoutes.linhaAmarelaWestbound,
             },
             travelAdvisory: {
               speedReadingIntervals: [

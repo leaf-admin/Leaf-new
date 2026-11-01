@@ -108,7 +108,10 @@ UPSTREAM_FN="
       printf '        server %s:3001 max_fails=3 fail_timeout=10s%s;\\n' \"\$svc\" \"\$flag\" >> \"\$tmp\"
     done
     mv \"\$tmp\" '$NGINX_UPSTREAM_FILE'
-    docker exec leaf-nginx nginx -t >/dev/null 2>&1
+    if ! nginx_check=\$(docker exec leaf-nginx nginx -t 2>&1); then
+      echo \"[deploy][nginx][error] configuracao recusada: \$nginx_check\" >&2
+      return 1
+    fi
     docker exec leaf-nginx nginx -s reload
     echo \"[deploy][nginx] upstream down=\${down:-none}\"
   }
@@ -774,6 +777,14 @@ remote "
       \$compose up -d --no-deps --force-recreate nginx
       sleep 3
     fi
+    # Gateway em loop de reinício não resolve no DNS e reprova o nginx -t: recria antes com a imagem nova.
+    for svc in $GATEWAY_SERVICES; do
+      if [ \"\$(docker inspect --format '{{.State.Restarting}}' \"leaf-\$svc\" 2>/dev/null)\" = true ]; then
+        echo \"[deploy][gateway] \$svc em loop de reinicio; recriando\"
+        \$compose up -d --no-deps --force-recreate \"\$svc\"
+        sleep 5
+      fi
+    done
     write_upstream ''
   fi
 

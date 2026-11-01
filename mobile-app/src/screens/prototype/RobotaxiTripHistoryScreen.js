@@ -380,7 +380,7 @@ export default function RobotaxiTripHistoryScreen({ navigation, route }) {
           <PrototypeMenuSurface
             onLayout={handlePanelLayout}
             eyebrow={isDriverRole ? 'Corridas concluídas' : 'Histórico de viagens'}
-            title={isRootTab ? 'Atividade' : isDriverRole ? 'Viagens' : 'Histórico'}
+            title={isRootTab ? 'Atividade' : isDriverRole ? 'Corridas' : 'Viagens e recibos'}
             pageTitle={isRootTab}
             subtitle={
               isDriverRole
