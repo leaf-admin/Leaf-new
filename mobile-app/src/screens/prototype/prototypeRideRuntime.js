@@ -17208,8 +17208,11 @@ async function loadPrototypeChatSession(profile, options = {}) {
     const loadedMessages = Array.isArray(messagesResponse?.messages)
       ? messagesResponse.messages
       : [];
+    // Messages held in memory belong to the ride that loaded them.
     const mergedMessages = mergeChatMessages(
-      runtimeState.chatMessages,
+      runtimeState.activeChatBookingId === bookingId
+        ? runtimeState.chatMessages
+        : [],
       loadedMessages,
     );
 
