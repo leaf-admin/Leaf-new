@@ -2497,7 +2497,8 @@ describe('prototype ride screens', () => {
     expect(screen.getByText('Motorista a caminho')).toBeTruthy();
     expect(screen.getByText('Motorista Leaf')).toBeTruthy();
     expect(screen.getByText('LEF-2042')).toBeTruthy();
-    expect(screen.getByTestId('ride-card-field-passenger-passenger_driver_accepted-vehicle_type')).toHaveTextContent(/Leaf Plus/);
+    expect(screen.queryByTestId('ride-card-field-passenger-passenger_driver_accepted-vehicle_type')).toBeNull();
+    expect(screen.queryByTestId('ride-card-field-passenger-passenger_driver_accepted-fare')).toBeNull();
     expect(screen.getByText('Cor não informada')).toBeTruthy();
     expect(screen.getByText('8 km até o embarque')).toBeTruthy();
     expect(screen.getByTestId('ride-card-field-passenger-passenger_driver_accepted-pickup_address')).toHaveTextContent('Rua A, 10');
@@ -2517,6 +2518,7 @@ describe('prototype ride screens', () => {
       'Voltar ao resumo da viagem',
     );
     expect(screen.getByLabelText('SOS')).toBeTruthy();
+    expect(screen.getByTestId('ride-card-field-passenger-passenger_driver_accepted-vehicle_type')).toHaveTextContent(/Leaf Plus/);
     expect(
       screen.getByTestId(
         'ride-card-field-passenger-passenger_driver_accepted-destination_address',
