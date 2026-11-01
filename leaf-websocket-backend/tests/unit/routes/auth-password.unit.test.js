@@ -20,6 +20,15 @@ const mockRealtimeUsers = new Map();
 const mockRedisSet = jest.fn();
 const mockRedisGet = jest.fn();
 const mockRedisDel = jest.fn();
+const mockRedisIncr = jest.fn();
+const mockRedisExpire = jest.fn();
+const mockSendOtp = jest.fn();
+const mockWhatsAppConfig = jest.fn();
+
+jest.mock('../../../services/whatsapp-otp-service', () => ({
+  getWhatsAppOtpConfig: (...args) => mockWhatsAppConfig(...args),
+  sendOtp: (...args) => mockSendOtp(...args)
+}));
 
 jest.mock('firebase-admin', () => ({
   auth: jest.fn(() => ({
@@ -97,7 +106,9 @@ jest.mock('../../../utils/redis-pool', () => ({
   getConnection: jest.fn(() => ({
     set: mockRedisSet,
     get: mockRedisGet,
-    del: mockRedisDel
+    del: mockRedisDel,
+    incr: mockRedisIncr,
+    expire: mockRedisExpire
   }))
 }));
 
@@ -179,6 +190,12 @@ describe('auth-password routes', () => {
     mockRedisSet.mockResolvedValue('OK');
     mockRedisGet.mockResolvedValue(null);
     mockRedisDel.mockResolvedValue(1);
+    mockRedisIncr.mockReset();
+    mockRedisIncr.mockResolvedValue(1);
+    mockSendOtp.mockReset();
+    mockSendOtp.mockResolvedValue({ messageId: 'wamid.test' });
+    mockWhatsAppConfig.mockReset();
+    mockWhatsAppConfig.mockReturnValue({ configured: false });
     mockCreateCustomToken.mockResolvedValue('custom-token');
     mockGetUserByPhoneNumber.mockRejectedValue(Object.assign(new Error('User not found'), { code: 'auth/user-not-found' }));
     admin.auth = jest.fn(() => ({
@@ -511,6 +528,76 @@ describe('auth-password routes', () => {
     expect(response.body.success).toBe(true);
     expect(response.body.otpBypassEnabled).toBe(false);
     expect(redisPool.ensureConnection).toHaveBeenCalledTimes(1);
+  });
+
+  describe('reset code delivery', () => {
+    const phoneDigits = '21999999999';
+    const originalNodeEnv = process.env.NODE_ENV;
+
+    const requestReset = () => request(createApp())
+      .post('/api/auth/password/reset/request')
+      .send({ phone: phoneDigits });
+
+    beforeEach(() => {
+      mockDocs.set(hashPhoneForTest(phoneDigits), {
+        uid: 'customer_non_test',
+        userType: 'customer',
+        passwordHash: 'old_hash'
+      });
+    });
+
+    afterEach(() => {
+      process.env.NODE_ENV = originalNodeEnv;
+    });
+
+    it('sends the stored code through WhatsApp', async () => {
+      mockWhatsAppConfig.mockReturnValue({ configured: true });
+
+      const response = await requestReset();
+
+      expect(response.status).toBe(200);
+      expect(response.body.code).toBeUndefined();
+      const storedCall = mockRedisSet.mock.calls.find(([key]) => key.startsWith('password_reset_otp:'));
+      expect(mockSendOtp).toHaveBeenCalledWith({
+        phoneNumber: '+5521999999999',
+        otp: storedCall[1],
+        verificationId: response.body.verificationId
+      });
+    });
+
+    it('shares the login send limits and spends nothing while cooling down', async () => {
+      mockWhatsAppConfig.mockReturnValue({ configured: true });
+      mockRedisSet.mockImplementation(async (key) => (key.startsWith('otp:cooldown:') ? null : 'OK'));
+
+      const response = await requestReset();
+
+      expect(response.status).toBe(429);
+      expect(response.body.code).toBe('OTP_RESEND_COOLDOWN');
+      expect(mockRedisSet.mock.calls.some(([key]) => key === 'otp:cooldown:5521999999999')).toBe(true);
+      expect(mockSendOtp).not.toHaveBeenCalled();
+    });
+
+    it('drops the code and frees the cooldown when delivery fails', async () => {
+      mockWhatsAppConfig.mockReturnValue({ configured: true });
+      mockSendOtp.mockRejectedValue(new Error('meta down'));
+
+      const response = await requestReset();
+
+      expect(response.status).toBe(502);
+      expect(response.body.code).toBe('WHATSAPP_OTP_DELIVERY_FAILED');
+      const deleted = mockRedisDel.mock.calls.map(([key]) => key);
+      expect(deleted.some((key) => key.startsWith('password_reset_otp:'))).toBe(true);
+      expect(deleted).toContain('otp:cooldown:5521999999999');
+    });
+
+    it('refuses in production when no provider can deliver', async () => {
+      process.env.NODE_ENV = 'production';
+
+      const response = await requestReset();
+
+      expect(response.status).toBe(503);
+      expect(response.body.code).toBe('OTP_PROVIDER_NOT_CONFIGURED');
+    });
   });
 
   it('accepts static reset OTP for configured test phones even when APP_REVIEW is false', async () => {
