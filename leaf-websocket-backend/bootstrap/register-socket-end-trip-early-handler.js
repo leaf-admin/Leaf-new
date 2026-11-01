@@ -6,6 +6,17 @@ const { isRiderEarlyEndEnabled } = require('../utils/ride-lifecycle-feature-flag
 const { buildTripCompletedPayload } = require('../utils/trip-completion-payload');
 const { acceptedContext } = require('../services/driver-intro-fee-service');
 
+// O hash da corrida guarda as localizações em JSON; o recibo lê pickup e drop.
+function parseStoredLocation(value) {
+  if (!value) return undefined;
+  if (typeof value !== 'string') return value;
+  try {
+    return JSON.parse(value);
+  } catch (_error) {
+    return undefined;
+  }
+}
+
 function registerSocketEndTripEarlyHandler({
   socket,
   io,
@@ -130,6 +141,8 @@ function registerSocketEndTripEarlyHandler({
               await receiptService.generateAndSaveReceipt(bookingId, {
                 ...bookingSnapshot,
                 bookingId,
+                pickup: parseStoredLocation(bookingSnapshot?.pickupLocation),
+                drop: parseStoredLocation(bookingSnapshot?.destinationLocation),
                 driverId: driverId || bookingSnapshot?.driverId,
                 customerId: resultCustomerId || customerId,
                 finalPrice: finalFare,
