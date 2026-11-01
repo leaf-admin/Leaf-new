@@ -70,6 +70,16 @@ class RatingService {
     }
 
     // Enviar avaliação via WebSocket
+    async submitAirConditioning({ tripId, airConditioningOk, ...context }) {
+        if (this.shouldUseLocalPrototypeBypass({ tripId, ...context })) {
+            return { success: true, localOnly: true };
+        }
+        if (!this.webSocketManager.isConnected()) {
+            await this.webSocketManager.connect();
+        }
+        return this.webSocketManager.submitAirConditioning({ tripId, airConditioningOk });
+    }
+
     async submitRating(ratingData) {
         try {
             Logger.log('⭐ Enviando avaliação:', ratingData);

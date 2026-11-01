@@ -3978,6 +3978,41 @@ class WebSocketManager {
   }
 
   // Submeter avaliação
+  async submitAirConditioning({ tripId, airConditioningOk }) {
+    if (!this.socket?.connected) {
+      throw buildSocketError(
+        { code: "WS_DISCONNECTED", error: "WebSocket não conectado" },
+        "WebSocket não conectado",
+        "rating",
+      );
+    }
+
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.socket?.off?.("airConditioningSubmitted", handleResult);
+        reject(
+          buildSocketError(
+            { code: "AIR_CONDITIONING_SUBMIT_TIMEOUT", error: "Submit air conditioning timeout" },
+            "Não foi possível registrar a resposta agora.",
+            "rating",
+          ),
+        );
+      }, 10000);
+      const handleResult = (data) => {
+        if (String(data?.tripId || "") !== String(tripId)) return;
+        clearTimeout(timeout);
+        this.socket?.off?.("airConditioningSubmitted", handleResult);
+        if (data.success) {
+          resolve(data);
+        } else {
+          reject(buildSocketError(data, "Não foi possível registrar a resposta agora.", "rating"));
+        }
+      };
+      this.socket.on("airConditioningSubmitted", handleResult);
+      this.socket.emit("submitAirConditioning", { tripId, airConditioningOk });
+    });
+  }
+
   async submitRating(ratingData) {
     if (!this.socket?.connected) {
       throw buildSocketError(

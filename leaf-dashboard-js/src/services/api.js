@@ -540,6 +540,11 @@ class LeafApiService {
     });
   }
 
+  async getDriverAirConditioning(driverId, context = {}) {
+    const scope = context.scope === "sandbox" ? "?scope=sandbox" : "";
+    return this.request(`/drivers/${encodeURIComponent(driverId)}/air-conditioning${scope}`);
+  }
+
   async getDriverComplete(driverId) {
     return this.request(`/drivers/${driverId}/complete`);
   }

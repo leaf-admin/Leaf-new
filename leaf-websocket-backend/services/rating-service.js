@@ -355,6 +355,87 @@ class RatingService {
     };
   }
 
+  // A resposta do ar-condicionado vem antes das estrelas e vale mesmo sem nota.
+  async submitAirConditioningFeedback(payload = {}, context = {}) {
+    if (!firebaseConfig.getFirestore?.()) {
+      return { success: false, error: 'Firebase não disponível' };
+    }
+
+    const tripId = this._resolveTripId(payload);
+    if (!tripId) {
+      return { success: false, error: 'tripId é obrigatório' };
+    }
+    if (typeof payload.airConditioningOk !== 'boolean') {
+      return {
+        success: false,
+        code: 'AIR_CONDITIONING_ANSWER_INVALID',
+        error: 'Resposta do ar-condicionado inválida'
+      };
+    }
+
+    let persistenceScope;
+    try {
+      persistenceScope = this._resolveRideScope(payload, context);
+    } catch (error) {
+      return this._persistenceError(error);
+    }
+
+    const scopeValidation = this._validateTripScope(tripId, 'passenger', context);
+    if (!scopeValidation.valid) {
+      return { success: false, code: scopeValidation.code, error: scopeValidation.error };
+    }
+
+    const answeredAt = new Date().toISOString();
+    try {
+      await rideAnnotationStore.updateAnnotation(
+        firebaseConfig.getFirestore?.(), persistenceScope.collections.bookings, tripId, {
+          air_conditioning_ok: payload.airConditioningOk,
+          air_conditioning_answered_at: answeredAt,
+          air_conditioning_driver_id: scopeValidation.targetUserId
+        }
+      );
+    } catch (error) {
+      logStructured('warn', 'Falha ao gravar resposta do ar-condicionado', {
+        service: 'rating-service', tripId, error: error.message
+      });
+      return {
+        success: false,
+        code: 'AIR_CONDITIONING_WRITE_FAILED',
+        error: 'Não foi possível registrar a resposta agora'
+      };
+    }
+
+    return {
+      success: true,
+      tripId,
+      airConditioningOk: payload.airConditioningOk,
+      answeredAt
+    };
+  }
+
+  async getDriverAirConditioningSummary(driverId, { root = 'bookings', recentLimit = 10 } = {}) {
+    const annotations = await rideAnnotationStore.listAnnotations(firebaseConfig.getFirestore?.(), root);
+    const answers = Object.entries(annotations)
+      .filter(([, annotation]) =>
+        annotation.air_conditioning_driver_id === driverId
+        && typeof annotation.air_conditioning_ok === 'boolean')
+      .map(([tripId, annotation]) => ({
+        tripId,
+        ok: annotation.air_conditioning_ok,
+        answeredAt: annotation.air_conditioning_answered_at || null
+      }));
+    const off = answers
+      .filter((answer) => !answer.ok)
+      .sort((left, right) => String(right.answeredAt).localeCompare(String(left.answeredAt)));
+
+    return {
+      answered: answers.length,
+      stayedOn: answers.length - off.length,
+      turnedOff: off.length,
+      recentTurnedOff: off.slice(0, recentLimit)
+    };
+  }
+
   async getTripRatings(tripId, scopeInput = {}) {
     if (!firebaseConfig.getFirestore?.()) return { success: false, error: 'Firebase não disponível' };
     if (!tripId) return { success: false, error: 'tripId é obrigatório' };

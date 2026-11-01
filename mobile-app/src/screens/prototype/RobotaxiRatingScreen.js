@@ -29,7 +29,7 @@ import robotaxiPrototypeTokens from "../../components/design-system/robotaxiProt
 import { usePrototypeMapOcclusion } from "./prototypeMapOcclusion";
 import { usePrototypeRideRuntime } from "./prototypeRideRuntime";
 import { useHapticFeedback } from "../../hooks/useHapticFeedback";
-import RatingService from "../../services/RatingService";
+import { submitTripAirConditioning, submitTripRating } from "./tripRatingSubmission";
 
 const { color, typography } = robotaxiPrototypeTokens;
 const SHEET_BOTTOM_OFFSET = 0;
@@ -84,29 +84,6 @@ function normalizeAutoBoolean(value, fallback = null) {
   return fallback;
 }
 
-function resolveSubmittedRatingValue(result, fallbackRating) {
-  const rawRating =
-    result?.rating && typeof result.rating === "object"
-      ? result.rating.rating
-      : result?.rating;
-  const numeric = Number(rawRating);
-  if (Number.isFinite(numeric) && numeric >= 1 && numeric <= 5) {
-    return numeric;
-  }
-  return fallbackRating;
-}
-
-function resolveSubmittedComment(result, fallbackComment) {
-  const rawComment =
-    result?.rating && typeof result.rating === "object"
-      ? result.rating.comment
-      : result?.comment;
-  if (typeof rawComment === "string") {
-    return rawComment.trim();
-  }
-  return fallbackComment.trim();
-}
-
 export default function RobotaxiRatingScreen({ navigation, route }) {
   const {
     activeRole,
@@ -153,7 +130,11 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
   const [selectedTags, setSelectedTags] = useState(() =>
     reviewerType === "driver" ? ["Pontualidade"] : ["Condução segura"],
   );
-  const [airConditioningOk, setAirConditioningOk] = useState(null);
+  // Already answered on the end-of-ride card: this screen does not ask again.
+  const airConditioningAnswered = typeof receipt?.airConditioningOk === "boolean";
+  const [airConditioningOk, setAirConditioningOk] = useState(
+    airConditioningAnswered ? receipt.airConditioningOk : null,
+  );
   // Required answer: keep the button disabled and say why instead of an alert after tapping.
   const awaitingAirConditioningAnswer = reviewerType === "passenger" && airConditioningOk === null;
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -304,41 +285,19 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
                 : [`Ar-condicionado: ${airConditioningOk ? "Sim" : "Não"}`]),
             ];
 
-      const submitResult = await RatingService.submitRating({
+      await submitTripRating({
         tripId,
-        userId: profile.uid,
         reviewerId: profile.uid,
         reviewerType,
-        userType: reviewerType,
         targetUserId,
-        ...(reviewerType === "driver"
-          ? { passengerId: targetUserId }
-          : { driverId: targetUserId }),
         rating,
-        comment: comment.trim(),
+        comment,
         selectedOptions,
-        tripData:
-          reviewerType === "driver"
-            ? { passengerId: targetUserId, passenger: targetUserId }
-            : { driverId: targetUserId, driver: targetUserId },
+        markTripRating,
       });
-      const committedRating = resolveSubmittedRatingValue(submitResult, rating);
-      const committedComment = resolveSubmittedComment(submitResult, comment);
-
-      markTripRating(
-        tripId,
-        reviewerType === "driver"
-          ? {
-              driverRatedPassengerAt: new Date().toISOString(),
-              driverRatedPassengerValue: committedRating,
-              driverRatedPassengerComment: committedComment,
-            }
-          : {
-              passengerRatedDriverAt: new Date().toISOString(),
-              passengerRatedDriverValue: committedRating,
-              passengerRatedDriverComment: committedComment,
-            },
-      );
+      if (reviewerType === "passenger" && !airConditioningAnswered) {
+        submitTripAirConditioning({ tripId, airConditioningOk, markTripRating }).catch(() => {});
+      }
 
       dismissCompletedReceipt();
       // Back home without an extra confirmation tap.
@@ -352,6 +311,7 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
       setIsSubmitting(false);
     }
   }, [
+    airConditioningAnswered,
     airConditioningOk,
     comment,
     dismissCompletedReceipt,
@@ -559,7 +519,7 @@ export default function RobotaxiRatingScreen({ navigation, route }) {
               </LeafTouchable>
             )}
 
-            {reviewerType === "passenger" ? (
+            {reviewerType === "passenger" && !airConditioningAnswered ? (
               <View style={styles.airConditioningCard}>
                 <Text style={styles.airConditioningTitle}>
                   O ar-condicionado permaneceu ligado durante toda a corrida?
