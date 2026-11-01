@@ -2101,12 +2101,9 @@ export default function RobotaxiTripScreen({ navigation, route }) {
     else setIsTripPeek(true);
   };
   const handlePassengerTripSheetStep = () => {
+    // Expanded has no back button: a tap on the handle returns to the summary.
     if (isTripPeek) setIsTripPeek(false);
-    else if (!isTripExpanded) setIsTripExpanded(true);
-    else {
-      setIsTripExpanded(false);
-      setIsTripPeek(true);
-    }
+    else setIsTripExpanded(!isTripExpanded);
   };
 
   const renderPassengerPeekCard = () => (
@@ -2119,13 +2116,17 @@ export default function RobotaxiTripScreen({ navigation, route }) {
             ? `Chegada ${arrivalClockLabel ? 'às' : 'em'} ${compactArrivalTime}`
             : 'Em viagem'
           : isArrived
-            ? 'Confira a placa e embarque'
+            ? 'Confira a placa'
             : compactEtaValue && compactEtaValue !== '--' ? `Chega em ${compactEtaValue}` : 'Motorista a caminho'}
         value={isArrived ? plateLabel : null}
         valueLabel={isArrived ? vehicleModel : null}
       />
     </View>
   );
+
+  const remainingDistanceText = distanceLabel && distanceLabel !== '--'
+    ? `${distanceLabel} ${/^1\s/.test(distanceLabel) ? 'restante' : 'restantes'}`
+    : 'Em rota';
 
   const renderCompactTripCard = () => (
     <View
@@ -2148,7 +2149,8 @@ export default function RobotaxiTripScreen({ navigation, route }) {
             title={compactArrivalTime && compactArrivalTime !== '--'
               ? `Chegada ${arrivalClockLabel ? 'às' : 'em'} ${compactArrivalTime}`
               : 'Em viagem'}
-            subtitle={compactEtaValue && compactEtaValue !== '--' ? `${compactEtaValue} restantes` : null}
+            subtitle={compactEtaValue && compactEtaValue !== '--' ? `${compactEtaValue} · ${remainingDistanceText}` : remainingDistanceText}
+            subtitleTestID={passengerCardFieldTestIDs.distance_remaining}
             value={fareLabel}
             valueLabel={vehicle}
             titleTestID={passengerCardFieldTestIDs.eta_final}
@@ -2162,6 +2164,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
             testID="passenger-trip-route-details"
             style={styles.journeyRoute}
             dense
+            showOrigin={false}
           />
           <View style={styles.startedProgressTrack} testID="passenger-trip-route-progress">
             <LeafTripProgressTrack
@@ -2169,16 +2172,6 @@ export default function RobotaxiTripScreen({ navigation, route }) {
               progressKey={liveRouteKey || 'passenger-trip-route'}
               fillTestID={passengerCardFieldTestIDs.route_progress}
             />
-            <View style={styles.startedProgressMetaRow}>
-              <Text style={styles.startedProgressMetaLabel}>Você está a caminho</Text>
-              <Text
-                style={styles.startedProgressMetaValue}
-                numberOfLines={1}
-                testID={passengerCardFieldTestIDs.distance_remaining}
-              >
-                {distanceLabel && distanceLabel !== '--' ? `${distanceLabel} ${/^1\s/.test(distanceLabel) ? 'restante' : 'restantes'}` : 'Em rota'}
-              </Text>
-            </View>
           </View>
           <RobotaxiLifecycleIdentity
             initial={driverInitial}
@@ -2206,7 +2199,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
         <>
           <RobotaxiLifecycleSummary
             eyebrow="MOTORISTA CHEGOU"
-            title="Confira a placa e embarque"
+            title="Confira a placa"
             value={boardingDisplayValue}
             valueLabel={boardingDisplayValueLabel}
             valueTestID={passengerCardFieldTestIDs.boarding_timer}
@@ -2259,6 +2252,7 @@ export default function RobotaxiTripScreen({ navigation, route }) {
             originTestID={passengerCardFieldTestIDs.pickup_address}
             style={styles.journeyRoute}
             dense
+            showDestination={false}
           />
           {renderCompactContactActions('passenger-trip-arrived-more-options-button')}
         </>
@@ -2272,22 +2266,6 @@ export default function RobotaxiTripScreen({ navigation, route }) {
             titleTestID={passengerCardFieldTestIDs.pickup_eta}
             subtitleTestID={passengerCardFieldTestIDs.pickup_distance}
           />
-          {(() => {
-            const foundChips = resolveDriverFoundChips({
-              foundSeconds: foundSecondsRef.current.bookingId === foundBookingKey ? foundSecondsRef.current.seconds : null,
-              pickupEtaMinutes: resolvedPickupEtaMin,
-            });
-            return foundChips.length ? (
-              <Reanimated.View entering={FadeInDown.duration(320).delay(120)} style={styles.foundChips} testID="passenger-trip-found-chips">
-                {foundChips.map((chip) => (
-                  <View key={chip.key} style={styles.foundChip}>
-                    <Ionicons name={chip.icon} size={12} color={chip.key === 'fast_match' ? '#B88A00' : '#1A330E'} />
-                    <Text style={styles.foundChipText}>{chip.label}</Text>
-                  </View>
-                ))}
-              </Reanimated.View>
-            ) : null;
-          })()}
           <RobotaxiLifecycleIdentity
             initial={driverInitial}
             photoUri={driverPhotoUri}
@@ -2318,10 +2296,6 @@ export default function RobotaxiTripScreen({ navigation, route }) {
             style={styles.journeyRoute}
             dense
           />
-          <View style={styles.journeyFacts}>
-            <Text style={styles.journeyFactSupport} testID={passengerCardFieldTestIDs.vehicle_type}>{vehicle}</Text>
-            <Text style={styles.journeyFareValue} testID={passengerCardFieldTestIDs.fare}>{fareLabel}</Text>
-          </View>
           {renderCompactContactActions('passenger-trip-accepted-more-options-button')}
         </>
       )}
@@ -2332,15 +2306,6 @@ export default function RobotaxiTripScreen({ navigation, route }) {
 
   const renderExpandedTripCard = () => (
     <View testID="passenger-trip-expanded-summary">
-      <RobotaxiLifecycleDisclosure
-        expanded
-        onPress={() => setIsTripExpanded(false)}
-        label="Mais opções"
-        expandedLabel="Voltar ao resumo"
-        testID="passenger-trip-collapse-button"
-        accessibilityLabel="Voltar ao resumo da viagem"
-      />
-
       <RobotaxiLifecycleSection>
         <RobotaxiLifecycleSummary
           eyebrow={isStarted ? 'EM VIAGEM' : isArrived ? 'MOTORISTA CHEGOU' : 'MOTORISTA A CAMINHO'}
@@ -2380,6 +2345,22 @@ export default function RobotaxiTripScreen({ navigation, route }) {
             >
               {isArrived ? boardingDisplayMessage : `${distanceLabel} até o embarque`}
             </Text>
+            {isArrived ? null : (() => {
+              const foundChips = resolveDriverFoundChips({
+                foundSeconds: foundSecondsRef.current.bookingId === foundBookingKey ? foundSecondsRef.current.seconds : null,
+                pickupEtaMinutes: resolvedPickupEtaMin,
+              });
+              return foundChips.length ? (
+                <Reanimated.View entering={FadeInDown.duration(320).delay(120)} style={styles.foundChips} testID="passenger-trip-found-chips">
+                  {foundChips.map((chip) => (
+                    <View key={chip.key} style={styles.foundChip}>
+                      <Ionicons name={chip.icon} size={12} color={chip.key === 'fast_match' ? '#B88A00' : '#1A330E'} />
+                      <Text style={styles.foundChipText}>{chip.label}</Text>
+                    </View>
+                  ))}
+                </Reanimated.View>
+              ) : null;
+            })()}
           </>
         )}
 
@@ -2967,7 +2948,7 @@ const styles = StyleSheet.create({
   journeyFactSupport: { ...leafTypography.regular, fontSize: 15, lineHeight: 20, color: '#6A6A6A' },
   journeyFare: { alignItems: 'flex-end' },
   journeyFareValue: { ...leafTypography.semiBold, fontSize: 17, lineHeight: 22, color: '#222222', fontVariant: ['tabular-nums'] },
-  journeyRoute: { marginTop: 16 },
+  journeyRoute: { marginTop: 12 },
   journeyVehicle: { ...leafTypography.regular, fontSize: 13, lineHeight: 22, color: '#6A6A6A', marginLeft: 56, marginTop: 4 },
   journeyBoarding: { marginTop: 16, paddingVertical: 14, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#E5E5E5', flexDirection: 'row', alignItems: 'center', gap: 14 },
   journeyBoardingCopy: { flex: 1 },
@@ -3319,7 +3300,7 @@ const styles = StyleSheet.create({
     color: '#1A330E',
   },
   compactIdentity: {
-    marginTop: 14,
+    marginTop: 10,
   },
   compactIdentitySection: {
     marginTop: 14,
@@ -3374,7 +3355,7 @@ const styles = StyleSheet.create({
     gap: 8
   },
   startedActionDockCompact: {
-    marginTop: 16
+    marginTop: 12
   },
   startedActionDockExpanded: {
     marginTop: 14,
@@ -3747,27 +3728,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.6,
   },
   startedProgressTrack: {
-    marginTop: 16,
-  },
-  startedProgressMetaRow: {
-    marginTop: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  startedProgressMetaLabel: {
-    flex: 1,
-    color: leafRideColors.secondary,
-    ...leafTypography.regular,
-    fontSize: 13,
-    lineHeight: 16,
-  },
-  startedProgressMetaValue: {
-    color: leafRideColors.text,
-    ...leafTypography.semiBold,
-    fontSize: 13,
-    lineHeight: 16,
+    marginTop: 12,
   },
   tripRouteMeta: {
     marginTop: 8,

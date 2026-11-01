@@ -553,6 +553,19 @@ function fixtureForApiPath(apiPath, method) {
     return json({ success: true, accessToken: "smoke-access-token-2", expiresIn: "1h" });
   }
   if (apiPath === "/admin/auth/logout") return json({ success: true });
+  if (apiPath === "/promotions/driver-intro-fee") {
+    return json({
+      success: true,
+      policy: { enabled: true, rideLimit: 25, feeCents: 99, paymentFeeIncluded: true },
+      summary: { drivers: 2, active: 1, finished: 0, needsReview: 1, ridesUsed: 7 },
+      drivers: [
+        { driverId: "driver-review", name: "Motorista Revisao", ridesUsed: 4, ridesRemaining: 21, inRide: false, status: "review" },
+        { driverId: "driver-active", name: "Motorista Promocao", ridesUsed: 3, ridesRemaining: 22, inRide: true, status: "active" },
+      ],
+      liveCounters: false,
+      truncated: false,
+    });
+  }
   if (apiPath === "/health/runtime-flags") return json(runtimeFlagsFixture());
   if (apiPath.startsWith("/ops/overview")) return json(opsOverviewFixture());
   if (apiPath.startsWith("/ops/alerts")) return json(opsAlertsFixture());
@@ -959,6 +972,15 @@ async function assertFinancialSimulatorRequiresExplicitFlag(page) {
   log("financial simulator requires explicit launch flag ok");
 }
 
+async function assertDriverIntroFeeContract(page) {
+  await page.goto("/promotions", { waitUntil: "domcontentloaded" });
+  await page.locator("body", { hasText: "Motorista Promocao" }).waitFor({ timeout: 15000 });
+  await page.locator("body", { hasText: "25 corridas a R$" }).waitFor({ timeout: 15000 });
+  await page.locator("body", { hasText: "corrida em andamento" }).waitFor({ timeout: 15000 });
+  await page.locator("body", { hasText: "Contadores ao vivo indisponíveis" }).waitFor({ timeout: 15000 });
+  log("promotions renders driver intro fee tracking ok");
+}
+
 async function assertObservabilityRideHealthContract(page) {
   await page.goto("/observability", { waitUntil: "domcontentloaded" });
   await page.locator("h1", { hasText: "Console operacional" }).waitFor({ timeout: 15000 });
@@ -1177,6 +1199,7 @@ async function main() {
 
     await assertDriverReviewContract(page);
 
+    await assertDriverIntroFeeContract(page);
     await assertFinancialReconciliationContract(page);
     await assertMetricsFinancialContract(page);
     await assertFinancialSimulatorRequiresExplicitFlag(page);

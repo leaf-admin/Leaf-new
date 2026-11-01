@@ -15,6 +15,20 @@ jest.mock("../src/screens/prototype/prototypeRideRuntime", () => ({
   usePrototypeRideRuntime: jest.fn(),
 }));
 
+// O fluxo do card tem testes próprios; aqui a tela abre direto no cupom.
+jest.mock("../src/screens/prototype/RideClosingCard", () => {
+  const { useEffect } = require("react");
+  return {
+    __esModule: true,
+    default: ({ onOpenFullReceipt }) => {
+      useEffect(() => {
+        onOpenFullReceipt();
+      }, [onOpenFullReceipt]);
+      return null;
+    },
+  };
+});
+
 jest.mock("../src/screens/prototype/prototypeMapOcclusion", () => ({
   usePrototypeMapOcclusion: jest.fn(),
 }));
@@ -157,10 +171,10 @@ describe("driver receipt screen", () => {
     expect(screen.getByText("Rua Origem")).toBeTruthy();
     expect(screen.getByText("Rua Destino")).toBeTruthy();
 
-    const backToMapButton = screen.getByTestId("driver-receipt-back-to-map-button");
-    expect(backToMapButton.props.accessibilityRole).toBe("button");
-    expect(backToMapButton.props.accessibilityLabel).toBe("Voltar ao mapa");
-    fireEvent.press(backToMapButton);
+    const backToSummaryButton = screen.getByTestId("driver-receipt-back-to-map-button");
+    expect(backToSummaryButton.props.accessibilityRole).toBe("button");
+    expect(backToSummaryButton.props.accessibilityLabel).toBe("Voltar ao resumo");
+    fireEvent.press(screen.getByTestId("receipt-done-button"));
 
     expect(dismissCompletedReceipt).toHaveBeenCalled();
     expect(navigation.navigate).toHaveBeenCalledWith("RobotaxiPrototype");
@@ -229,7 +243,7 @@ describe("driver receipt screen", () => {
     const screen = render(
       <RobotaxiReceiptScreen
         navigation={navigation}
-        route={{ params: { fromTrip: true, receipt } }}
+        route={{ params: { receipt } }}
       />,
     );
 
@@ -399,20 +413,10 @@ describe("driver receipt screen", () => {
     expect(screen.getByTestId("passenger-receipt-screen").props.accessibilityLabel)
       .toBe("Recibo do passageiro");
     expect(screen.getByTestId("passenger-receipt-back-to-map-button").props.accessibilityLabel)
-      .toBe("Voltar ao mapa");
+      .toBe("Voltar ao resumo");
 
-    const moreOptionsButton = screen.getByTestId("passenger-receipt-more-options-button");
-    expect(moreOptionsButton.props.accessibilityRole).toBe("button");
-    expect(moreOptionsButton.props.accessibilityLabel).toBe("Mais opções");
-    expect(moreOptionsButton.props.accessibilityState).toEqual({ expanded: false });
-    fireEvent.press(moreOptionsButton);
-
-    expect(screen.getByTestId("passenger-receipt-more-options-button").props.accessibilityLabel)
-      .toBe("Ocultar opções");
-    expect(screen.getByTestId("passenger-receipt-more-options-button").props.accessibilityState)
-      .toEqual({ expanded: true });
     expect(screen.getByTestId("passenger-receipt-report-issue-button").props.accessibilityLabel)
-      .toBe("Reportar problema com a viagem");
+      .toBe("Problema com esta corrida");
   });
 
   it("decodes only persisted slash entities on the current driver receipt", () => {

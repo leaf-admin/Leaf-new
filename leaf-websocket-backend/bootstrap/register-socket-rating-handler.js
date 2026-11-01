@@ -112,6 +112,41 @@ function registerSocketRatingHandler({
         }
     });
 
+    socket.on('submitAirConditioning', async (data = {}) => {
+        const tripId = data.tripId || data.bookingId || data.rideId || null;
+        const respond = (payload) => socket.emit('airConditioningSubmitted', { tripId, ...payload });
+        try {
+            logRatingEvent('submitAirConditioning', 'airConditioningSubmitted');
+            const participant = await assertRideParticipant({
+                socket,
+                io,
+                redisPool,
+                bookingId: tripId,
+                allowedRoles: ['passenger'],
+                allowSupport: false,
+                preferPersistentTerminal: true
+            });
+
+            if (!participant.allowed) {
+                respond({ success: false, error: participant.error, code: participant.code });
+                return;
+            }
+
+            const result = await ratingService.submitAirConditioningFeedback({
+                tripId,
+                airConditioningOk: data.airConditioningOk
+            }, {
+                socketUserId: participant.identity.userId,
+                socketUserType: 'passenger',
+                tripScope: participant.scope,
+                persistenceScope: participant.scope?.raw || participant.scope
+            });
+            respond(result);
+        } catch (error) {
+            respond({ success: false, error: error.message || 'Erro ao registrar a resposta' });
+        }
+    });
+
     socket.on('getTripRatings', async (data = {}) => {
         try {
             logRatingEvent('getTripRatings', 'tripRatings');

@@ -27,7 +27,11 @@ import interactiveNotificationService from "../../services/InteractiveNotificati
 import { isRideGoneOnServerError } from "./rideServerErrors";
 import {
   buildNightSurchargeNotice,
+  buildNightSurchargeSchedule,
+  cancelOrphanNightSurchargeNotifications,
+  claimNightSurchargeNotice,
   isNightSurchargeActive,
+  NIGHT_SURCHARGE_NOTIFICATION_ID,
   nextNightSurchargeTransition,
 } from "./nightSurchargeNotice";
 import prototypeDriverTripAssistantService, {
@@ -20999,39 +21003,33 @@ export function usePrototypeRideRuntime(options = null) {
 
   // Adicional noturno: o motorista online é avisado quando começa e quando termina
   // (cartão na tela, central de notificações e notificação local para quem está com o
-  // app em segundo plano). Ao ficar online durante o período, um lembrete.
+  // app em segundo plano). Ao ficar online durante o período, um lembrete. Cada aviso
+  // sai uma vez por noite.
   useEffect(() => {
     if (!isRuntimeEffectOwner || !driverOnlinePresenceUid) {
       return undefined;
     }
     let timer = null;
-    let scheduledNotificationId = null;
     let cancelled = false;
     const announce = (kind) => {
-      const notice = buildNightSurchargeNotice(kind);
-      showDriverTransientCard({ type: notice.type, title: notice.title, message: notice.message });
-      appendRuntimeNotification(
-        createRuntimeNotification({ title: notice.title, message: notice.message, kind: "system", scope: "driver" }),
-      );
+      claimNightSurchargeNotice(kind, AsyncStorage)
+        .then((claimed) => {
+          if (!claimed || cancelled) return;
+          const notice = buildNightSurchargeNotice(kind);
+          showDriverTransientCard({ type: notice.type, title: notice.title, message: notice.message });
+          appendRuntimeNotification(
+            createRuntimeNotification({ title: notice.title, message: notice.message, kind: "system", scope: "driver" }),
+          );
+        })
+        .catch(() => {});
     };
     const scheduleNext = () => {
       const next = nextNightSurchargeTransition(new Date());
       const delayMs = Math.max(1000, next.at.getTime() - Date.now());
       // setTimeout de JS pode atrasar com o app parado; a notificação local cobre esse caso.
       try {
-        const Notifications = require("expo-notifications");
-        const notice = buildNightSurchargeNotice(next.kind);
-        Notifications.scheduleNotificationAsync({
-          content: { title: notice.title, body: notice.message, data: { type: notice.type } },
-          trigger: { type: "date", date: next.at },
-        })
-          .then((id) => {
-            if (cancelled) {
-              Notifications.cancelScheduledNotificationAsync(id).catch(() => {});
-            } else {
-              scheduledNotificationId = id;
-            }
-          })
+        require("expo-notifications")
+          .scheduleNotificationAsync(buildNightSurchargeSchedule(next))
           .catch(() => {});
       } catch (_error) {
         // sem notificações locais neste ambiente
@@ -21041,7 +21039,6 @@ export function usePrototypeRideRuntime(options = null) {
         if (AppState.currentState === "active") {
           announce(next.kind);
         }
-        scheduledNotificationId = null;
         scheduleNext();
       }, Math.min(delayMs, 2 ** 31 - 1));
     };
@@ -21053,17 +21050,22 @@ export function usePrototypeRideRuntime(options = null) {
         announce("active");
       }
     }, openedRecently ? 14000 : 1200);
+    try {
+      cancelOrphanNightSurchargeNotifications(require("expo-notifications")).catch(() => {});
+    } catch (_error) {
+      // sem notificações locais neste ambiente
+    }
     scheduleNext();
     return () => {
       cancelled = true;
       clearTimeout(timer);
       clearTimeout(activeReminder);
-      if (scheduledNotificationId) {
-        try {
-          require("expo-notifications").cancelScheduledNotificationAsync(scheduledNotificationId).catch(() => {});
-        } catch (_error) {
-          // sem notificações locais neste ambiente
-        }
+      try {
+        require("expo-notifications")
+          .cancelScheduledNotificationAsync(NIGHT_SURCHARGE_NOTIFICATION_ID)
+          .catch(() => {});
+      } catch (_error) {
+        // sem notificações locais neste ambiente
       }
     };
   }, [isRuntimeEffectOwner, driverOnlinePresenceUid]);

@@ -36,6 +36,8 @@ import { resolveDriverOfferDeadlineMs } from './driverOfferCountdown';
 import DriverTripStatusBanner from './home/DriverTripStatusBanner';
 import LeafNativeNavigationBanner from './home/LeafNativeNavigationBanner';
 import DriverTransientStateCard from './home/DriverTransientStateCard';
+import DriverPromoCelebrationCard from './home/DriverPromoCelebrationCard';
+import { resolveDriverPromoCelebration } from './home/driverPromoCelebration';
 import RideChatMessageBanner from './home/RideChatMessageBanner';
 import RobotaxiReceiptScreen from './RobotaxiReceiptScreen';
 import { PROTOTYPE_REGION } from './robotaxiPrototypeData';
@@ -2092,6 +2094,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const connectionAutomationExecutionRef = useRef('');
   const connectionAutomationTimersRef = useRef([]);
   const [homeCardHeight, setHomeCardHeight] = useState(HOME_CARD_FALLBACK_HEIGHT);
+  const [driverTripCardExpanded, setDriverTripCardExpanded] = useState(false);
   const [homeCardTop, setHomeCardTop] = useState(null);
   const [homePickupPickerVisible, setHomePickupPickerVisible] = useState(false);
   const [homePickupSearchActive, setHomePickupSearchActive] = useState(false);
@@ -3724,6 +3727,31 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     selectedFare,
     selectedVehicle,
   ]);
+
+  // Na promoção, o card conta a corrida antes do recibo. Os parâmetros saem agora
+  // porque o estado da corrida é limpo enquanto o card está na tela.
+  const [driverPromoCelebration, setDriverPromoCelebration] = useState(null);
+  const openDriverReceiptAfterCompletion = useCallback((result) => {
+    const receiptParams = buildHomeReceiptParams({
+      receipt: result?.receipt || result?.lastReceipt || null,
+    });
+    const celebration = resolveDriverPromoCelebration(result);
+    if (celebration) {
+      setDriverPromoCelebration({ celebration, receiptParams });
+      return;
+    }
+    navigation.navigate('RobotaxiPrototypeReceipt', receiptParams);
+  }, [buildHomeReceiptParams, navigation]);
+  const finishDriverPromoCelebration = useCallback(() => {
+    if (!driverPromoCelebration) return;
+    setDriverPromoCelebration(null);
+    navigation.navigate('RobotaxiPrototypeReceipt', driverPromoCelebration.receiptParams);
+  }, [driverPromoCelebration, navigation]);
+  useEffect(() => {
+    if (driverPromoCelebration && driverOffers?.length > 0) {
+      finishDriverPromoCelebration();
+    }
+  }, [driverOffers, driverPromoCelebration, finishDriverPromoCelebration]);
   const routeDriverAutomationConfig = useMemo(
     () =>
       resolveDriverHomeAutomationConfig(effectiveRouteParams, {
@@ -9172,23 +9200,18 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
         }
         const result = await completeTripFlow(earlyEnd ? { earlyEnd } : {});
         if (result?.success !== false) {
-          navigation.navigate(
-            'RobotaxiPrototypeReceipt',
-            buildHomeReceiptParams({
-              receipt: result?.receipt || result?.lastReceipt || null,
-            })
-          );
+          openDriverReceiptAfterCompletion(result);
         }
       }
     } catch (error) {
       Alert.alert('Não foi possível atualizar', error?.message || 'Tente novamente.');
     }
   }, [
-    buildHomeReceiptParams,
     completeTripFlow,
     driverTripAssist,
     markDriverArrived,
     navigation,
+    openDriverReceiptAfterCompletion,
     startTripFlow,
   ]);
 
@@ -9978,11 +10001,20 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       driverActiveRide?.id ||
       '',
   ).trim();
+  // Oferta valendo passa na frente do fim de corrida: o card da oferta fica na Início e
+  // o recibo volta se o motorista recusar.
+  const driverOfferDeadlineMs = driverLiveOffer ? resolveDriverOfferDeadlineMs(driverLiveOffer, Date.now()) : NaN;
+  const driverOfferPreemptsReceipt = Boolean(
+    isDriverRole &&
+      driverLiveOfferInstance &&
+      !(Number.isFinite(driverOfferDeadlineMs) && driverOfferDeadlineMs <= Date.now()),
+  );
   const shouldPresentCompletedReceipt = Boolean(
     isHomeRoute &&
       normalizedBookingStatus === 'completed' &&
       completedReceiptBookingId &&
-      (isDriverRole || lastReceipt?.id),
+      (isDriverRole || lastReceipt?.id) &&
+      !driverOfferPreemptsReceipt,
   );
 
 
@@ -10043,14 +10075,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
       ));
     }
   }, []);
-  const handleDriverTripCompletedSuccess = useCallback((result) => {
-    navigation.navigate(
-      'RobotaxiPrototypeReceipt',
-      buildHomeReceiptParams({
-        receipt: result?.receipt || result?.lastReceipt || null,
-      })
-    );
-  }, [buildHomeReceiptParams, navigation]);
+  const handleDriverTripCompletedSuccess = openDriverReceiptAfterCompletion;
   const handleOpenDriverEarnings = useCallback(() => {
     navigation.navigate('EarningsReport', {
       source: 'driver-home',
@@ -10490,6 +10515,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
             navigationModel={leafNativeNavigationModel}
             onOpenNavigation={handleOpenDriverNavigation}
             onHide={handleHideLeafNativeNavigation}
+            suppressed={driverTripCardExpanded}
           />
         ) : null}
 
@@ -10663,6 +10689,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
               insetsBottom={insets.bottom}
               bottomOffset={driverLiveRideBottomOffset}
               onCardLayout={handleDriverLiveRideCardLayout}
+              onTripExpandedChange={setDriverTripCardExpanded}
               driverOffers={driverOffers}
               driverActiveRide={driverActiveRide}
               driverTripMeta={driverTripMeta}
@@ -10687,6 +10714,15 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
               nativeNavigationVisible={showLeafNativeNavigation}
               onTripCompletedSuccess={handleDriverTripCompletedSuccess}
             />
+
+            {driverPromoCelebration ? (
+              <DriverPromoCelebrationCard
+                key={driverPromoCelebration.celebration.bookingId || 'driver-promo-celebration'}
+                celebration={driverPromoCelebration.celebration}
+                bottomOffset={rootNavigationInset + insets.bottom + 16}
+                onFinish={finishDriverPromoCelebration}
+              />
+            ) : null}
 
             {showDriverHomeOverlay ? (
               <DriverHomeOverlay

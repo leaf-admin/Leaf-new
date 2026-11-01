@@ -540,6 +540,11 @@ class LeafApiService {
     });
   }
 
+  async getDriverAirConditioning(driverId, context = {}) {
+    const scope = context.scope === "sandbox" ? "?scope=sandbox" : "";
+    return this.request(`/drivers/${encodeURIComponent(driverId)}/air-conditioning${scope}`);
+  }
+
   async getDriverComplete(driverId) {
     return this.request(`/drivers/${driverId}/complete`);
   }
@@ -985,6 +990,10 @@ class LeafApiService {
 
   async getPromotionStats() {
     return this.request("/promotions/stats");
+  }
+
+  async getDriverIntroFeeReport() {
+    return this.request("/promotions/driver-intro-fee");
   }
 
   async applyPromotion(promotionId, driverId) {

@@ -5512,9 +5512,6 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                   <Text style={styles.preferenceModalTitle}>
                     Preferências da viagem
                   </Text>
-                  <Text style={styles.preferenceModalSubtitle}>
-                    Ajuste agora ou seguimos automaticamente.
-                  </Text>
                 </View>
                 <View style={styles.preferenceModalCountdown}>
                   <Text style={styles.preferenceModalCountdownText}>
@@ -5542,14 +5539,6 @@ export default function RobotaxiDestinationScreen({ navigation, route }) {
                 })}
               </View>
 
-              <View style={styles.preferenceModalProgressHeader}>
-                <Text style={styles.preferenceModalProgressLabel}>
-                  Confirmação automática
-                </Text>
-                <Text style={styles.preferenceModalProgressTime}>
-                  {Math.max(0, Math.ceil((1 - preferenceProgress) * 5))}s
-                </Text>
-              </View>
               <View style={styles.preferenceModalProgressTrack}>
                 <View
                   style={[
@@ -6644,13 +6633,6 @@ const styles = StyleSheet.create({
     fontSize: 20,
     lineHeight: 26,
   },
-  preferenceModalSubtitle: {
-    marginTop: 4,
-    color: leafRideColors.secondary,
-    ...leafTypography.regular,
-    fontSize: 11,
-    lineHeight: 16,
-  },
   preferenceModalCountdown: {
     width: 42,
     height: 42,
@@ -6675,13 +6657,13 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   preferenceSelectorButton: {
-    minHeight: 62,
+    minHeight: 54,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: '#E5E5E5',
     backgroundColor: '#F5F5F5',
     paddingHorizontal: 14,
-    paddingVertical: 11,
+    paddingVertical: 8,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
@@ -6699,10 +6681,10 @@ const styles = StyleSheet.create({
     color: leafRideColors.secondary,
     ...leafTypography.medium,
     fontSize: 13,
-    lineHeight: 22,
+    lineHeight: 18,
   },
   preferenceSelectorValue: {
-    marginTop: 3,
+    marginTop: 1,
     color: leafRideColors.text,
     ...leafTypography.semiBold,
     fontSize: 17,
@@ -6816,27 +6798,8 @@ const styles = StyleSheet.create({
   preferenceModalOptionHintSelected: {
     color: "#466755",
   },
-  preferenceModalProgressHeader: {
-    marginTop: 18,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
-  },
-  preferenceModalProgressLabel: {
-    color: leafRideColors.secondary,
-    ...leafTypography.medium,
-    fontSize: 11,
-    lineHeight: 15,
-  },
-  preferenceModalProgressTime: {
-    color: leafRideColors.leaf,
-    ...leafTypography.semiBold,
-    fontSize: 11,
-    lineHeight: 15,
-  },
   preferenceModalProgressTrack: {
-    marginTop: 7,
+    marginTop: 14,
     height: 4,
     borderRadius: 999,
     backgroundColor: "rgba(23,74,43,0.1)",

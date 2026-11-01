@@ -115,6 +115,7 @@ export function RobotaxiLifecycleCard({
           <Pressable
             onPress={onHandlePress}
             style={styles.handleArea}
+            hitSlop={{ top: 12, bottom: 12 }}
             accessibilityRole="adjustable"
             accessibilityLabel="Altura do cartão"
             accessibilityHint="Toque para alternar entre resumo, padrão e detalhes"
@@ -354,7 +355,7 @@ export function RobotaxiLifecycleSection({ title, children, style }) {
 }
 
 const styles = StyleSheet.create({
-  handleArea: { height: 22, alignItems: 'center', justifyContent: 'flex-start' },
+  handleArea: { height: 18, alignItems: 'center', justifyContent: 'flex-start' },
   handle: { width: 32, height: 3, borderRadius: 2, backgroundColor: '#E5E5E5' },
   card: {
     borderRadius: robotaxiLifecycleMetrics.cardRadius,

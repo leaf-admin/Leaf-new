@@ -22,6 +22,29 @@ const defaultForm = {
 
 const statusOptions = ["all", "active", "paused", "completed", "expired"];
 
+const introFeeStatusLabels = {
+  active: "Na promoção",
+  finished: "Concluiu",
+  review: "Em revisão",
+  invalid: "Contador ilegível",
+};
+
+const formatCents = (cents) =>
+  (cents / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+
+const introFeeSubtitle = (report) => {
+  if (!report) return "";
+  const { enabled, rideLimit, feeCents, paymentFeeIncluded } = report.policy;
+  const terms = `${rideLimit} corridas a ${formatCents(feeCents)}${paymentFeeIncluded ? ", Pix incluído" : ""}`;
+  const notes = [
+    enabled ? terms : `Desligada. Condição: ${terms}`,
+    "Lista só quem já recebeu oferta de corrida.",
+  ];
+  if (!report.liveCounters) notes.push("Contadores ao vivo indisponíveis: valores podem estar atrasados.");
+  if (report.truncated) notes.push(`Mostrando os primeiros ${report.drivers.length} motoristas.`);
+  return notes.join(" ");
+};
+
 export default function PromotionsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -34,22 +57,35 @@ export default function PromotionsPage() {
   const [selectedPromotion, setSelectedPromotion] = useState("");
   const [busyPromotionId, setBusyPromotionId] = useState("");
   const [runtimeFlags, setRuntimeFlags] = useState(null);
+  const [introFeeReport, setIntroFeeReport] = useState(null);
+  const [introFeeError, setIntroFeeError] = useState("");
   const { requestConfirmation, confirmationDialog, confirmationOpen } = useConfirmAction();
 
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
+    setIntroFeeError("");
     try {
       const params = statusFilter !== "all" ? { status: statusFilter } : {};
-      const [listResponse, statsResponse, flagsResponse] = await Promise.all([
+      const [listResponse, statsResponse, flagsResponse, introFeeResponse] = await Promise.all([
         leafAPI.listPromotions(params),
         leafAPI.getPromotionStats(),
         leafAPI.getRuntimeFlags(),
+        // Falha aqui não pode esconder o resto da tela.
+        leafAPI.getDriverIntroFeeReport().catch((err) => {
+          setIntroFeeError(err?.message || "Falha ao carregar o acompanhamento da promoção");
+          return null;
+        }),
       ]);
 
       setRows(listResponse?.promotions || []);
       setStats(statsResponse?.stats || null);
       setRuntimeFlags(flagsResponse || null);
+      // Resposta sem o contrato (ex.: backend antigo no meio de um deploy) não entra na tela.
+      if (introFeeResponse && !introFeeResponse.policy) {
+        setIntroFeeError("Acompanhamento da promoção indisponível no momento");
+      }
+      setIntroFeeReport(introFeeResponse?.policy ? introFeeResponse : null);
     } catch (err) {
       setError(err?.message || "Falha ao carregar promocoes");
     } finally {
@@ -217,6 +253,55 @@ export default function PromotionsPage() {
         {loading ? <LoadingState message="Carregando promocoes..." /> : null}
 
         <section className="grid">
+          <Panel className="panel-span-full" title="Primeiras corridas do motorista" subtitle={introFeeSubtitle(introFeeReport)}>
+            <ErrorText message={introFeeError} />
+            {introFeeReport ? (
+              <>
+                <KeyValueGrid
+                  data={introFeeReport.summary}
+                  labels={{
+                    drivers: "Motoristas",
+                    active: "Na promoção",
+                    finished: "Concluíram",
+                    needsReview: "Precisam de revisão",
+                    ridesUsed: "Corridas usadas",
+                  }}
+                />
+                <div className="table-shell">
+                  <table className="table table-compact">
+                    <thead>
+                      <tr>
+                        <th>Motorista</th>
+                        <th>Usadas</th>
+                        <th>Restantes</th>
+                        <th>Situação</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {introFeeReport.drivers.length === 0 ? (
+                        <tr>
+                          <td colSpan={4}>Nenhum motorista com contador da promoção.</td>
+                        </tr>
+                      ) : (
+                        introFeeReport.drivers.map((row) => (
+                          <tr key={row.driverId}>
+                            <td>{row.name || row.driverId}</td>
+                            <td>{row.ridesUsed ?? "-"}</td>
+                            <td>{row.ridesRemaining ?? "-"}</td>
+                            <td>
+                              {introFeeStatusLabels[row.status] || row.status}
+                              {row.inRide ? " · corrida em andamento" : ""}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            ) : null}
+          </Panel>
+
           <Panel title="Resumo">
             <KeyValueGrid
               data={{

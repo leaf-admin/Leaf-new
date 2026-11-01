@@ -22,10 +22,12 @@ jest.mock('../../../firebase-config', () => ({
 jest.mock('../../../services/ride-annotation-store', () => ({
   updateAnnotation: jest.fn(async (_firestore, root, id, patch) => {
     mockAnnotations.push({ root, id, patch });
-  })
+  }),
+  listAnnotations: jest.fn()
 }));
 
 const ratingService = require('../../../services/rating-service');
+const rideAnnotationStore = require('../../../services/ride-annotation-store');
 
 function completedPassengerScope() {
   return {
@@ -98,6 +100,78 @@ describe('rating-service lifecycle and idempotency', () => {
     expect(mockAnnotations).toEqual([
       { root: 'bookings', id: 'ride_1', patch: { rating: 5, feedback: 'Corrida encerrada' } }
     ]);
+  });
+
+  it('records the air conditioning answer on its own, without a rating', async () => {
+    const result = await ratingService.submitAirConditioningFeedback({
+      tripId: 'ride_1',
+      airConditioningOk: false
+    }, {
+      socketUserId: 'passenger_1',
+      socketUserType: 'passenger',
+      tripScope: completedPassengerScope()
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      success: true,
+      tripId: 'ride_1',
+      airConditioningOk: false
+    }));
+    expect(mockAnnotations).toEqual([{
+      root: 'bookings',
+      id: 'ride_1',
+      patch: {
+        air_conditioning_ok: false,
+        air_conditioning_answered_at: expect.any(String),
+        air_conditioning_driver_id: 'driver_1'
+      }
+    }]);
+  });
+
+  it('rejects an air conditioning answer that is not yes or no', async () => {
+    const result = await ratingService.submitAirConditioningFeedback({
+      tripId: 'ride_1',
+      airConditioningOk: 'sim'
+    }, { tripScope: completedPassengerScope() });
+
+    expect(result).toEqual(expect.objectContaining({
+      success: false,
+      code: 'AIR_CONDITIONING_ANSWER_INVALID'
+    }));
+    expect(mockAnnotations).toEqual([]);
+  });
+
+  it('rejects an air conditioning answer before the ride ends', async () => {
+    const result = await ratingService.submitAirConditioningFeedback({
+      tripId: 'ride_1',
+      airConditioningOk: true
+    }, { tripScope: { ...completedPassengerScope(), status: 'STARTED' } });
+
+    expect(result).toEqual(expect.objectContaining({
+      success: false,
+      code: 'RATING_TRIP_NOT_COMPLETED'
+    }));
+    expect(mockAnnotations).toEqual([]);
+  });
+
+  it('summarises air conditioning answers for one driver, newest first', async () => {
+    rideAnnotationStore.listAnnotations.mockResolvedValue({
+      ride_1: { air_conditioning_ok: true, air_conditioning_driver_id: 'driver_1' },
+      ride_2: { air_conditioning_ok: false, air_conditioning_driver_id: 'driver_1', air_conditioning_answered_at: '2026-11-01T10:00:00.000Z' },
+      ride_3: { air_conditioning_ok: false, air_conditioning_driver_id: 'driver_1', air_conditioning_answered_at: '2026-11-01T12:00:00.000Z' },
+      ride_4: { air_conditioning_ok: false, air_conditioning_driver_id: 'driver_2' },
+      ride_5: { rating: 5 }
+    });
+
+    await expect(ratingService.getDriverAirConditioningSummary('driver_1')).resolves.toEqual({
+      answered: 3,
+      stayedOn: 1,
+      turnedOff: 2,
+      recentTurnedOff: [
+        { tripId: 'ride_3', ok: false, answeredAt: '2026-11-01T12:00:00.000Z' },
+        { tripId: 'ride_2', ok: false, answeredAt: '2026-11-01T10:00:00.000Z' }
+      ]
+    });
   });
 
   it('reserves one rating atomically and replays the persisted result after a duplicate submit', async () => {

@@ -15,6 +15,7 @@ import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import WebSocketManager from './WebSocketManager';
 import fcmService from './FCMNotificationService';
+import { isNightSurchargeNotification } from '../screens/prototype/nightSurchargeNotice';
 
 const COMPACT_NOTIFICATION_ACTION_LABELS = Object.freeze({
     arrivedAtPickup: 'Cheguei',
@@ -78,12 +79,16 @@ function getCompactAndroidActions(categoryId) {
 
 // Configurar comportamento padrão das notificações
 Notifications.setNotificationHandler({
-    handleNotification: async () => ({
-        shouldShowBanner: true,
-        shouldShowList: true,
-        shouldPlaySound: true,
-        shouldSetBadge: true,
-    }),
+    handleNotification: async (notification) => {
+        // Com o app aberto, o adicional noturno já aparece no cartão da home.
+        const showAlert = !isNightSurchargeNotification(notification?.request?.content);
+        return {
+            shouldShowBanner: showAlert,
+            shouldShowList: showAlert,
+            shouldPlaySound: showAlert,
+            shouldSetBadge: showAlert,
+        };
+    },
 });
 
 class InteractiveNotificationService {

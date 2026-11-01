@@ -349,6 +349,41 @@ describe('WooviPaymentModal qaAutoConfirm', () => {
     screen.unmount();
   });
 
+  it('keeps the smaller QR always visible on the ride card, without the repeated copy', async () => {
+    const screen = render(
+      <WooviPaymentModal
+        visible
+        robotaxiLifecycleCard
+        onClose={jest.fn()}
+        onPaymentConfirmed={jest.fn()}
+        tripData={{
+          pickup: { add: 'Origem' },
+          drop: { add: 'Destino' },
+          carType: 'Leaf Plus',
+          estimatedFare: 22.43,
+        }}
+        estimates={{ estimateFare: 22.43 }}
+        passengerId="passenger_1"
+        prefilledPaymentData={{
+          chargeId: 'woovi_charge_with_image',
+          rideId: 'temp_ride_with_image',
+          pixQRCode: 'https://api.woovi-sandbox.com/openpix/charge/woovi_charge_with_image/brcode/image',
+          brCode: '000201010212mockreviewprebooking',
+          paymentLink: 'https://woovi-sandbox.com/pay/woovi_charge_with_image',
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('payment-modal-qr-container')).toBeTruthy();
+    });
+    expect(screen.getByTestId('payment-modal-pending-state')).toBeTruthy();
+    expect(screen.getByTestId('payment-modal-copy-code-button')).toBeTruthy();
+    expect(screen.queryByTestId('payment-modal-pix-code')).toBeNull();
+    expect(screen.queryByText('Pagamento seguro')).toBeNull();
+    screen.unmount();
+  });
+
   it('reopens the persisted charge without creating a second Pix charge', async () => {
     WooviService.processAdvancePayment.mockResolvedValue({
       success: true,
