@@ -109,6 +109,7 @@ describe("end of ride on the receipt screen", () => {
       airConditioningOk: true,
     });
     expect(markTripRating).toHaveBeenCalledWith("trip_closing", { airConditioningOk: true });
+    expect(screen.getByText("Corrida concluída · Pix pago")).toBeTruthy();
     expect(screen.getByText("R$ 25,00")).toBeTruthy();
     expect(screen.getByText("Como foi com Carlos?")).toBeTruthy();
   });

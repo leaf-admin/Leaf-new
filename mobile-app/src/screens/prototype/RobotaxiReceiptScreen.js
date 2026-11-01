@@ -3,6 +3,7 @@ import { returnToPrototypeHome } from '../../navigation/returnToPrototypeHome';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
+  BackHandler,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -1632,6 +1633,16 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
     });
   };
 
+  // No cupom aberto a partir do card, o Voltar do Android retorna ao resumo.
+  useEffect(() => {
+    if (!fullReceiptOpen) return undefined;
+    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
+      setFullReceiptOpen(false);
+      return true;
+    });
+    return () => subscription.remove();
+  }, [fullReceiptOpen]);
+
   // O card muda de altura a cada etapa: a rota continua visível acima dele.
   useEffect(() => {
     if (closingActive) fitReceiptRoute(cleanMapRef.current);
@@ -1870,7 +1881,9 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
       ? hasDriverNetAmount ? "Corrida concluída · Líquido" : driverReceiptAmountLabel
       : showPassengerOperationalSettlement
         ? "Corrida concluída · Valor final"
-        : `Corrida concluída · ${receiptPaymentPill}`;
+        : hasReceiptFinancialContract
+          ? "Corrida concluída · Pix pago"
+          : `Corrida concluída · ${receiptPaymentPill}`;
     const closingAmount = isDriverView
       ? hasDriverNetAmount ? `+ ${driverReceivedAmount}` : "--"
       : showPassengerOperationalSettlement
