@@ -17,11 +17,13 @@ function resolveFinalSnapshot(result) {
 
 export function resolveDriverPromoCelebration(result) {
   // Corrida encerrada antes do destino ou em revisão financeira não é comemorada.
+  // O backend manda completionType COMPLETED em toda corrida normal.
+  const completionType = String(result?.completionType || 'COMPLETED').toUpperCase();
   if (
     !result ||
     result.earlyEnd ||
     result.settlement ||
-    result.completionType ||
+    completionType !== 'COMPLETED' ||
     result.settlementReviewRequired ||
     result.localFallback
   ) {
