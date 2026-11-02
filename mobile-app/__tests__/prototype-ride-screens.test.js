@@ -4489,6 +4489,22 @@ describe('prototype ride screens', () => {
       expect(global.fetch).not.toHaveBeenCalled();
     });
 
+    it('asks the server for the whole period in one page and stops when it is complete', async () => {
+      // The period page ends inside the period, but the server says it is complete.
+      mockGetBookingHistory
+        .mockResolvedValueOnce({ ...result, pageInfo: { hasNextPage: true, endCursor: 'c1' } })
+        .mockResolvedValueOnce({ ...result, bookings: [{ ...booking, id: 'period_trip' }], pageInfo: { hasNextPage: true, endCursor: 'c2', periodComplete: true } });
+      usePrototypeRideRuntime.mockReturnValue(runtime({ activeRole: 'driver' }));
+      const screen = render(<RobotaxiTripHistoryScreen navigation={navigation()} route={{ key: 'activity' }} />);
+      await waitFor(() => expect(screen.getByTestId('robotaxi-history-row-period_trip')).toBeTruthy());
+      expect(mockGetBookingHistory).toHaveBeenCalledTimes(2);
+      const [, , periodOptions] = mockGetBookingHistory.mock.calls[1];
+      expect(periodOptions).toMatchObject({ first: 200, after: 'c1' });
+      expect(Math.abs(periodOptions.since - (Date.now() - 30 * 86400000))).toBeLessThan(86400000 * 1.1);
+      expect(screen.queryByTestId('robotaxi-history-summary-loading-amount')).toBeNull();
+      expect(screen.getByText('Líquido nos últimos 30 dias')).toBeTruthy();
+    });
+
     it('does not present a truncated page as the whole driver history', async () => {
       const oldBooking = { ...booking, completedAt: new Date(Date.now() - 60 * 86400000).toISOString() };
       mockGetBookingHistory.mockResolvedValueOnce({ ...result, bookings: [oldBooking], pageInfo: { hasNextPage: true, endCursor: '10' } });

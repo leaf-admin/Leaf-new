@@ -35,6 +35,20 @@ describe('BookingHistoryService', () => {
     expect(next.pageInfo.hasPreviousPage).toBe(true);
   });
 
+  it('sends a period start and reports when the period is complete', async () => {
+    mockGet.mockResolvedValue({ data: { success: true, receipts: [], total: null, hasMore: true,
+      pagination: 'keyset', nextCursor: 'after-period', periodComplete: true } });
+    const service = require('../src/services/BookingHistoryService').default;
+    const page = await service.getBookingHistory('period_user', 'DRIVER', { first: 200, after: 'c1', since: 1790000000000 });
+    expect(mockGet).toHaveBeenLastCalledWith('/receipts/user/period_user', { params: {
+      role: 'driver', limit: 200, offset: 0, pagination: 'cursor', cursor: 'c1', since: '1790000000000'
+    } });
+    expect(page.pageInfo).toMatchObject({ hasNextPage: true, periodComplete: true });
+    // A different period is a different request, not a cache hit.
+    await service.getBookingHistory('period_user', 'DRIVER', { first: 200, after: 'c1', since: 1780000000000 });
+    expect(mockGet).toHaveBeenCalledTimes(2);
+  });
+
   it('keeps the next cursor when local filters exclude all rows in the current page', async () => {
     mockGet.mockResolvedValue({ data: { success: true, receipts: [{ rideId: 'r1', status: 'completed', grossAmount: 30 }],
       total: null, hasMore: true, pagination: 'keyset', nextCursor: 'next-filtered-page' } });

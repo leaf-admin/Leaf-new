@@ -99,6 +99,8 @@ const PASSENGER_PERIOD_KEYS = ['7d', 'month', 'all'];
 const DRIVER_PERIOD_KEYS = ['7d', '30d', 'all'];
 const PERIOD_TAB_WIDTH = 84;
 const PERIOD_UNDERLINE_WIDTH = 56;
+// Rides per request when loading a whole period; the server caps it at 200.
+const PERIOD_PAGE_SIZE = 200;
 
 function resolveHistoryItemTimeMs(item) {
   const value = item?.completedAt || item?.date || item?.tripdate || item?.startTime || item?.createdAt;
@@ -316,6 +318,8 @@ export default function RobotaxiTripHistoryScreen({ navigation, route }) {
       pageInfo: cached?.result?.pageInfo || { hasNextPage: false, endCursor: null },
       updatedAt: cached?.updatedAt || 0,
       loaded: Boolean(cached?.result?.success),
+      // Oldest period start whose rides are all loaded (null: none yet).
+      completeSinceMs: null,
       loading: !cached?.result?.success,
       loadingMore: false,
       refreshing: false,
@@ -346,8 +350,11 @@ export default function RobotaxiTripHistoryScreen({ navigation, route }) {
   const oldestLoadedMs = loadedHistory.length
     ? resolveHistoryItemTimeMs(loadedHistory[loadedHistory.length - 1])
     : NaN;
+  const completeSinceMs = visibleHistory.completeSinceMs;
+  const periodLoaded = isDateFiltered && completeSinceMs !== null && completeSinceMs <= dateFilterStartMs;
   const periodNeedsMorePages = Boolean(
     isDateFiltered &&
+      !periodLoaded &&
       pageInfo?.hasNextPage &&
       (!Number.isFinite(oldestLoadedMs) || oldestLoadedMs >= dateFilterStartMs),
   );
@@ -381,7 +388,7 @@ export default function RobotaxiTripHistoryScreen({ navigation, route }) {
     }
   }, []);
 
-  const loadHistory = useCallback(async ({ append = false, after = null, forceRefresh = false } = {}) => {
+  const loadHistory = useCallback(async ({ append = false, after = null, forceRefresh = false, since = null } = {}) => {
     if (!profileUid) {
       setHistoryState({ ...initialHistory, loading: false, error: 'Entre na sua conta para consultar o histórico.' });
       return;
@@ -405,7 +412,14 @@ export default function RobotaxiTripHistoryScreen({ navigation, route }) {
       const result = await BookingHistoryService.getBookingHistory(
         profileUid,
         historyRole,
-        { first: 10, after, ...(historyRevision ? { revision: historyRevision } : {}), ...(forceRefresh ? { forceRefresh: true } : {}) },
+        {
+          // A period page asks the server for the whole period at once.
+          first: since === null ? 10 : PERIOD_PAGE_SIZE,
+          after,
+          ...(since === null ? {} : { since }),
+          ...(historyRevision ? { revision: historyRevision } : {}),
+          ...(forceRefresh ? { forceRefresh: true } : {}),
+        },
       );
       if (!isCurrentRequest()) return;
       if (!result?.success) throw new Error(result?.error || 'Não foi possível carregar o histórico.');
@@ -414,6 +428,11 @@ export default function RobotaxiTripHistoryScreen({ navigation, route }) {
         ...current,
         bookings: append ? [...current.bookings, ...nextBookings] : nextBookings,
         pageInfo: result.pageInfo || { hasNextPage: false, endCursor: null },
+        completeSinceMs: !append
+          ? null
+          : since !== null && result.pageInfo?.periodComplete
+            ? Math.min(since, current.completeSinceMs ?? since)
+            : current.completeSinceMs ?? null,
         updatedAt: Date.now(),
         loaded: true,
         error: '',
@@ -443,8 +462,8 @@ export default function RobotaxiTripHistoryScreen({ navigation, route }) {
 
   useEffect(() => {
     if (!periodNeedsMorePages || loadingHistory || loadingMore || refreshing) return;
-    loadHistory({ append: true, after: pageInfo.endCursor });
-  }, [loadHistory, loadingHistory, loadingMore, pageInfo?.endCursor, periodNeedsMorePages, refreshing]);
+    loadHistory({ append: true, after: pageInfo.endCursor, since: dateFilterStartMs });
+  }, [dateFilterStartMs, loadHistory, loadingHistory, loadingMore, pageInfo?.endCursor, periodNeedsMorePages, refreshing]);
 
   const openReceipt = useCallback((item) => {
     navigation.navigate('RobotaxiPrototypeReceipt', {

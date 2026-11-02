@@ -120,6 +120,28 @@ describe('receipts routes auth', () => {
     }));
   });
 
+  it('loads a history period in one larger page and rejects a bad period start', async () => {
+    mockListStoredReceiptsByUser.mockResolvedValue({ receipts: [], total: null, limit: 200, offset: 0,
+      nextOffset: 0, hasMore: true, nextCursor: 'previous-v1', periodComplete: true, pagination: 'keyset' });
+    const since = String(Date.now() - 30 * 86400000);
+    const response = await request(createApp())
+      .get(`/api/receipts/user/passenger_1?pagination=cursor&cursor=previous-v1&limit=500&since=${since}`)
+      .set('Authorization', 'Bearer passenger_1');
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({ periodComplete: true, hasMore: true });
+    expect(mockListStoredReceiptsByUser).toHaveBeenCalledWith(expect.objectContaining({
+      userId: 'passenger_1', limit: 200, sinceMs: Number(since)
+    }));
+
+    for (const bad of ['abc', '-1', String(Date.now() + 86400000), '1e12']) {
+      const rejected = await request(createApp())
+        .get(`/api/receipts/user/passenger_1?since=${encodeURIComponent(bad)}`)
+        .set('Authorization', 'Bearer passenger_1');
+      expect(rejected.status).toBe(400);
+    }
+    expect(mockListStoredReceiptsByUser).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps receipt health public and before dynamic ride routes', async () => {
     const response = await request(createApp()).get('/api/receipts/health');
 
