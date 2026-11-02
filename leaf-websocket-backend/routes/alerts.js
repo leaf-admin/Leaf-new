@@ -20,7 +20,9 @@ const ALERT_WRITE_ROLES = ['admin', 'manager', 'super-admin', 'development'];
 function isAlertWebhookAuthorized(req, env = process.env) {
   const expectedSecret = env.ALERT_WEBHOOK_SECRET || env.OBSERVABILITY_WEBHOOK_SECRET || '';
   if (!expectedSecret) return env.NODE_ENV !== 'production';
-  const providedSecret = String(req.get('x-leaf-alert-secret') || req.body?.secret || '');
+  const bearer = String(req.get('authorization') || '').match(/^Bearer\s+(.+)$/i)?.[1] || '';
+  // Alertmanager sends it as Authorization: Bearer (http_config.authorization).
+  const providedSecret = String(req.get('x-leaf-alert-secret') || bearer || req.body?.secret || '');
   const expected = Buffer.from(expectedSecret);
   const provided = Buffer.from(providedSecret);
   return provided.length === expected.length && crypto.timingSafeEqual(provided, expected);
@@ -63,8 +65,8 @@ function normalizePrometheusAlert(rawAlert = {}, defaultStatus = 'firing') {
  * Entrada para Alertmanager/Grafana encaminharem alertas para o alertService.
  *
  * Segurança:
- * - Em produção, configure ALERT_WEBHOOK_SECRET e envie o mesmo valor em
- *   x-leaf-alert-secret ou no query param ?secret=...
+ * - Em produção, ALERT_WEBHOOK_SECRET é obrigatório; o valor vai em
+ *   Authorization: Bearer (Alertmanager), x-leaf-alert-secret ou no corpo.
  * - Em ambiente local sem secret, a rota fica aberta apenas para facilitar
  *   Alertmanager em rede Docker local.
  */

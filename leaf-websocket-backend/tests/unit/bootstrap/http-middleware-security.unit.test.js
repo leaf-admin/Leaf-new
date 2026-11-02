@@ -95,8 +95,8 @@ describe('HTTP middleware security', () => {
 });
 
 describe('alert webhook authorization', () => {
-  const req = ({ header = '', body = {}, query = {} } = {}) => ({
-    get: (name) => (name === 'x-leaf-alert-secret' ? header : undefined),
+  const req = ({ header = '', authorization = '', body = {}, query = {} } = {}) => ({
+    get: (name) => (name === 'x-leaf-alert-secret' ? header : name === 'authorization' ? authorization : undefined),
     body,
     query
   });
@@ -110,6 +110,8 @@ describe('alert webhook authorization', () => {
     const env = { NODE_ENV: 'production', ALERT_WEBHOOK_SECRET: 's3cret-value' };
     expect(isAlertWebhookAuthorized(req({ header: 's3cret-value' }), env)).toBe(true);
     expect(isAlertWebhookAuthorized(req({ body: { secret: 's3cret-value' } }), env)).toBe(true);
+    expect(isAlertWebhookAuthorized(req({ authorization: 'Bearer s3cret-value' }), env)).toBe(true);
+    expect(isAlertWebhookAuthorized(req({ authorization: 'Bearer wrong-value' }), env)).toBe(false);
     expect(isAlertWebhookAuthorized(req({ query: { secret: 's3cret-value' } }), env)).toBe(false);
     expect(isAlertWebhookAuthorized(req({ header: 's3cret-valuX' }), env)).toBe(false);
     expect(isAlertWebhookAuthorized(req({ header: 'short' }), env)).toBe(false);
