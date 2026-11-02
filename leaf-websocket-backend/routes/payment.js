@@ -9,6 +9,7 @@ const kycPolicyService = require('../services/kyc-policy-service');
 const firebaseConfig = require('../firebase-config');
 const redisPool = require('../utils/redis-pool');
 const passengerDiscountBenefitService = require('../services/passenger-discount-benefit-service');
+const whatsappPaymentNotificationService = require('../services/whatsapp-payment-notification-service');
 const {
   buildPaymentAvailabilityInput,
   hasPaymentEligibleDriver
@@ -1154,6 +1155,33 @@ router.post('/payment/advance', authenticatePaymentActor, requirePassengerScope,
         result?.charge?.paymentLinkUrl ||
         result?.charge?.paymentMethods?.pix?.paymentLinkUrl ||
         null;
+
+      const paymentActor = req.paymentActor || null;
+      if (
+        chargeId &&
+        paymentActor?.type === 'firebase' &&
+        String(paymentActor.uid || '') === String(passengerId || '') &&
+        whatsappPaymentNotificationService.getWhatsAppPaymentNotificationConfig().enabled
+      ) {
+        Promise.resolve()
+          .then(() => redisPool.ensureConnection())
+          .then(() => whatsappPaymentNotificationService.rememberPixChargeContext({
+            redis: redisPool.getConnection(),
+            chargeId,
+            passengerId,
+            verifiedPhone: paymentActor.phoneNumber,
+            passengerName,
+            destination: rideDetails?.destination,
+            tollCents: authoritativeTollAmounts.tollFeeCents
+          }))
+          .catch((contextError) => {
+            logStructured('warn', 'Falha ao guardar contexto do aviso de Pix no WhatsApp', {
+              service: 'payment-routes',
+              chargeId,
+              error: contextError.message
+            });
+          });
+      }
 
       res.status(200).json({
         ...result,
