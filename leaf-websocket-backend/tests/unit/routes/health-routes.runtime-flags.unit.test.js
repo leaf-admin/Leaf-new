@@ -3,6 +3,13 @@ jest.unmock('express');
 const express = require('express');
 const request = require('supertest');
 
+jest.mock('../../../middleware/support-auth', () => ({
+  authenticateSupport: (req, res, next) => (req.get('authorization') === 'Bearer admin'
+    ? next()
+    : res.status(401).json({ success: false })),
+  requireSupportRoles: () => (_req, _res, next) => next()
+}));
+
 jest.mock('../../../services/health-check-service', () => ({
   runAllChecks: jest.fn(async () => ({
     status: 'healthy',
@@ -105,6 +112,13 @@ describe('health runtime flags route', () => {
     process.env = originalEnv;
   });
 
+  it('requires an admin token for the runtime map', async () => {
+    for (const path of ['/health/runtime-flags', '/api/health/runtime-flags']) {
+      const response = await request(createApp()).get(path);
+      expect(response.status).toBe(401);
+    }
+  });
+
   it('reports ready=true for strict real-sandbox runtime', async () => {
     process.env.WOOVI_ENVIRONMENT = 'sandbox';
     process.env.WOOVI_BASE_URL = 'https://api.woovi-sandbox.com/api/v1';
@@ -120,7 +134,7 @@ describe('health runtime flags route', () => {
     process.env.AUTH_REVIEW_OTP_BYPASS_ENABLED = 'false';
 
     const app = createApp();
-    const response = await request(app).get('/health/runtime-flags');
+    const response = await request(app).get('/health/runtime-flags').set('Authorization', 'Bearer admin');
 
     expect(response.status).toBe(200);
     expect(response.body.success).toBe(true);
@@ -148,7 +162,7 @@ describe('health runtime flags route', () => {
     process.env.PILOT_MAX_DRIVER_COHORT_SIZE = '250';
     delete process.env.PILOT_ALLOWED_PASSENGER_IDS;
 
-    const response = await request(createApp()).get('/health/runtime-flags');
+    const response = await request(createApp()).get('/health/runtime-flags').set('Authorization', 'Bearer admin');
 
     expect(response.status).toBe(200);
     expect(response.body.launchAccess).toEqual(expect.objectContaining({
@@ -234,7 +248,7 @@ describe('health runtime flags route', () => {
     });
 
     const readiness = await request(createApp()).get('/health/readiness');
-    const flags = await request(createApp()).get('/health/runtime-flags');
+    const flags = await request(createApp()).get('/health/runtime-flags').set('Authorization', 'Bearer admin');
 
     expect(readiness.body.dependencies).toEqual(expect.objectContaining({
       redisAcceptAuthority: true,
@@ -306,7 +320,7 @@ describe('health runtime flags route', () => {
     process.env.WOOVI_BASE_URL = 'https://api.woovi-sandbox.com/api/v1';
 
     const app = createApp();
-    const response = await request(app).get('/health/runtime-flags');
+    const response = await request(app).get('/health/runtime-flags').set('Authorization', 'Bearer admin');
 
     expect(response.status).toBe(200);
     expect(response.body.runtime.runtimeRole).toBe('sideeffects');
@@ -320,7 +334,7 @@ describe('health runtime flags route', () => {
     process.env.WOOVI_BASE_URL = 'https://api.woovi-sandbox.com/api/v1';
 
     const app = createApp();
-    const response = await request(app).get('/health/runtime-flags');
+    const response = await request(app).get('/health/runtime-flags').set('Authorization', 'Bearer admin');
 
     expect(response.status).toBe(200);
     expect(response.body.firebase).toBeDefined();
@@ -338,7 +352,7 @@ describe('health runtime flags route', () => {
     process.env.WOOVI_BASE_URL = 'https://api.woovi-sandbox.com/api/v1';
 
     const app = createApp();
-    const response = await request(app).get('/health/runtime-flags');
+    const response = await request(app).get('/health/runtime-flags').set('Authorization', 'Bearer admin');
 
     expect(response.status).toBe(200);
     expect(response.body.firebase.configured).toBe(false);
@@ -351,7 +365,7 @@ describe('health runtime flags route', () => {
     process.env.WOOVI_BASE_URL = 'https://api.woovi-sandbox.com/api/v1';
 
     const app = createApp();
-    const response = await request(app).get('/health/runtime-flags');
+    const response = await request(app).get('/health/runtime-flags').set('Authorization', 'Bearer admin');
 
     expect(response.status).toBe(200);
     expect(response.body.push).toBeDefined();
@@ -387,7 +401,7 @@ describe('health runtime flags route', () => {
     process.env.WOOVI_BASE_URL = 'https://api.woovi-sandbox.com/api/v1';
 
     const app = createApp();
-    const response = await request(app).get('/health/runtime-flags');
+    const response = await request(app).get('/health/runtime-flags').set('Authorization', 'Bearer admin');
 
     expect(response.status).toBe(200);
     expect(response.body.kyc).toBeDefined();
@@ -602,7 +616,7 @@ describe('health runtime flags route', () => {
       }
     });
 
-    const response = await request(createApp()).get('/health/runtime-flags');
+    const response = await request(createApp()).get('/health/runtime-flags').set('Authorization', 'Bearer admin');
 
     expect(response.status).toBe(200);
     expect(response.body.kyc.activeTripAuthorityReady).toBe(false);
@@ -632,7 +646,7 @@ describe('health runtime flags route', () => {
     });
     process.env.KYC_ACTIVE_TRIP_AUTHORITY_MODE = 'durable_fallback';
 
-    const flags = await request(createApp()).get('/health/runtime-flags');
+    const flags = await request(createApp()).get('/health/runtime-flags').set('Authorization', 'Bearer admin');
     const readiness = await request(createApp()).get('/health/readiness');
 
     expect(flags.status).toBe(200);
@@ -669,7 +683,7 @@ describe('health runtime flags route', () => {
       KYC_ACTIVE_TRIP_AUTHORITY_MODE: ''
     });
 
-    const flags = await request(createApp()).get('/health/runtime-flags');
+    const flags = await request(createApp()).get('/health/runtime-flags').set('Authorization', 'Bearer admin');
     const readiness = await request(createApp()).get('/health/readiness');
 
     expect(flags.body.acceptRideAuthority).toEqual({
@@ -687,7 +701,7 @@ describe('health runtime flags route', () => {
     process.env.KYC_TRUST_CADENCE_ENABLED = 'false';
     delete process.env.KYC_TRUST_POLICY_VERSION;
 
-    const response = await request(createApp()).get('/health/runtime-flags');
+    const response = await request(createApp()).get('/health/runtime-flags').set('Authorization', 'Bearer admin');
 
     expect(response.body.kyc).toEqual(expect.objectContaining({
       adaptiveCadenceEnabled: false,
@@ -775,7 +789,7 @@ describe('health runtime flags route', () => {
     process.env.KYC_AWS_COMPARE_FACES_ENABLED = 'true';
     process.env.KYC_AWS_COMPARE_FACES_APPROVE_THRESHOLD = '0.90';
 
-    const flags = await request(createApp()).get('/health/runtime-flags');
+    const flags = await request(createApp()).get('/health/runtime-flags').set('Authorization', 'Bearer admin');
     const readiness = await request(createApp()).get('/health/readiness');
 
     expect(flags.body.kyc).toEqual(expect.objectContaining({
@@ -841,7 +855,7 @@ describe('health runtime flags route', () => {
     process.env.KYC_AWS_COMPARE_FACES_APPROVE_THRESHOLD = '0.95';
     process.env.KYC_AWS_COMPARE_FACES_REVIEW_THRESHOLD = '0.95';
 
-    const flags = await request(createApp()).get('/health/runtime-flags');
+    const flags = await request(createApp()).get('/health/runtime-flags').set('Authorization', 'Bearer admin');
     const readiness = await request(createApp()).get('/health/readiness');
 
     expect(flags.body.kyc).toEqual(expect.objectContaining({
@@ -923,7 +937,7 @@ describe('health runtime flags route', () => {
     process.env.WOOVI_BASE_URL = 'https://api.woovi-sandbox.com/api/v1';
 
     const app = createApp();
-    const response = await request(app).get('/health/runtime-flags');
+    const response = await request(app).get('/health/runtime-flags').set('Authorization', 'Bearer admin');
 
     expect(response.status).toBe(200);
     expect(response.body.maps).toBeDefined();
@@ -940,7 +954,7 @@ describe('health runtime flags route', () => {
     process.env.WOOVI_BASE_URL = 'https://api.woovi-sandbox.com/api/v1';
 
     const app = createApp();
-    const response = await request(app).get('/health/runtime-flags');
+    const response = await request(app).get('/health/runtime-flags').set('Authorization', 'Bearer admin');
 
     expect(response.status).toBe(200);
     expect(response.body.pricing).toEqual({
@@ -957,14 +971,14 @@ describe('health runtime flags route', () => {
     process.env.WOOVI_BASE_URL = 'https://api.woovi-sandbox.com/api/v1';
 
     const appWithoutFallback = createApp();
-    const resNoFallback = await request(appWithoutFallback).get('/health/runtime-flags');
+    const resNoFallback = await request(appWithoutFallback).get('/health/runtime-flags').set('Authorization', 'Bearer admin');
     expect(resNoFallback.body.maps.clientDirectGoogleFallbackAllowed).toBe(false);
     expect(resNoFallback.body.maps.backendOnly).toBe(true);
     expect(resNoFallback.body.maps.receiptMapImagesConfigured).toBe(true);
 
     process.env.EXPO_PUBLIC_ALLOW_CLIENT_DIRECT_GOOGLE_FALLBACK = 'true';
     const appWithFallback = createApp();
-    const resWithFallback = await request(appWithFallback).get('/health/runtime-flags');
+    const resWithFallback = await request(appWithFallback).get('/health/runtime-flags').set('Authorization', 'Bearer admin');
     expect(resWithFallback.body.maps.clientDirectGoogleFallbackAllowed).toBe(true);
     expect(resWithFallback.body.maps.backendOnly).toBe(false);
   });
@@ -975,7 +989,7 @@ describe('health runtime flags route', () => {
     process.env.WOOVI_BASE_URL = 'https://api.woovi-sandbox.com/api/v1';
 
     const app = createApp();
-    const response = await request(app).get('/health/runtime-flags');
+    const response = await request(app).get('/health/runtime-flags').set('Authorization', 'Bearer admin');
 
     expect(response.body.maps.configured).toBe(false);
     expect(response.body.maps.backendOnly).toBe(false);
@@ -987,11 +1001,11 @@ describe('health runtime flags route', () => {
     process.env.WOOVI_ENVIRONMENT = 'sandbox';
     process.env.WOOVI_BASE_URL = 'https://api.woovi-sandbox.com/api/v1';
 
-    const enabledByDefault = await request(createApp()).get('/health/runtime-flags');
+    const enabledByDefault = await request(createApp()).get('/health/runtime-flags').set('Authorization', 'Bearer admin');
     expect(enabledByDefault.body.maps.placesCacheEnabled).toBe(true);
 
     process.env.ENABLE_PLACES_CACHE = 'false';
-    const disabledExplicitly = await request(createApp()).get('/health/runtime-flags');
+    const disabledExplicitly = await request(createApp()).get('/health/runtime-flags').set('Authorization', 'Bearer admin');
     expect(disabledExplicitly.body.maps.placesCacheEnabled).toBe(false);
   });
 
@@ -1002,7 +1016,7 @@ describe('health runtime flags route', () => {
     process.env.WOOVI_BASE_URL = 'https://api.woovi-sandbox.com/api/v1';
 
     const app = createApp();
-    const response = await request(app).get('/health/runtime-flags');
+    const response = await request(app).get('/health/runtime-flags').set('Authorization', 'Bearer admin');
 
     expect(response.status).toBe(200);
     expect(response.body.socket).toBeDefined();
@@ -1016,7 +1030,7 @@ describe('health runtime flags route', () => {
     process.env.WOOVI_BASE_URL = 'https://api.woovi-sandbox.com/api/v1';
 
     const app = createApp();
-    const response = await request(app).get('/health/runtime-flags');
+    const response = await request(app).get('/health/runtime-flags').set('Authorization', 'Bearer admin');
 
     expect(response.body.runtime.runtimeRole).toBe('gateway');
   });
@@ -1029,7 +1043,7 @@ describe('health runtime flags route', () => {
     process.env.AUTH_TEST_OTP_BYPASS_ENABLED = 'true';
 
     const app = createApp();
-    const response = await request(app).get('/api/health/runtime-flags');
+    const response = await request(app).get('/api/health/runtime-flags').set('Authorization', 'Bearer admin');
 
     expect(response.status).toBe(200);
     expect(response.body.realSandbox.ready).toBe(false);
