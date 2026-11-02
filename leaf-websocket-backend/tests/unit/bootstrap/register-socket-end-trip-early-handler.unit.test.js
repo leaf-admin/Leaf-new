@@ -49,6 +49,8 @@ function buildHarness({ commandResult } = {}) {
       customerId: 'customer-1',
       driverId: 'driver-1',
       destinationAddress: 'Leblon',
+      pickupLocation: JSON.stringify({ lat: -22.98, lng: -43.19, add: 'Ipanema' }),
+      destinationLocation: JSON.stringify({ lat: -22.95, lng: -43.18, add: 'Botafogo' }),
       status: 'STARTED'
     }),
     hdel: jest.fn().mockResolvedValue(1)
@@ -119,7 +121,12 @@ describe('registerSocketEndTripEarlyHandler', () => {
 
     expect(mockGenerateAndSaveReceipt).toHaveBeenCalledWith(
       'booking-1',
-      expect.objectContaining({ bookingId: 'booking-1', completionType: 'EARLY_ENDED_BY_RIDER' })
+      expect.objectContaining({
+        bookingId: 'booking-1',
+        completionType: 'EARLY_ENDED_BY_RIDER',
+        pickup: expect.objectContaining({ add: 'Ipanema' }),
+        drop: expect.objectContaining({ add: 'Botafogo' })
+      })
     );
     expect(EndRideEarlyByRiderCommand).toHaveBeenCalledWith(
       expect.objectContaining({
