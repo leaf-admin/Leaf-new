@@ -12,6 +12,7 @@ function historyRequestKey(userId, userType, options = {}) {
         String(userType || 'CUSTOMER').toUpperCase() === 'DRIVER' ? 'driver' : 'customer',
         options.first ?? 50, options.after ?? null,
         options.status ?? null, options.dateRange ?? null, options.revision ?? null,
+        options.since ?? null,
     ]);
 }
 
@@ -189,7 +190,8 @@ class BookingHistoryService {
                 first = 50,
                 after = null,
                 status = null,
-                dateRange = null
+                dateRange = null,
+                since = null
             } = options;
 
             const normalizedUserType = String(userType || 'CUSTOMER').toUpperCase();
@@ -203,7 +205,8 @@ class BookingHistoryService {
                     limit: first,
                     offset,
                     pagination: 'cursor',
-                    ...(cursor ? { cursor } : {})
+                    ...(cursor ? { cursor } : {}),
+                    ...(Number.isSafeInteger(since) && since > 0 ? { since: String(since) } : {})
                 }
             });
 
@@ -225,7 +228,9 @@ class BookingHistoryService {
                     endCursor: receipts.length > 0
                         ? response?.data?.pagination === 'keyset' ? response.data.nextCursor
                             : String(response?.data?.nextOffset ?? offset + receipts.length)
-                        : null
+                        : null,
+                    // Only a period request (since) answers this.
+                    ...(response?.data?.periodComplete === true ? { periodComplete: true } : {})
                 },
                 totalCount: Number(response?.data?.total ?? filteredBookings.length),
                 totalCountKnown: response?.data?.total !== null && response?.data?.total !== undefined && response?.data?.total !== '' && Number.isInteger(Number(response.data.total)) && Number(response.data.total) >= receipts.length
