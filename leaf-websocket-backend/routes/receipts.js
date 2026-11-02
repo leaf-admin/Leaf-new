@@ -310,6 +310,15 @@ router.post(
     }
 );
 
+// Period start for the history list: absent means no period; anything that is
+// not a past instant (ms) is rejected (undefined).
+function parseHistorySince(raw, nowMs = Date.now()) {
+    if (raw === null || raw === undefined || raw === '') return null;
+    if (typeof raw !== 'string' || !/^\d{1,15}$/.test(raw)) return undefined;
+    const value = Number(raw);
+    return Number.isSafeInteger(value) && value > 0 && value <= nowMs ? value : undefined;
+}
+
 /**
  * 📋 GET /api/receipts/user/:userId
  * Lista recibos de um usuário específico
@@ -317,8 +326,15 @@ router.post(
 router.get('/api/receipts/user/:userId', authenticateSupport, requireReceiptUserScope, async (req, res) => {
     try {
         const { userId } = req.params;
-        const { limit = 10, offset = 0, role = 'customer', cursor = null, pagination = null } = req.query;
-        const safeLimit = Math.min(50, Math.max(1, Number.parseInt(limit, 10) || 10));
+        const { limit = 10, offset = 0, role = 'customer', cursor = null, pagination = null, since = null } = req.query;
+        const sinceMs = parseHistorySince(since);
+        if (sinceMs === undefined) {
+            return res.status(400).json({
+                success: false,
+                error: 'since deve ser um instante em milissegundos'
+            });
+        }
+        const safeLimit = Math.min(sinceMs === null ? 50 : 200, Math.max(1, Number.parseInt(limit, 10) || 10));
         const safeOffset = Math.max(0, Number.parseInt(offset, 10) || 0);
 
         if (!['customer', 'driver'].includes(role)) {
@@ -338,6 +354,7 @@ router.get('/api/receipts/user/:userId', authenticateSupport, requireReceiptUser
             limit: safeLimit,
             offset: safeOffset,
             cursor,
+            sinceMs,
             pagination
         });
         const receipts = result.receipts.map((receipt) => buildStoredReceiptSummary(receipt, role));
@@ -351,6 +368,7 @@ router.get('/api/receipts/user/:userId', authenticateSupport, requireReceiptUser
             nextOffset: result.nextOffset,
             hasMore: result.hasMore,
             nextCursor: result.nextCursor ?? null,
+            periodComplete: result.periodComplete ?? null,
             pagination: result.pagination || 'legacy-offset'
         });
 

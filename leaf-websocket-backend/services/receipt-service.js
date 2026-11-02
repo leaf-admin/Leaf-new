@@ -895,6 +895,7 @@ class ReceiptService {
         limit = 10,
         offset = 0,
         cursor = null,
+        sinceMs = null,
         pagination = null
     } = {}) {
         const firestore = this.getReceiptFirestore();
@@ -931,11 +932,13 @@ class ReceiptService {
         const requestedContext = requestedContextResult.context;
         const persistenceScope = resolvePersistenceScope({ financialContext: requestedContext });
         const ownerPath = role === 'driver' ? 'driver/id' : 'customer/id';
-        const safeLimit = Math.min(50, Math.max(1, Number.parseInt(limit, 10) || 10));
+        // A period page may be larger: it ends at the period start.
+        const maxLimit = sinceMs === null ? 50 : 200;
+        const safeLimit = Math.min(maxLimit, Math.max(1, Number.parseInt(limit, 10) || 10));
         const safeOffset = Math.max(0, Number.parseInt(offset, 10) || 0);
         return receiptFirestoreStore.listPage(firestore, {
             scope: persistenceScope, role, userId: normalizedUserId, limit: safeLimit,
-            offset: safeOffset, cursor, assertRecord: assertStoredRecordMatchesScope,
+            offset: safeOffset, cursor, sinceMs, assertRecord: assertStoredRecordMatchesScope,
             ownerOf: this.resolveStoredReceiptOwnerId.bind(this)
         });
     }
