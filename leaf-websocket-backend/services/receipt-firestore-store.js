@@ -85,10 +85,14 @@ function decodeCursor(raw) {
   }
 }
 
-async function listPage(firestore, { scope, role, userId, limit, offset = 0, cursor = null, assertRecord, ownerOf }) {
+// sinceMs limits the page to one period (rides listed at or after it), so a
+// period total loads in one request. hasMore still answers "older rides
+// exist", and periodComplete says the period has no more pages.
+async function listPage(firestore, { scope, role, userId, limit, offset = 0, cursor = null, sinceMs = null, assertRecord, ownerOf }) {
   if (!firestore) throw fail('RECEIPT_FIRESTORE_UNAVAILABLE', 'Firestore indisponível para o recibo', 503);
   if (offset && cursor) throw fail('RECEIPT_HISTORY_CURSOR_INVALID', 'Use cursor ou offset, não ambos', 400);
   if (offset > MAX_LEGACY_OFFSET) throw fail('RECEIPT_HISTORY_REFRESH_REQUIRED', 'Atualize o histórico para continuar', 409);
+  if (sinceMs !== null && offset) throw fail('RECEIPT_HISTORY_CURSOR_INVALID', 'Período exige cursor, não offset', 400);
   let query = firestore.collection(scope.collections.receipts)
     .where(`historyIndex.${role}Id`, '==', userId);
   if (scope.namespace === 'sandbox') query = query.where('historyIndex.contextId', '==', scope.financialContextId);
@@ -100,19 +104,34 @@ async function listPage(firestore, { scope, role, userId, limit, offset = 0, cur
   } else if (offset) {
     page = page.offset(offset);
   }
-  const [snapshot, count] = await Promise.all([page.limit(limit + 1).get(), query.count().get()]);
+  const since = sinceMs === null ? null : admin.firestore.Timestamp.fromMillis(sinceMs);
+  if (since) page = page.where('historyIndex.listedAt', '>=', since);
+  // The total only changes the first screen; later pages skip the count query.
+  const firstPage = !cursor && !offset;
+  const [snapshot, count] = await Promise.all([
+    page.limit(limit + 1).get(),
+    firstPage ? query.count().get() : null
+  ]);
   const docs = snapshot.docs.slice(0, limit);
+  const periodHasMore = snapshot.docs.length > limit;
+  let hasMore = periodHasMore;
+  if (since && !periodHasMore) {
+    const older = await ordered.where('historyIndex.listedAt', '<', since).limit(1).get();
+    hasMore = !older.empty;
+  }
   const receipts = docs.map(doc => {
     const receipt = readBody(doc.data());
     assertRecord(receipt, scope);
     if (ownerOf(receipt, role) !== userId) throw fail('RECEIPT_HISTORY_OWNER_MISMATCH', 'Histórico requer conciliação', 503);
     return { ...receipt, rideId: receipt.rideId || doc.id };
   });
-  const hasMore = snapshot.docs.length > limit;
+  // An empty period page keeps the caller's position for the next page.
+  const nextCursor = !hasMore ? null : docs.length ? encodeCursor(docs[docs.length - 1]) : cursor;
   return {
-    receipts, total: count.data().count, limit, offset,
+    receipts, total: count ? count.data().count : null, limit, offset,
     nextOffset: offset + receipts.length, hasMore,
-    nextCursor: hasMore ? encodeCursor(docs[docs.length - 1]) : null,
+    nextCursor,
+    periodComplete: since ? !periodHasMore : null,
     pagination: 'keyset', financialNamespace: scope.namespace
   };
 }

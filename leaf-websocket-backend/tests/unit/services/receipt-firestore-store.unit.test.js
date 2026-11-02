@@ -99,6 +99,87 @@ describe('receipt Firestore store (only copy; RTDB retired)', () => {
     expect(store.decodeCursor(valid)).toEqual({ v: 1, t: 1792947990000, id: 'booking_1' });
   });
 
+  describe('listPage', () => {
+    // In-memory query: newest first, honours listedAt filters, startAfter and limit.
+    function fakeHistory(listedAts) {
+      const docs = listedAts.map((ms, index) => ({
+        id: `booking_${index}`,
+        data: () => ({ ...receipt({ rideId: `booking_${index}` }), historyIndex: { listedAt: { ms } } }),
+        get: () => ({ toMillis: () => ms })
+      })).sort((a, b) => b.get().toMillis() - a.get().toMillis());
+      const calls = { count: 0, gets: [] };
+      const chain = (state) => ({
+        where: (field, op, value) => (field === 'historyIndex.listedAt'
+          ? chain({ ...state, filters: [...state.filters, { op, ms: value.ms }] })
+          : chain(state)),
+        orderBy: () => chain(state),
+        startAfter: (ts) => chain({ ...state, after: ts.ms }),
+        offset: () => chain(state),
+        limit: (n) => chain({ ...state, limit: n }),
+        count: () => ({ get: async () => { calls.count += 1; return { data: () => ({ count: docs.length }) }; } }),
+        get: async () => {
+          const ms = (doc) => doc.get().toMillis();
+          const matched = docs
+            .filter((doc) => state.after === undefined || ms(doc) < state.after)
+            .filter((doc) => state.filters.every((f) => (f.op === '>=' ? ms(doc) >= f.ms : ms(doc) < f.ms)))
+            .slice(0, state.limit);
+          calls.gets.push(state);
+          return { docs: matched, empty: matched.length === 0 };
+        }
+      });
+      const firestore = { collection: () => chain({ filters: [] }) };
+      return { firestore, calls };
+    }
+    const base = {
+      scope, role: 'driver', userId: 'driver_1',
+      assertRecord: () => {}, ownerOf: (r, role) => r?.[role]?.id
+    };
+
+    beforeAll(() => {
+      admin.firestore.FieldPath = { documentId: () => '__name__' };
+    });
+
+    it('loads a whole period in one page and reports older rides', async () => {
+      const { firestore, calls } = fakeHistory([5000, 4000, 3000, 2000, 1000]);
+      const first = await store.listPage(firestore, { ...base, limit: 1 });
+      expect(first).toMatchObject({ total: 5, hasMore: true, periodComplete: null });
+      expect(calls.count).toBe(1);
+
+      const period = await store.listPage(firestore, { ...base, limit: 200, cursor: first.nextCursor, sinceMs: 2500 });
+      expect(period.receipts.map((r) => r.rideId)).toEqual(['booking_1', 'booking_2']);
+      expect(period).toMatchObject({ total: null, hasMore: true, periodComplete: true });
+      // Later pages skip the count query.
+      expect(calls.count).toBe(1);
+      expect(store.decodeCursor(period.nextCursor)).toMatchObject({ t: 3000, id: 'booking_2' });
+    });
+
+    it('keeps paging inside a period larger than the page', async () => {
+      const { firestore } = fakeHistory([5000, 4000, 3000, 2000]);
+      const page = await store.listPage(firestore, { ...base, limit: 2, sinceMs: 1500 });
+      expect(page).toMatchObject({ hasMore: true, periodComplete: false });
+      expect(page.receipts).toHaveLength(2);
+    });
+
+    it('ends the list when nothing is older than the period', async () => {
+      const { firestore } = fakeHistory([5000, 4000]);
+      const page = await store.listPage(firestore, { ...base, limit: 200, sinceMs: 1000 });
+      expect(page).toMatchObject({ hasMore: false, nextCursor: null, periodComplete: true });
+    });
+
+    it('keeps the caller position when the period page is empty', async () => {
+      const { firestore } = fakeHistory([5000, 1000]);
+      const first = await store.listPage(firestore, { ...base, limit: 1 });
+      const empty = await store.listPage(firestore, { ...base, limit: 200, cursor: first.nextCursor, sinceMs: 3000 });
+      expect(empty).toMatchObject({ receipts: [], hasMore: true, periodComplete: true, nextCursor: first.nextCursor });
+    });
+
+    it('refuses a period with an offset', async () => {
+      const { firestore } = fakeHistory([5000]);
+      await expect(store.listPage(firestore, { ...base, limit: 10, offset: 10, sinceMs: 1000 }))
+        .rejects.toMatchObject({ code: 'RECEIPT_HISTORY_CURSOR_INVALID', statusCode: 400 });
+    });
+  });
+
   it('lists and looks receipts up only in Firestore', async () => {
     const service = new ReceiptService();
     service.getReceiptFirestore = () => ({});
@@ -109,7 +190,12 @@ describe('receipt Firestore store (only copy; RTDB retired)', () => {
 
     await expect(service.listStoredReceiptsByUser({ userId: 'customer_1', role: 'customer', financialContext, limit: 5, cursor: 'c' }))
       .resolves.toEqual({ receipts: [], pagination: 'keyset' });
-    expect(listPage.mock.calls[0][1]).toMatchObject({ role: 'customer', userId: 'customer_1', limit: 5, cursor: 'c' });
+    expect(listPage.mock.calls[0][1]).toMatchObject({ role: 'customer', userId: 'customer_1', limit: 5, cursor: 'c', sinceMs: null });
+
+    await service.listStoredReceiptsByUser({ userId: 'customer_1', role: 'customer', financialContext, limit: 500, cursor: 'c', sinceMs: 1000 });
+    expect(listPage.mock.calls[1][1]).toMatchObject({ limit: 200, sinceMs: 1000 });
+    await service.listStoredReceiptsByUser({ userId: 'customer_1', role: 'customer', financialContext, limit: 500 });
+    expect(listPage.mock.calls[2][1]).toMatchObject({ limit: 50 });
 
     await expect(service.getReceiptFromFirestore('booking_1')).resolves.toBeNull();
     getByRideId.mockResolvedValueOnce({ rideId: 'booking_1', receiptId: 'LEAF-FS' });
