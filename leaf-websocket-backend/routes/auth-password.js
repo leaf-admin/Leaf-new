@@ -6,6 +6,8 @@ const redisPool = require('../utils/redis-pool');
 const firebaseConfig = require('../firebase-config');
 const userStore = require('../services/user-store');
 const { logStructured, logError } = require('../utils/logger');
+const whatsappOtpService = require('../services/whatsapp-otp-service');
+const { createOtpChallengeService, resolveHmacKey } = require('../services/otp-challenge-service');
 const {
   getBypassOtpCode,
   isOtpBypassPhone,
@@ -266,15 +268,44 @@ function lockoutUntilFromData(data = {}) {
   return Number.isFinite(parsed.getTime()) ? parsed : null;
 }
 
-async function generateResetOtp(phoneDigits) {
+function resetDeliveryError(message, status, code) {
+  const error = new Error(message);
+  error.status = status;
+  error.code = code;
+  return error;
+}
+
+// Same paid channel and same send limits as the login code.
+async function deliverResetOtp({ redis, key, phoneDigits, otp, verificationId, ip }) {
+  const whatsappReady = whatsappOtpService.getWhatsAppOtpConfig().configured && Boolean(resolveHmacKey());
+  if (!whatsappReady) {
+    if (String(process.env.NODE_ENV || '').trim().toLowerCase() !== 'production') return;
+    throw resetDeliveryError('OTP provider not configured for production', 503, 'OTP_PROVIDER_NOT_CONFIGURED');
+  }
+
+  const phoneNumber = formatPhoneE164(phoneDigits);
+  const challenges = createOtpChallengeService({ redis });
+  await challenges.reserveSend({ phone: phoneNumber, ip });
+  try {
+    await whatsappOtpService.sendOtp({ phoneNumber, otp, verificationId });
+  } catch (_deliveryError) {
+    await redis.del(key);
+    await challenges.releaseCooldown(phoneNumber);
+    throw resetDeliveryError('Não foi possível enviar o código pelo WhatsApp.', 502, 'WHATSAPP_OTP_DELIVERY_FAILED');
+  }
+}
+
+async function generateResetOtp(phoneDigits, ip) {
   const otpBypassEnabled = isOtpBypassPhone(phoneDigits);
   const otp = otpBypassEnabled
     ? getBypassOtpCode(phoneDigits)
-    : Math.floor(100000 + Math.random() * 900000).toString();
+    : crypto.randomInt(100000, 1000000).toString();
   const verificationId = `pwd_${Date.now()}_${crypto.randomBytes(8).toString('hex')}`;
   if (!otpBypassEnabled) {
     const redis = redisPool.getConnection();
-    await redis.set(`password_reset_otp:${verificationId}:${phoneDigits}`, otp, 'EX', PASSWORD_RESET_TTL_SECONDS);
+    const key = `password_reset_otp:${verificationId}:${phoneDigits}`;
+    await redis.set(key, otp, 'EX', PASSWORD_RESET_TTL_SECONDS);
+    await deliverResetOtp({ redis, key, phoneDigits, otp, verificationId, ip });
   }
 
   if (otpBypassEnabled) {
@@ -617,7 +648,7 @@ router.post('/reset/request', async (req, res) => {
     if (!otpBypassEnabled) {
       await redisPool.ensureConnection();
     }
-    const { verificationId } = await generateResetOtp(phoneDigits);
+    const { verificationId } = await generateResetOtp(phoneDigits, req.ip);
     await recordPasswordAudit('password_reset_requested', { phoneLast4: phoneDigits.slice(-4) });
 
     return res.status(200).json({
@@ -627,6 +658,14 @@ router.post('/reset/request', async (req, res) => {
       otpBypassEnabled
     });
   } catch (error) {
+    if (error?.status && error?.code) {
+      return res.status(error.status).json({
+        success: false,
+        code: error.code,
+        error: error.message,
+        ...(error.retryAfterSeconds ? { retryAfterSeconds: error.retryAfterSeconds } : {})
+      });
+    }
     logError(error, 'Erro ao solicitar reset de senha', { service: 'auth-password-routes' });
     return res.status(500).json({ success: false, error: 'Erro interno do servidor' });
   }
