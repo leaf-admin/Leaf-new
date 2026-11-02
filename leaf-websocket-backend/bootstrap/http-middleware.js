@@ -13,6 +13,36 @@ function captureSignedWebhookRawBody(req, _res, buffer) {
     }
 }
 
+const SECURITY_HEADERS = Object.freeze({
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
+    'Referrer-Policy': 'no-referrer',
+    'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
+    'Cross-Origin-Opener-Policy': 'same-origin'
+});
+
+function applySecurityHeaders(_req, res, next) {
+    for (const [name, value] of Object.entries(SECURITY_HEADERS)) res.setHeader(name, value);
+    next();
+}
+
+// The OTLP sink only serves this process's own exporter (loopback or the
+// Docker network); the public edge must not reach it.
+function isInternalAddress(address) {
+    const ip = String(address || '').replace(/^::ffff:/, '');
+    return ip === '127.0.0.1'
+        || ip === '::1'
+        || /^10\./.test(ip)
+        || /^192\.168\./.test(ip)
+        || /^172\.(1[6-9]|2\d|3[01])\./.test(ip);
+}
+
+function requireInternalCaller(req, res, next) {
+    // Behind nginx req.ip is the client; the socket is the proxy. Both must be internal.
+    if (isInternalAddress(req.ip) && isInternalAddress(req.socket?.remoteAddress)) return next();
+    return res.status(404).end();
+}
+
 function configureHttpMiddleware({
     app,
     server,
@@ -34,10 +64,18 @@ function configureHttpMiddleware({
     // ✅ NOVO: Middleware para gerar traceId automaticamente em requisições HTTP
     app.use(traceIdExpressMiddleware);
 
-    app.use(cors(corsOptions));
+    app.disable('x-powered-by');
+    app.use(applySecurityHeaders);
+
+    // A refused origin is a 403, not a 500 from the default error handler.
+    const corsMiddleware = cors(corsOptions);
+    app.use((req, res, next) => corsMiddleware(req, res, (error) => {
+        if (!error) return next();
+        return res.status(403).json({ success: false, error: 'Origem não permitida' });
+    }));
 
     // OTLP ingest local para evitar exporter apontando para endpoint inválido (ECONNREFUSED)
-    app.post('/otel/v1/traces', express.raw({ type: '*/*', limit: '10mb' }), (req, res) => {
+    app.post('/otel/v1/traces', requireInternalCaller, express.raw({ type: '*/*', limit: '10mb' }), (req, res) => {
         const bytesFromBody = Buffer.isBuffer(req.body) ? req.body.length : 0;
         const headerLength = Number.parseInt(req.headers['content-length'] || '0', 10);
         const bytes = Number.isFinite(headerLength) && headerLength > 0 ? headerLength : bytesFromBody;
@@ -45,7 +83,7 @@ function configureHttpMiddleware({
         res.status(200).end();
     });
 
-    app.get('/otel/health', (_req, res) => {
+    app.get('/otel/health', requireInternalCaller, (_req, res) => {
         res.status(200).json({
             success: true,
             timestamp: new Date().toISOString(),
@@ -112,3 +150,5 @@ function configureHttpMiddleware({
 module.exports = configureHttpMiddleware;
 module.exports.captureSignedWebhookRawBody = captureSignedWebhookRawBody;
 module.exports.shouldCaptureSignedWebhookRawBody = shouldCaptureSignedWebhookRawBody;
+module.exports.isInternalAddress = isInternalAddress;
+module.exports.SECURITY_HEADERS = SECURITY_HEADERS;

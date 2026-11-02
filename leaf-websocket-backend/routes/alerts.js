@@ -4,6 +4,7 @@
  * Rotas para gerenciar e visualizar alertas
  */
 
+const crypto = require('crypto');
 const express = require('express');
 const router = express.Router();
 const alertService = require('../services/alert-service');
@@ -13,15 +14,16 @@ const { authenticateSupport, requireSupportRoles } = require('../middleware/supp
 const ALERT_READ_ROLES = ['admin', 'manager', 'super-admin', 'viewer', 'development'];
 const ALERT_WRITE_ROLES = ['admin', 'manager', 'super-admin', 'development'];
 
-function isAlertWebhookAuthorized(req) {
-  const expectedSecret = process.env.ALERT_WEBHOOK_SECRET || process.env.OBSERVABILITY_WEBHOOK_SECRET || '';
-  if (!expectedSecret) return true;
-  const providedSecret =
-    req.get('x-leaf-alert-secret') ||
-    req.query.secret ||
-    req.body?.secret ||
-    '';
-  return providedSecret === expectedSecret;
+// Fails closed in production: without a configured secret nobody may post
+// alerts. The secret travels in a header or the body, never in the URL
+// (URLs end up in access logs).
+function isAlertWebhookAuthorized(req, env = process.env) {
+  const expectedSecret = env.ALERT_WEBHOOK_SECRET || env.OBSERVABILITY_WEBHOOK_SECRET || '';
+  if (!expectedSecret) return env.NODE_ENV !== 'production';
+  const providedSecret = String(req.get('x-leaf-alert-secret') || req.body?.secret || '');
+  const expected = Buffer.from(expectedSecret);
+  const provided = Buffer.from(providedSecret);
+  return provided.length === expected.length && crypto.timingSafeEqual(provided, expected);
 }
 
 function normalizePrometheusAlert(rawAlert = {}, defaultStatus = 'firing') {
@@ -215,3 +217,4 @@ router.post('/test', async (req, res) => {
 });
 
 module.exports = router;
+module.exports.isAlertWebhookAuthorized = isAlertWebhookAuthorized;
