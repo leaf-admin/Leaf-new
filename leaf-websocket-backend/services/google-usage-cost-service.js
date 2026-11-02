@@ -55,6 +55,19 @@ function hourKey(ms) {
 }
 
 const RIDES_KEY = 'google_cost:rides';
+// Corridas aceitas: já pagaram a navegação do motorista mesmo se forem canceladas depois.
+const ACCEPTED_RIDES_KEY = 'google_cost:accepted_rides';
+const ROUTES_PATTERN = /Routes\.ComputeRoutes|Directions/;
+// Alertas de razão em 6 h: só repetem se houve chamada nova depois do último aviso.
+const RATIO_ALERT_USAGE = Object.freeze({
+  google_routes_per_ride: ROUTES_PATTERN,
+  google_cost_per_ride_usd: /./
+});
+const RATIO_ALERT_TTL_SECONDS = 6 * 60 * 60;
+
+function ratioAlertKey(metric) {
+  return `google_cost:alerted:${metric}`;
+}
 
 function priceFor(field, prices = DEFAULT_PRICES_PER_1000) {
   if (Object.prototype.hasOwnProperty.call(prices, field)) return prices[field];
@@ -204,6 +217,20 @@ async function recordRideCompletionForCost(redis, bookingId, nowMs = Date.now())
   await redis.zremrangebyscore(RIDES_KEY, 0, nowMs - RETENTION_SECONDS * 1000);
 }
 
+// Chamado no aceite. Entra só no denominador de rotas por corrida.
+async function recordRideAcceptanceForCost(redis, bookingId, nowMs = Date.now()) {
+  if (!redis || !bookingId) return;
+  await redis.zadd(ACCEPTED_RIDES_KEY, nowMs, String(bookingId));
+  await redis.zremrangebyscore(ACCEPTED_RIDES_KEY, 0, nowMs - RETENTION_SECONDS * 1000);
+}
+
+// Corridas aceitas ou concluídas na janela, sem contar a mesma duas vezes.
+async function countRouteRides(redis, startMs, nowMs) {
+  const accepted = await redis.zrangebyscore(ACCEPTED_RIDES_KEY, startMs, nowMs);
+  const completed = await redis.zrangebyscore(RIDES_KEY, startMs, nowMs);
+  return new Set([...(accepted || []), ...(completed || [])]).size;
+}
+
 // Janelas até 6 h somam os buckets por minuto (últimos N minutos de verdade);
 // janelas maiores somam as horas fechadas.
 async function readWindow(redis, { hours, nowMs = Date.now(), prices } = {}) {
@@ -214,16 +241,18 @@ async function readWindow(redis, { hours, nowMs = Date.now(), prices } = {}) {
     : Array.from({ length: hours }, (_, index) => hourKey(Math.floor(endMs / HOUR_MS) * HOUR_MS - index * HOUR_MS));
   const counts = await sumMinuteHashes(redis, keys);
   const rides = Number(await redis.zcount(RIDES_KEY, startMs, nowMs)) || 0;
+  const routeRides = await countRouteRides(redis, startMs, nowMs);
   const usd = costUsd(counts, prices);
   const google = Object.fromEntries(Object.entries(counts).filter(([field]) => !field.startsWith('firestore|')));
   return {
     hours,
     rides,
+    routeRides,
     counts,
     costUsd: usd,
     googleCostUsd: costUsd(google, prices),
     costPerRideUsd: rides > 0 ? usd / rides : null,
-    routesPerRide: rides > 0 ? sumMatching(counts, /Routes\.ComputeRoutes|Directions/) / rides : null,
+    routesPerRide: routeRides > 0 ? sumMatching(counts, ROUTES_PATTERN) / routeRides : null,
     autocompletePerRide: rides > 0 ? sumMatching(counts, /Autocomplete/) / rides : null
   };
 }
@@ -283,7 +312,7 @@ function evaluateCostAlerts({ lastHour, last6h }) {
         metric: 'google_routes_per_ride',
         value: Number(last6h.routesPerRide.toFixed(2)),
         threshold: routesLimit,
-        message: `${last6h.routesPerRide.toFixed(1)} rotas por corrida em 6 h (esperado: 2).`
+        message: `${last6h.routesPerRide.toFixed(1)} rotas por corrida em 6 h (esperado: 2; ${last6h.routeRides ?? last6h.rides} corridas aceitas).`
       });
     }
   }
@@ -301,13 +330,34 @@ function evaluateCostAlerts({ lastHour, last6h }) {
   return alerts.map((alert) => ({ service: 'google-cost', ...alert }));
 }
 
+// A janela de 6 h mantém as mesmas chamadas por horas: sem chamada nova desde o
+// último aviso, o alerta seria o mesmo evento repetido.
+async function isRepeatedRatioAlert(redis, metric, nowMs) {
+  const pattern = RATIO_ALERT_USAGE[metric];
+  if (!pattern) return false;
+  const lastAlertMs = Number(await redis.get(ratioAlertKey(metric)));
+  if (!Number.isFinite(lastAlertMs) || lastAlertMs <= 0) return false;
+  const startMs = Math.floor(lastAlertMs / MINUTE_MS) * MINUTE_MS;
+  const endMs = Math.floor(nowMs / MINUTE_MS) * MINUTE_MS;
+  const keys = [];
+  for (let ms = startMs; ms <= endMs; ms += MINUTE_MS) keys.push(minuteKey(ms));
+  const counts = await sumMinuteHashes(redis, keys);
+  const google = Object.fromEntries(Object.entries(counts).filter(([field]) => !field.startsWith('firestore|')));
+  return sumMatching(google, pattern) === 0;
+}
+
 async function runGoogleCostCycle(redis, { alertClient, nowMs = Date.now(), fetchImpl, token } = {}) {
   const collected = await collectGoogleUsage(redis, { nowMs, fetchImpl, token });
   const lastHour = await readWindow(redis, { hours: 1, nowMs });
   const last6h = await readWindow(redis, { hours: 6, nowMs });
-  const alerts = evaluateCostAlerts({ lastHour, last6h });
-  for (const alert of alerts) {
+  const alerts = [];
+  for (const alert of evaluateCostAlerts({ lastHour, last6h })) {
+    if (await isRepeatedRatioAlert(redis, alert.metric, nowMs)) continue;
     await alertClient?.sendAlert?.(alert);
+    if (RATIO_ALERT_USAGE[alert.metric]) {
+      await redis.set(ratioAlertKey(alert.metric), String(nowMs), 'EX', RATIO_ALERT_TTL_SECONDS);
+    }
+    alerts.push(alert);
   }
   logStructured('info', 'Ciclo de custo Google concluído', {
     service: 'google-usage-cost',
@@ -361,10 +411,12 @@ module.exports = {
   bucketSeries,
   collectGoogleUsage,
   recordRideCompletionForCost,
+  recordRideAcceptanceForCost,
   readWindow,
   evaluateCostAlerts,
   runGoogleCostCycle,
   minuteKey,
   hourKey,
-  RIDES_KEY
+  RIDES_KEY,
+  ACCEPTED_RIDES_KEY
 };

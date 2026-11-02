@@ -520,6 +520,11 @@ function registerSocketAcceptRideHandler({
                 // ✅ Emitir confirmação IMEDIATAMENTE para o motorista que solicitou o aceite
                 socket.emit('rideAccepted', acceptRideResponse);
 
+                // Denominador de rotas Google por corrida (monitor de custo).
+                require('../services/google-usage-cost-service')
+                    .recordRideAcceptanceForCost(redisPool.getConnection(), bookingIdToUse)
+                    .catch(() => {});
+
                 // ✅ Fallback direto para passageiro (garante transição de estado mesmo se listener falhar)
                 if (customerId) {
                     io.to(`customer_${customerId}`).emit('rideAccepted', {
