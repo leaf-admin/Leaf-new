@@ -96,16 +96,16 @@ async function listPage(firestore, { scope, role, userId, limit, offset = 0, cur
   let query = firestore.collection(scope.collections.receipts)
     .where(`historyIndex.${role}Id`, '==', userId);
   if (scope.namespace === 'sandbox') query = query.where('historyIndex.contextId', '==', scope.financialContextId);
-  const ordered = query.orderBy('historyIndex.listedAt', 'desc').orderBy(admin.firestore.FieldPath.documentId(), 'desc');
-  let page = ordered;
+  const newestFirst = (q) => q.orderBy('historyIndex.listedAt', 'desc').orderBy(admin.firestore.FieldPath.documentId(), 'desc');
+  const since = sinceMs === null ? null : admin.firestore.Timestamp.fromMillis(sinceMs);
+  // Firestore takes filters only before the cursor (startAfter).
+  let page = newestFirst(since ? query.where('historyIndex.listedAt', '>=', since) : query);
   if (cursor) {
     const decoded = decodeCursor(cursor);
     page = page.startAfter(admin.firestore.Timestamp.fromMillis(decoded.t), decoded.id);
   } else if (offset) {
     page = page.offset(offset);
   }
-  const since = sinceMs === null ? null : admin.firestore.Timestamp.fromMillis(sinceMs);
-  if (since) page = page.where('historyIndex.listedAt', '>=', since);
   // The total only changes the first screen; later pages skip the count query.
   const firstPage = !cursor && !offset;
   const [snapshot, count] = await Promise.all([
@@ -116,7 +116,7 @@ async function listPage(firestore, { scope, role, userId, limit, offset = 0, cur
   const periodHasMore = snapshot.docs.length > limit;
   let hasMore = periodHasMore;
   if (since && !periodHasMore) {
-    const older = await ordered.where('historyIndex.listedAt', '<', since).limit(1).get();
+    const older = await newestFirst(query.where('historyIndex.listedAt', '<', since)).limit(1).get();
     hasMore = !older.empty;
   }
   const receipts = docs.map(doc => {

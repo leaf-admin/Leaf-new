@@ -4505,6 +4505,17 @@ describe('prototype ride screens', () => {
       expect(screen.getByText('Líquido nos últimos 30 dias')).toBeTruthy();
     });
 
+    it('stops paging the period after a failed page instead of retrying in a loop', async () => {
+      mockGetBookingHistory
+        .mockResolvedValueOnce({ ...result, pageInfo: { hasNextPage: true, endCursor: 'c1' } })
+        .mockResolvedValue({ success: false, error: 'Erro ao buscar histórico' });
+      usePrototypeRideRuntime.mockReturnValue(runtime({ activeRole: 'driver' }));
+      render(<RobotaxiTripHistoryScreen navigation={navigation()} route={{ key: 'activity' }} />);
+      await waitFor(() => expect(mockGetBookingHistory).toHaveBeenCalledTimes(2));
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 50)); });
+      expect(mockGetBookingHistory).toHaveBeenCalledTimes(2);
+    });
+
     it('does not present a truncated page as the whole driver history', async () => {
       const oldBooking = { ...booking, completedAt: new Date(Date.now() - 60 * 86400000).toISOString() };
       mockGetBookingHistory.mockResolvedValueOnce({ ...result, bookings: [oldBooking], pageInfo: { hasNextPage: true, endCursor: '10' } });
