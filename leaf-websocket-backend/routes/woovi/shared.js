@@ -1920,6 +1920,7 @@ async function processPaymentConfirmation(chargeId, rideId, amount, passengerId,
     const paymentDispatchService = require('../../services/payment-dispatch-service');
     const redisPool = require('../../utils/redis-pool');
     const { applyConfirmedRideExtension } = require('../../services/ride-lifecycle-service');
+    const whatsappPaymentNotificationService = require('../../services/whatsapp-payment-notification-service');
     const paymentService = new PaymentService();
     const amountInReais = amount ? (amount / 100).toFixed(2) : null;
     const amountInCents = Number.isFinite(Number(amount)) ? Math.round(Number(amount)) : 0;
@@ -2286,6 +2287,17 @@ async function processPaymentConfirmation(chargeId, rideId, amount, passengerId,
         chargeId,
         error: markError.message
       });
+    }
+
+    if (whatsappPaymentNotificationService.getWhatsAppPaymentNotificationConfig().enabled) {
+      Promise.resolve()
+        .then(() => redisPool.ensureConnection())
+        .then(() => whatsappPaymentNotificationService.sendPaymentConfirmedNotification({
+          redis: redisPool.getConnection(),
+          chargeId,
+          amountInCents
+        }))
+        .catch(() => {});
     }
 
     try {
