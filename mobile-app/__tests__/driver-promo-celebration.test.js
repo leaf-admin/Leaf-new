@@ -35,6 +35,17 @@ describe('resolveDriverPromoCelebration', () => {
     ).toEqual({ bookingId: 'booking_1', paidCents: 2497, tollCents: 0, feeCents: 99, netCents: 2398 });
   });
 
+  it('celebrates the payload the backend sends for a normal completion', () => {
+    expect(
+      resolveDriverPromoCelebration({
+        success: true,
+        bookingId: 'booking_1',
+        completionType: 'COMPLETED',
+        fareBreakdown: { financialSnapshot: promoSnapshot() },
+      }),
+    ).toMatchObject({ bookingId: 'booking_1', netCents: 2398 });
+  });
+
   it('keeps the toll inside what the driver received', () => {
     const celebration = resolveDriverPromoCelebration({
       financialSnapshot: promoSnapshot({
