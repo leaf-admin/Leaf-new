@@ -1,17 +1,14 @@
 import leafTypography from '../../components/prototype/LeafTypography';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, ScrollView, StatusBar, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, Animated, Easing, ScrollView, StatusBar, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import LeafTouchable from '../../components/design-system/LeafTouchable';
-import { useIsFocused } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LeafRootTabs } from '../../components/prototype/PrototypeScaffold';
-import { LeafObjectIcon } from '../../components/prototype/LeafVisualElements';
 import { Ionicons } from '@expo/vector-icons';
 import PrototypeScreenTransition from '../../components/prototype/PrototypeScreenTransition';
 import PrototypeDismissibleSheet from '../../components/prototype/PrototypeDismissibleSheet';
 import {
   PrototypeMenuCloseButton,
-  PrototypeMenuSection,
   PrototypeMenuSurface,
 } from '../../components/prototype/PrototypeMenuSurface';
 import { ListSkeleton, SkeletonLoader } from '../../components/LoadingStates';
@@ -22,14 +19,15 @@ import { navigateLeafRootTab } from '../../navigation/leafRootTabNavigation';
 import {
   buildTripFinancialTotals,
   formatCurrencyBRL,
+  resolveTripDisplayAmount,
   resolveTripDisplayLabel,
+  resolveTripTollAmount,
 } from './tripFinancialSummary';
 import { LeafButton, LeafEmptyState } from '../../components/prototype/LeafRideUI';
 import BookingHistoryService, { BOOKING_HISTORY_CACHE_TTL_MS } from '../../services/BookingHistoryService';
-import { buildDriverHistoryStats, resolveServerPeriodEarnings, useDriverEarningsReport } from './driverEarningsReport';
-import { formatTripDateLabel, resolveTripAddressLabel, shortTripAddressLabel } from './tripAddressPresentation';
+import { resolveTripAddressLabel, shortTripAddressLabel } from './tripAddressPresentation';
 
-const { color, typography } = robotaxiPrototypeTokens;
+const { color, typography, motion } = robotaxiPrototypeTokens;
 const SURFACE_TOP_PADDING = 20;
 const SURFACE_BOTTOM_PADDING = 18;
 const BACKDROP_COLOR = 'transparent';
@@ -80,43 +78,27 @@ function formatHistoryValue(item, isDriverRole) {
   });
 }
 
-// `partial`: only the latest page is loaded. The passenger's Activity then said
-// "Viagens 10" while the account showed 58 trips; the labels now say these are
-// the latest trips, not the total.
-function buildHistoryStats(history, isDriverRole, { partial = false } = {}) {
-  const totals = buildTripFinancialTotals(history, {
-    role: isDriverRole ? 'driver' : 'passenger',
-  });
-  const totalTrips = totals.count;
-  const totalAmount = isDriverRole ? totals.totalNet : totals.totalGross;
-  const knownAmountCount = isDriverRole ? totals.netKnownCount : totals.grossKnownCount;
+const MONTH_NAMES = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+const WEEKDAY_NAMES = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
 
-  return [
-    {
-      key: 'rides',
-      label: isDriverRole ? 'Concluídas' : partial ? 'Últimas viagens' : 'Viagens',
-      value: String(totalTrips),
-    },
-    {
-      key: 'amount',
-      label: isDriverRole ? 'Total líquido' : partial ? 'Pago nessas viagens' : 'Total pago',
-      value:
-        totalTrips > 0 && knownAmountCount === totalTrips
-          ? formatCurrencyBRL(totalAmount)
-          : 'Indisponível',
-    },
-  ];
+function isCancelledStatus(item) {
+  return ['CANCELLED', 'CANCELED'].includes(String(item?.status || '').toUpperCase());
 }
 
-// Period filter of the receipts list. The server returns newest first and has no
+// Period tabs of the statement. The server returns newest first and has no
 // date parameter, so the list filters what is loaded and keeps loading older
-// pages until the chosen period is covered.
-const HISTORY_DATE_FILTERS = [
-  { key: 'all', label: 'Tudo', days: null },
-  { key: 'today', label: 'Hoje', days: 0 },
-  { key: '7d', label: '7 dias', days: 7 },
-  { key: '30d', label: '30 dias', days: 30 },
-];
+// pages until the chosen period is covered. "Tudo" pages on demand instead.
+const HISTORY_PERIODS = {
+  all: { label: 'Tudo', days: null },
+  today: { label: 'Hoje', days: 0 },
+  '7d': { label: '7 dias', days: 7 },
+  '30d': { label: '30 dias', days: 30 },
+  month: { label: 'Mês', calendarMonth: true },
+};
+const PASSENGER_PERIOD_KEYS = ['7d', 'month', 'all'];
+const DRIVER_PERIOD_KEYS = ['7d', '30d', 'all'];
+const PERIOD_TAB_WIDTH = 84;
+const PERIOD_UNDERLINE_WIDTH = 56;
 
 function resolveHistoryItemTimeMs(item) {
   const value = item?.completedAt || item?.date || item?.tripdate || item?.startTime || item?.createdAt;
@@ -127,11 +109,12 @@ function resolveHistoryItemTimeMs(item) {
 }
 
 export function resolveHistoryFilterStartMs(filterKey, nowMs = Date.now()) {
-  const filter = HISTORY_DATE_FILTERS.find((entry) => entry.key === filterKey);
-  if (!filter || filter.days === null) return null;
+  const filter = HISTORY_PERIODS[filterKey];
+  if (!filter || (filter.days === null && !filter.calendarMonth)) return null;
   const start = new Date(nowMs);
   start.setHours(0, 0, 0, 0);
-  if (filter.days > 0) start.setDate(start.getDate() - (filter.days - 1));
+  if (filter.calendarMonth) start.setDate(1);
+  else if (filter.days > 0) start.setDate(start.getDate() - (filter.days - 1));
   return start.getTime();
 }
 
@@ -144,44 +127,171 @@ export function filterHistoryByStart(history, startMs) {
   });
 }
 
-function HistoryRow({ item, isDriverRole = false, last = false, onPress }) {
+function resolvePeriodTabLabel(periodKey, nowMs = Date.now()) {
+  if (periodKey !== 'month') return HISTORY_PERIODS[periodKey]?.label || '';
+  const name = MONTH_NAMES[new Date(nowMs).getMonth()];
+  return name.charAt(0).toUpperCase() + name.slice(1);
+}
+
+function resolvePeriodTotalLabel(periodKey, isDriverRole, { complete = true, count = 0, nowMs = Date.now() } = {}) {
+  const prefix = isDriverRole ? 'Líquido' : 'Pago';
+  if (periodKey === '7d') return `${prefix} nos últimos 7 dias`;
+  if (periodKey === '30d') return `${prefix} nos últimos 30 dias`;
+  if (periodKey === 'month') return `${prefix} em ${MONTH_NAMES[new Date(nowMs).getMonth()]}, até hoje`;
+  if (complete) return isDriverRole ? 'Líquido desde a primeira corrida' : 'Pago desde a primeira viagem';
+  const noun = isDriverRole ? (count === 1 ? 'corrida' : 'corridas') : count === 1 ? 'viagem' : 'viagens';
+  return count === 1 ? `${prefix} na última ${noun}` : `${prefix} nas últimas ${count} ${noun}`;
+}
+
+// Statement header: the period total plus receipt lines. A total is shown only
+// when each trip has a known role-appropriate amount; the toll and fee lines
+// appear only when the loaded receipts carry them.
+export function buildHistoryStatement(history, isDriverRole) {
+  const list = Array.isArray(history) ? history.filter(Boolean) : [];
+  const totals = buildTripFinancialTotals(list, {
+    role: isDriverRole ? 'driver' : 'passenger',
+  });
+  const totalTrips = totals.count;
+  const totalAmount = isDriverRole ? totals.totalNet : totals.totalGross;
+  const knownAmountCount = isDriverRole ? totals.netKnownCount : totals.grossKnownCount;
+  const amount = totalTrips > 0 && knownAmountCount === totalTrips ? totalAmount : null;
+  const completed = list.filter((item) => !isCancelledStatus(item));
+  const toll = list.reduce((sum, item) => sum + resolveTripTollAmount(item), 0);
+  const distance = completed.reduce((sum, item) => {
+    const km = Number(item?.distanceKm ?? item?.distance);
+    return sum + (Number.isFinite(km) && km > 0 ? km : 0);
+  }, 0);
+  const lines = [{ key: 'rides', label: isDriverRole ? 'Corridas' : 'Viagens', value: String(completed.length) }];
+  if (!isDriverRole && distance > 0) {
+    lines.push({ key: 'distance', label: 'Distância', value: `${distance.toLocaleString('pt-BR', { maximumFractionDigits: 0 })} km` });
+  }
+  if (toll > 0) lines.push({ key: 'toll', label: 'Pedágios', value: formatCurrencyBRL(toll) });
+  if (isDriverRole && totals.totalFees > 0 && totals.feeKnownCount === totalTrips) {
+    lines.push({ key: 'fees', label: 'Taxas', value: `− ${formatCurrencyBRL(totals.totalFees)}` });
+  }
+  return { amount, lines };
+}
+
+function splitCurrency(amount) {
+  const [whole, cents] = formatCurrencyBRL(amount).replace(/^R\$\s*/, '').split(',');
+  return { whole, cents: `,${cents}` };
+}
+
+function resolveDayParts(timeMs, nowMs = Date.now()) {
+  if (!Number.isFinite(timeMs)) return { key: 'undated', day: '', week: '', today: false };
+  const date = new Date(timeMs);
+  const now = new Date(nowMs);
+  const today = date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth() && date.getDate() === now.getDate();
+  return {
+    key: `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`,
+    day: String(date.getDate()),
+    week: today ? 'hoje' : WEEKDAY_NAMES[date.getDay()],
+    today,
+  };
+}
+
+function formatTime(timeMs) {
+  const date = new Date(timeMs);
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
+function PeriodTabs({ keys, activeKey, onChange }) {
+  const activeIndex = Math.max(0, keys.indexOf(activeKey));
+  const offset = useRef(new Animated.Value(activeIndex * PERIOD_TAB_WIDTH)).current;
+  useEffect(() => {
+    Animated.timing(offset, {
+      toValue: activeIndex * PERIOD_TAB_WIDTH,
+      duration: motion.timing.slow,
+      easing: Easing.bezier(...motion.bezier.snappy),
+      useNativeDriver: true,
+    }).start();
+  }, [activeIndex, offset]);
+
+  return (
+    <View style={styles.periodTabs} accessibilityRole="tablist" testID="robotaxi-history-date-filter">
+      {keys.map((key) => {
+        const active = key === activeKey;
+        const label = resolvePeriodTabLabel(key);
+        return (
+          <LeafTouchable
+            key={key}
+            onPress={() => onChange(key)}
+            style={styles.periodTab}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: active }}
+            accessibilityLabel={`Período: ${label}`}
+            testID={`robotaxi-history-date-filter-${key}`}
+          >
+            <Text style={[styles.periodTabText, active && styles.periodTabTextActive]}>{label}</Text>
+          </LeafTouchable>
+        );
+      })}
+      <Animated.View pointerEvents="none" style={[styles.periodUnderline, { transform: [{ translateX: offset }] }]} />
+    </View>
+  );
+}
+
+function HistoryRow({ item, isDriverRole = false, first = false, showDay = false, onPress }) {
   const routeLabels = splitRouteLabel(item);
-  const valueLabel = formatHistoryValue(item, isDriverRole);
+  const timeMs = resolveHistoryItemTimeMs(item);
+  const dayParts = resolveDayParts(timeMs);
+  const amount = resolveTripDisplayAmount(item, { role: isDriverRole ? 'driver' : 'passenger' });
+  const cancelled = isCancelledStatus(item);
+  const toll = resolveTripTollAmount(item);
   // Placeholder names are not information; show the counterparty only when known.
   const counterpartyName = String(isDriverRole ? item?.passengerName || '' : item?.driverName || '').trim();
   const counterpartyLabel = /^(passageiro|motorista) leaf$/i.test(counterpartyName) ? '' : counterpartyName;
-  const counterpartyTitle = isDriverRole ? 'Passageiro' : 'Motorista';
-  const distance = Number(item?.distanceKm ?? item?.distance);
-  const duration = Number(item?.durationMinutes ?? item?.duration);
-  const metrics = [formatTripDateLabel(item?.date || item?.completedAt || item?.createdAt, { compact: true }),
-    Number.isFinite(distance) && distance > 0 ? `${distance.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} km` : null,
-    Number.isFinite(duration) && duration > 0 ? `${Math.round(duration)} min` : null].filter(Boolean).join(' · ');
-  const status = String(item?.status || '').toUpperCase();
-  const completed = ['COMPLETE', 'COMPLETED'].includes(status);
-  const statusLabel = completed ? 'Concluída' : ['CANCELLED', 'CANCELED'].includes(status) ? 'Cancelada' : 'Registro da viagem';
+  const pickupLabel = shortTripAddressLabel(routeLabels.pickup);
+  const context = toll > 0
+    ? `inclui ${formatCurrencyBRL(toll)} de pedágio`
+    : isDriverRole && counterpartyLabel
+    ? counterpartyLabel
+    : pickupLabel && pickupLabel !== 'Origem indisponível'
+    ? `de ${pickupLabel}`
+    : '';
+  const chargedCancel = cancelled && Number(amount) > 0;
+  const meta = [chargedCancel ? 'Cancelada' : null, Number.isFinite(timeMs) ? formatTime(timeMs) : null, context]
+    .filter(Boolean)
+    .join(' · ');
+  const valueLabel = cancelled && !chargedCancel ? 'Cancelada' : formatHistoryValue(item, isDriverRole);
+  const destination = shortTripAddressLabel(routeLabels.dropoff);
+  const rule = first ? null : styles.rowRule;
 
   return (
     <LeafTouchable
       activeOpacity={0.82}
       onPress={onPress}
-      style={[styles.tripRow, last && styles.tripRowLast]}
+      style={styles.tripRow}
       testID={`robotaxi-history-row-${item?.id || item?.rideId || 'receipt'}`}
       accessibilityRole="button"
-      accessibilityLabel={`${routeLabels.dropoff}, ${valueLabel}, ${statusLabel}`}
+      accessibilityLabel={[dayParts.today ? 'Hoje' : dayParts.day ? `Dia ${dayParts.day}` : null, destination, valueLabel, cancelled ? 'Cancelada' : null].filter(Boolean).join(', ')}
     >
-      <LeafObjectIcon name="activity" size={44} />
-      <View style={styles.tripCopy}>
-        <Text style={styles.tripDestination} numberOfLines={1}>{shortTripAddressLabel(routeLabels.dropoff)}</Text>
-        <Text style={styles.tripDetail} numberOfLines={1}>{metrics}</Text>
-        <View style={styles.tripAmountRow}>
-          <Text style={styles.tripAmount}>{valueLabel} · {isDriverRole ? 'líquido' : 'total pago'}</Text>
-          {completed ? null : <Text style={styles.tripStatus}>{statusLabel}</Text>}
-        </View>
-        <Text style={styles.tripDetail} numberOfLines={1}>Partida: {shortTripAddressLabel(routeLabels.pickup)}</Text>
-        {counterpartyLabel ? <Text style={styles.tripDetail} numberOfLines={1}>{counterpartyTitle}: {counterpartyLabel}</Text> : null}
+      <View style={[styles.dayColumn, showDay && rule]}>
+        {showDay ? (
+          <>
+            <Text style={[styles.dayNumber, dayParts.today && styles.dayToday]}>{dayParts.day}</Text>
+            <Text style={[styles.dayWeek, dayParts.today && styles.dayWeekToday]}>{dayParts.week}</Text>
+          </>
+        ) : null}
       </View>
-      <Ionicons name="chevron-forward" size={13} color="#6A6A6A" />
+      <View style={[styles.tripBody, rule]}>
+        <View style={styles.tripCopy}>
+          <Text style={styles.tripDestination} numberOfLines={1}>{destination}</Text>
+          {meta ? <Text style={styles.tripDetail} numberOfLines={1}>{meta}</Text> : null}
+        </View>
+        <Text style={[styles.tripAmount, cancelled && !chargedCancel && styles.tripAmountMuted]}>{valueLabel}</Text>
+      </View>
     </LeafTouchable>
+  );
+}
+
+function ReceiptLine({ label, value }) {
+  return (
+    <View style={styles.receiptLine}>
+      <Text style={styles.receiptLabel}>{label}</Text>
+      <View style={styles.receiptLeader} />
+      <Text style={styles.receiptValue}>{value}</Text>
+    </View>
   );
 }
 
@@ -191,7 +301,6 @@ export default function RobotaxiTripHistoryScreen({ navigation, route }) {
   const { height: windowHeight } = useWindowDimensions();
   const { activeRole, profileUid, lastReceipt } = usePrototypeRideRuntime();
   const [panelHeight, setPanelHeight] = useState(windowHeight);
-  const isScreenFocused = useIsFocused();
   const isDriverRole = activeRole === 'driver';
   const historyRole = isDriverRole ? 'DRIVER' : 'CUSTOMER';
   const historyRevision = lastReceipt?.receiptId || lastReceipt?.id || lastReceipt?.rideId || null;
@@ -223,7 +332,10 @@ export default function RobotaxiTripHistoryScreen({ navigation, route }) {
   const mountedRef = useRef(false);
   const pendingHistoryRef = useRef(null);
   const { bookings: loadedHistory, loading: loadingHistory, loadingMore, refreshing, error: historyError, pageInfo } = visibleHistory;
-  const [dateFilterKey, setDateFilterKey] = useState('all');
+  const periodKeys = isDriverRole ? DRIVER_PERIOD_KEYS : PASSENGER_PERIOD_KEYS;
+  const [chosenPeriodKey, setDateFilterKey] = useState(null);
+  // The middle tab (this month, or 30 days for the driver) opens by default.
+  const dateFilterKey = periodKeys.includes(chosenPeriodKey) ? chosenPeriodKey : periodKeys[1];
   const dateFilterStartMs = useMemo(() => resolveHistoryFilterStartMs(dateFilterKey), [dateFilterKey]);
   const history = useMemo(
     () => filterHistoryByStart(loadedHistory, dateFilterStartMs),
@@ -239,32 +351,14 @@ export default function RobotaxiTripHistoryScreen({ navigation, route }) {
       pageInfo?.hasNextPage &&
       (!Number.isFinite(oldestLoadedMs) || oldestLoadedMs >= dateFilterStartMs),
   );
-  const driverEarningsReport = useDriverEarningsReport({
-    driverId: isDriverRole ? profileUid : '',
-    enabled: isDriverRole && isScreenFocused,
-    refreshKey: String(historyRevision || ''),
+  // A period total is a total only once its pages are loaded.
+  const loadingSummary = loadingHistory || periodNeedsMorePages;
+  const statement = useMemo(() => buildHistoryStatement(history, isDriverRole), [history, isDriverRole]);
+  const totalLabel = resolvePeriodTotalLabel(dateFilterKey, isDriverRole, {
+    complete: !pageInfo?.hasNextPage,
+    count: history.length,
   });
-  const driverServerPeriod = useMemo(
-    () => (isDriverRole ? resolveServerPeriodEarnings(driverEarningsReport.report) : null),
-    [driverEarningsReport.report, isDriverRole],
-  );
-  const loadingSummary = loadingHistory || (isDriverRole && driverEarningsReport.pending);
-  const stats = useMemo(
-    () =>
-      isDateFiltered
-        ? buildHistoryStats(history, isDriverRole)
-        : isDriverRole
-        ? buildDriverHistoryStats({
-            serverPeriod: driverServerPeriod,
-            historyComplete: !pageInfo?.hasNextPage,
-            loadedListStats: buildHistoryStats(history, true),
-            loadedRideCount: Array.isArray(history) ? history.length : 0,
-          })
-        : buildHistoryStats(history, false, { partial: Boolean(pageInfo?.hasNextPage) && !isDateFiltered }),
-    [driverServerPeriod, history, isDateFiltered, isDriverRole, pageInfo?.hasNextPage],
-  );
-  const primaryStat = stats[0] || null;
-  const secondaryStat = stats[1] || null;
+  const totalParts = statement.amount === null ? null : splitCurrency(statement.amount);
 
   usePrototypeMapOcclusion({
     routeKey: route?.key,
@@ -363,6 +457,8 @@ export default function RobotaxiTripHistoryScreen({ navigation, route }) {
     });
   }, [isDriverRole, navigation]);
 
+  const showStatement = loadingHistory || history.length > 0 || (isDateFiltered && periodNeedsMorePages);
+
   return (
     <PrototypeScreenTransition>
       <View
@@ -382,11 +478,6 @@ export default function RobotaxiTripHistoryScreen({ navigation, route }) {
             eyebrow={isDriverRole ? 'Corridas concluídas' : 'Histórico de viagens'}
             title={isRootTab ? 'Atividade' : isDriverRole ? 'Corridas' : 'Viagens e recibos'}
             pageTitle={isRootTab}
-            subtitle={
-              isDriverRole
-                ? 'Recibos, trajetos e valores líquidos em uma leitura direta.'
-                : 'Origem, destino e comprovantes das suas últimas viagens.'
-            }
             fullScreen
             style={{
               paddingTop: insets.top + SURFACE_TOP_PADDING,
@@ -402,53 +493,34 @@ export default function RobotaxiTripHistoryScreen({ navigation, route }) {
             </View>}
           >
             {loadedHistory.length > 0 ? (
-              <View style={styles.dateFilterRow} accessibilityRole="tablist" testID="robotaxi-history-date-filter">
-                {HISTORY_DATE_FILTERS.map((filter) => {
-                  const active = filter.key === dateFilterKey;
-                  return (
-                    <LeafTouchable
-                      key={filter.key}
-                      onPress={() => setDateFilterKey(filter.key)}
-                      style={[styles.dateFilterChip, active && styles.dateFilterChipActive]}
-                      accessibilityRole="tab"
-                      accessibilityState={{ selected: active }}
-                      accessibilityLabel={`Período: ${filter.label}`}
-                      testID={`robotaxi-history-date-filter-${filter.key}`}
-                    >
-                      <Text style={[styles.dateFilterChipText, active && styles.dateFilterChipTextActive]}>
-                        {filter.label}
-                      </Text>
-                    </LeafTouchable>
-                  );
-                })}
+              <PeriodTabs keys={periodKeys} activeKey={dateFilterKey} onChange={setDateFilterKey} />
+            ) : null}
+            {showStatement ? (
+              <View style={styles.statement} testID="robotaxi-history-statement">
+                <Text style={styles.totalLabel}>{totalLabel}</Text>
+                {loadingSummary ? (
+                  <View testID="robotaxi-history-summary-loading-amount" accessibilityRole="progressbar" accessibilityLabel="Carregando total das viagens">
+                    <SkeletonLoader width={160} height={48} style={{ marginTop: 8 }} />
+                    <SkeletonLoader width={220} height={14} style={{ marginTop: 14 }} />
+                  </View>
+                ) : (
+                  <>
+                    {totalParts ? (
+                      <View style={styles.totalRow} accessible accessibilityLabel={`${totalLabel}: ${formatCurrencyBRL(statement.amount)}`}>
+                        <Text style={styles.totalCurrency}>R$</Text>
+                        <Text style={styles.totalWhole}>{totalParts.whole}</Text>
+                        <Text style={styles.totalCents}>{totalParts.cents}</Text>
+                      </View>
+                    ) : <Text style={styles.totalUnavailable}>Indisponível</Text>}
+                    <View style={styles.receiptLines}>
+                      {statement.lines.map((line) => <ReceiptLine key={line.key} label={line.label} value={line.value} />)}
+                    </View>
+                  </>
+                )}
               </View>
             ) : null}
-            {loadingHistory || history.length > 0 ? <View style={styles.summaryCardGrid}>
-              {primaryStat ? (
-                <View style={styles.summaryCard}>
-                  <Text style={styles.summaryCardLabel}>{primaryStat.label}</Text>
-                  {loadingSummary ? (
-                    <View testID="robotaxi-history-summary-loading-rides" accessibilityRole="progressbar" accessibilityLabel="Carregando número de viagens">
-                      <SkeletonLoader width={48} height={28} style={{ marginTop: 6 }} />
-                    </View>
-                  ) : <Text style={styles.summaryCardValue}>{primaryStat.value}</Text>}
-                </View>
-              ) : null}
-              {secondaryStat ? (
-                <View style={[styles.summaryCard, styles.summaryCardAccent]}>
-                  <Text style={styles.summaryCardLabel}>{secondaryStat.label}</Text>
-                  {loadingSummary ? (
-                    <View testID="robotaxi-history-summary-loading-amount" accessibilityRole="progressbar" accessibilityLabel="Carregando total das viagens">
-                      <SkeletonLoader width={112} height={28} style={{ marginTop: 6 }} />
-                    </View>
-                  ) : <Text style={[styles.summaryCardValue, styles.summaryCardValueAccent]}>
-                    {secondaryStat.value}
-                  </Text>}
-                </View>
-              ) : null}
-            </View> : null}
 
-            <PrototypeMenuSection title={isDriverRole ? 'Recibos recentes' : 'Viagens recentes'} style={styles.historySection}>
+            <View style={[styles.historySection, showStatement && styles.historySectionRuled]}>
               <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
                 {loadingHistory ? (
                   <View style={styles.centerState} testID="robotaxi-history-loading">
@@ -476,7 +548,8 @@ export default function RobotaxiTripHistoryScreen({ navigation, route }) {
                       key={item?.id || `trip-history-${index}`}
                       item={item}
                       isDriverRole={isDriverRole}
-                      last={index === history.length - 1}
+                      first={index === 0}
+                      showDay={index === 0 || resolveDayParts(resolveHistoryItemTimeMs(item)).key !== resolveDayParts(resolveHistoryItemTimeMs(history[index - 1])).key}
                       onPress={() => openReceipt(item)}
                     />
                   ))}
@@ -497,7 +570,7 @@ export default function RobotaxiTripHistoryScreen({ navigation, route }) {
                   ) : (
                     <LeafEmptyState
                       icon="calendar-outline"
-                      title="Nenhuma corrida neste período"
+                      title={isDriverRole ? 'Nenhuma corrida neste período' : 'Nenhuma viagem neste período'}
                       message="Escolha outro período para ver mais recibos."
                       actionLabel="Ver tudo"
                       onAction={() => setDateFilterKey('all')}
@@ -517,7 +590,7 @@ export default function RobotaxiTripHistoryScreen({ navigation, route }) {
                   />
                 )}
               </ScrollView>
-            </PrototypeMenuSection>
+            </View>
           </PrototypeMenuSurface>
         </PrototypeDismissibleSheet>
         {isRootTab ? <LeafRootTabs navigation={navigation} insets={insets} active="activity" /> : null}
@@ -529,14 +602,19 @@ export default function RobotaxiTripHistoryScreen({ navigation, route }) {
 const styles = StyleSheet.create({
   headerAccessory: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   refreshStatus: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10 },
-  tripRow: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#E5E5E5' },
-  tripRowLast: { borderBottomWidth: 0 },
-  tripCopy: { flex: 1, minWidth: 0, gap: 3 },
-  tripAmountRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  tripDestination: { ...leafTypography.semiBold, fontSize: 16, lineHeight: 22, color: '#222222' },
+  tripRow: { flexDirection: 'row', gap: 8 },
+  dayColumn: { width: 40, alignItems: 'center', paddingTop: 10 },
+  dayNumber: { ...leafTypography.semiBold, fontSize: 16, lineHeight: 22, color: '#222222', fontVariant: ['tabular-nums'] },
+  dayToday: { color: '#1A330E' },
+  dayWeek: { ...leafTypography.medium, fontSize: 11, lineHeight: 13, color: '#6A6A6A' },
+  dayWeekToday: { ...leafTypography.semiBold, color: '#1A330E' },
+  rowRule: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#E5E5E5' },
+  tripBody: { flex: 1, minWidth: 0, minHeight: 58, paddingVertical: 9, flexDirection: 'row', justifyContent: 'space-between', gap: 12 },
+  tripCopy: { flex: 1, minWidth: 0 },
+  tripDestination: { ...leafTypography.medium, fontSize: 15, lineHeight: 21, color: '#222222' },
   tripDetail: { ...leafTypography.regular, fontSize: 13, lineHeight: 18, color: '#6A6A6A' },
-  tripAmount: { ...leafTypography.medium, fontSize: 14, lineHeight: 20, color: '#222222' },
-  tripStatus: { ...leafTypography.medium, fontSize: 12, lineHeight: 17, color: '#6A6A6A', paddingHorizontal: 8, paddingVertical: 1, borderRadius: 8, backgroundColor: '#F2F2F2', overflow: 'hidden' },
+  tripAmount: { ...leafTypography.semiBold, fontSize: 15, lineHeight: 21, color: '#222222', fontVariant: ['tabular-nums'] },
+  tripAmountMuted: { color: '#6A6A6A' },
   container: {
     flex: 1,
     backgroundColor: '#FFFFFF',
@@ -547,76 +625,115 @@ const styles = StyleSheet.create({
   body: {
     flex: 1,
   },
-  dateFilterRow: {
+  periodTabs: {
     flexDirection: 'row',
-    gap: 8,
-    marginBottom: 14,
+    marginTop: -4,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#E5E5E5',
   },
-  dateFilterChip: {
-    minHeight: 36,
-    paddingHorizontal: 14,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: '#E3E3E0',
-    backgroundColor: '#FFFFFF',
-    alignItems: 'center',
+  periodTab: {
+    width: PERIOD_TAB_WIDTH,
+    height: 44,
     justifyContent: 'center',
   },
-  dateFilterChipActive: {
-    borderColor: '#1A330E',
+  periodTabText: {
+    ...leafTypography.medium,
+    fontSize: 14,
+    color: '#6A6A6A',
+  },
+  periodTabTextActive: {
+    ...leafTypography.semiBold,
+    color: '#1A330E',
+  },
+  periodUnderline: {
+    position: 'absolute',
+    left: 0,
+    bottom: -1,
+    width: PERIOD_UNDERLINE_WIDTH,
+    height: 2,
     backgroundColor: '#1A330E',
   },
-  dateFilterChipText: {
+  statement: {
+    marginTop: 20,
+    marginBottom: 16,
+  },
+  totalLabel: {
+    ...leafTypography.regular,
+    fontSize: 14,
+    lineHeight: 20,
+    color: color.text.secondary,
+  },
+  totalRow: {
+    marginTop: 2,
+    flexDirection: 'row',
+    alignItems: 'baseline',
+  },
+  totalCurrency: {
     ...leafTypography.medium,
-    fontSize: 13,
+    marginRight: 6,
+    fontSize: 20,
+    lineHeight: 24,
+    color: '#1A330E',
+  },
+  totalWhole: {
+    ...leafTypography.semiBold,
+    fontSize: 54,
+    lineHeight: 60,
+    letterSpacing: -2.2,
+    color: '#1A330E',
+    fontVariant: ['tabular-nums'],
+  },
+  totalCents: {
+    ...leafTypography.medium,
+    fontSize: 24,
+    lineHeight: 30,
+    letterSpacing: -0.4,
+    color: '#56764A',
+    fontVariant: ['tabular-nums'],
+  },
+  totalUnavailable: {
+    ...leafTypography.semiBold,
+    marginTop: 6,
+    fontSize: 24,
+    lineHeight: 30,
+    color: color.text.primary,
+  },
+  receiptLines: {
+    marginTop: 12,
+    gap: 5,
+  },
+  receiptLine: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 6,
+  },
+  receiptLabel: {
+    ...leafTypography.regular,
+    fontSize: 14,
+    lineHeight: 20,
     color: '#3A3A38',
   },
-  dateFilterChipTextActive: {
-    color: '#FFFFFF',
-  },
-  summaryCardGrid: {
-    flexDirection: 'row',
-    gap: 10,
-    marginBottom: 14,
-  },
-  summaryCard: {
+  // Dotted leader of a printed receipt between the label and its value.
+  receiptLeader: {
     flex: 1,
-    minHeight: 86,
-    borderRadius: 0,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: '#E5E5E5',
-    backgroundColor: 'transparent',
-    paddingHorizontal: 0,
-    paddingVertical: 12,
-    justifyContent: 'center',
+    minWidth: 12,
+    marginBottom: 5,
+    borderBottomWidth: 1,
+    borderStyle: 'dotted',
+    borderColor: '#B9BEB5',
   },
-  summaryCardAccent: {
-    backgroundColor: 'transparent',
-    borderColor: '#E5E5E5',
-  },
-  summaryCardLabel: {
-    color: color.text.secondary,
-    ...leafTypography.semiBold,
-    fontSize: typography.micro.size,
-    lineHeight: typography.micro.lineHeight,
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-  },
-  summaryCardValue: {
-    marginTop: 6,
+  receiptValue: {
+    ...leafTypography.medium,
+    fontSize: 14,
+    lineHeight: 20,
     color: color.text.primary,
-    ...leafTypography.semiBold,
-    fontSize: 24,
-    lineHeight: 28,
-  },
-  summaryCardValueAccent: {
-    color: '#1A330E',
+    fontVariant: ['tabular-nums'],
   },
   scroll: {
     flex: 1,
   },
-  historySection: { flex: 1, minHeight: 0, marginBottom: 0 },
+  historySection: { flex: 1, minHeight: 0 },
+  historySectionRuled: { borderTopWidth: 1.5, borderTopColor: '#222222' },
   scrollContent: {
     paddingBottom: 6,
   },

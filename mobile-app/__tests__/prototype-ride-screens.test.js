@@ -4322,7 +4322,7 @@ describe('prototype ride screens', () => {
       bookings: [
         {
           id: 'trip_1',
-          date: '02 abr 2026',
+          date: new Date().toISOString(),
           fare: 16.5,
           driverNetAmount: 15.01,
           totalFees: 1.49,
@@ -4347,13 +4347,18 @@ describe('prototype ride screens', () => {
     );
 
     expect(getByText('Corridas concluídas')).toBeTruthy();
-    expect(getByText('Corridas')).toBeTruthy();
-    expect(getByText('Recibos, trajetos e valores líquidos em uma leitura direta.')).toBeTruthy();
+    expect(getAllByText('Corridas').length).toBeGreaterThan(0);
     await waitFor(() => {
-      expect(getByText('Partida: 1540 Mission St')).toBeTruthy();
+      expect(getByText(/de 1540 Mission St$/)).toBeTruthy();
       expect(getByText('1 Ferry Building')).toBeTruthy();
-      expect(getAllByText(/R\$ 15,01/)).toHaveLength(2);
+      expect(getAllByText(/R\$ 15,01/)).toHaveLength(1);
     });
+    expect(getByText('Líquido nos últimos 30 dias')).toBeTruthy();
+    expect(getByText('15')).toBeTruthy();
+    expect(getByText(',01')).toBeTruthy();
+    expect(getByText('Taxas')).toBeTruthy();
+    expect(getByText('− R$ 1,49')).toBeTruthy();
+    expect(getByText('hoje')).toBeTruthy();
     expect(mockGetBookingHistory).toHaveBeenCalledWith('customer_1', 'DRIVER', { first: 10, after: null, revision: 'trip_1' });
     fireEvent.press(getByTestId('robotaxi-history-row-trip_1'));
     expect(navigation.navigate).toHaveBeenCalledWith(
@@ -4367,7 +4372,7 @@ describe('prototype ride screens', () => {
   });
 
   describe('activity loading and refresh', () => {
-    const booking = { id: 'cached_trip', grossAmount: 22.4, driverNetAmount: 18.9, pickupAddress: 'Rua A', destinationAddress: 'Destino salvo', status: 'COMPLETE' };
+    const booking = { id: 'cached_trip', completedAt: new Date().toISOString(), grossAmount: 22.4, driverNetAmount: 18.9, pickupAddress: 'Rua A', destinationAddress: 'Destino salvo', status: 'COMPLETE' };
     const result = { success: true, bookings: [booking], pageInfo: { hasNextPage: false, endCursor: null } };
     const runtime = (overrides = {}) => buildReceiptRuntime({ profileUid: 'activity_user', lastReceipt: null, ...overrides });
     const navigation = () => ({ navigate: jest.fn(), canGoBack: () => false });
@@ -4380,7 +4385,6 @@ describe('prototype ride screens', () => {
       const unsubscribe = jest.fn();
       const nav = { ...navigation(), addListener: jest.fn((event, listener) => { focus = listener; return unsubscribe; }) };
       const screen = render(<RobotaxiTripHistoryScreen navigation={nav} route={{ key: 'activity' }} />);
-      expect(screen.getByTestId('robotaxi-history-summary-loading-rides')).toBeTruthy();
       expect(screen.getByTestId('robotaxi-history-summary-loading-amount')).toBeTruthy();
       expect(screen.queryByText('0')).toBeNull();
       expect(screen.queryByText('--')).toBeNull();
@@ -4467,46 +4471,54 @@ describe('prototype ride screens', () => {
       expect(mockGetBookingHistory).toHaveBeenCalledTimes(2);
     });
 
-    it('shows the driver totals from the server report with their period instead of summing the loaded page', async () => {
-      mockGetBookingHistory.mockResolvedValueOnce({ ...result, pageInfo: { hasNextPage: true, endCursor: '10' } });
-      global.fetch = jest.fn().mockResolvedValue({
-        json: async () => ({
-          success: true,
-          report: { dailySeries: [], totalCompletedRides: 37, totalNetAmount: 1480.9, dailySeriesWindowDays: 30 },
-        }),
-      });
+    it('totals the driver period from the loaded receipts once the period is covered', async () => {
+      const older = { ...booking, id: 'older_trip', completedAt: new Date(Date.now() - 40 * 86400000).toISOString() };
+      mockGetBookingHistory
+        .mockResolvedValueOnce({ ...result, pageInfo: { hasNextPage: true, endCursor: '10' } })
+        .mockResolvedValueOnce({ ...result, bookings: [older], pageInfo: { hasNextPage: true, endCursor: '20' } });
+      global.fetch = jest.fn();
       usePrototypeRideRuntime.mockReturnValue(runtime({ activeRole: 'driver' }));
       const screen = render(<RobotaxiTripHistoryScreen navigation={navigation()} route={{ key: 'activity' }} />);
-      await waitFor(() => expect(screen.getByText('Concluídas · 30 dias')).toBeTruthy());
-      expect(screen.getByText('37')).toBeTruthy();
-      expect(screen.getByText('Líquido · 30 dias')).toBeTruthy();
-      expect(screen.getByText('R$ 1.480,90')).toBeTruthy();
-      expect(global.fetch).toHaveBeenCalledTimes(1);
-      expect(global.fetch.mock.calls[0][0]).toMatch(/\/api\/drivers\/activity_user\/earnings$/);
+      await waitFor(() => expect(screen.getByText('Líquido nos últimos 30 dias')).toBeTruthy());
+      await waitFor(() => expect(mockGetBookingHistory).toHaveBeenCalledTimes(2));
+      expect(screen.getByText('18')).toBeTruthy();
+      expect(screen.getByText(',90')).toBeTruthy();
+      expect(screen.getByText('Taxas')).toBeTruthy();
+      expect(screen.getByText('− R$ 3,50')).toBeTruthy();
+      expect(screen.queryByTestId('robotaxi-history-row-older_trip')).toBeNull();
+      expect(global.fetch).not.toHaveBeenCalled();
     });
 
-    it('does not present a truncated page as the driver total when the server report is unavailable', async () => {
-      mockGetBookingHistory.mockResolvedValueOnce({ ...result, pageInfo: { hasNextPage: true, endCursor: '10' } });
+    it('does not present a truncated page as the whole driver history', async () => {
+      const oldBooking = { ...booking, completedAt: new Date(Date.now() - 60 * 86400000).toISOString() };
+      mockGetBookingHistory.mockResolvedValueOnce({ ...result, bookings: [oldBooking], pageInfo: { hasNextPage: true, endCursor: '10' } });
       usePrototypeRideRuntime.mockReturnValue(runtime({ activeRole: 'driver' }));
       const screen = render(<RobotaxiTripHistoryScreen navigation={navigation()} route={{ key: 'activity' }} />);
-      await waitFor(() => expect(screen.getByTestId('robotaxi-history-row-cached_trip')).toBeTruthy());
-      await waitFor(() => expect(screen.getAllByText('Indisponível')).toHaveLength(2));
-      expect(screen.queryByText('1')).toBeNull();
-      expect(screen.queryByText('R$ 18,90')).toBeNull();
+      await waitFor(() => expect(screen.getByTestId('robotaxi-history-filter-empty')).toBeTruthy());
+      fireEvent.press(screen.getByTestId('robotaxi-history-date-filter-all'));
+      expect(screen.getByText('Líquido na última corrida')).toBeTruthy();
+      expect(screen.queryByText('Líquido desde a primeira corrida')).toBeNull();
+      expect(screen.getByText('Carregar mais')).toBeTruthy();
+      expect(mockGetBookingHistory).toHaveBeenCalledTimes(1);
     });
 
     it('appends pages without hiding the existing rows or duplicating a pending page request', async () => {
       let finishPage;
-      mockGetBookingHistory.mockResolvedValueOnce({ ...result, pageInfo: { hasNextPage: true, endCursor: '10' } })
+      // Older than this month: the default month tab is empty and does not page.
+      const oldBooking = { ...booking, completedAt: new Date(Date.now() - 60 * 86400000).toISOString() };
+      mockGetBookingHistory.mockResolvedValueOnce({ ...result, bookings: [oldBooking], pageInfo: { hasNextPage: true, endCursor: '10' } })
         .mockReturnValueOnce(new Promise(resolve => { finishPage = resolve; }));
       usePrototypeRideRuntime.mockReturnValue(runtime());
       const screen = render(<RobotaxiTripHistoryScreen navigation={navigation()} route={{ key: 'activity' }} />);
+      await waitFor(() => expect(screen.getByTestId('robotaxi-history-filter-empty')).toBeTruthy());
+      fireEvent.press(screen.getByTestId('robotaxi-history-date-filter-all'));
       await waitFor(() => expect(screen.getByTestId('robotaxi-history-row-cached_trip')).toBeTruthy());
+      expect(screen.getByText('Pago na última viagem')).toBeTruthy();
       fireEvent.press(screen.getByText('Carregar mais'));
       expect(screen.getByTestId('robotaxi-history-row-cached_trip')).toBeTruthy();
       expect(screen.queryByTestId('robotaxi-history-loading')).toBeNull();
       expect(mockGetBookingHistory).toHaveBeenLastCalledWith('activity_user', 'CUSTOMER', { first: 10, after: '10' });
-      await act(async () => finishPage({ ...result, bookings: [{ ...booking, id: 'second_page' }] }));
+      await act(async () => finishPage({ ...result, bookings: [{ ...oldBooking, id: 'second_page' }] }));
       expect(screen.getByTestId('robotaxi-history-row-second_page')).toBeTruthy();
       expect(screen.getByTestId('robotaxi-history-row-cached_trip')).toBeTruthy();
       expect(screen.getByText('2')).toBeTruthy();
@@ -4519,7 +4531,7 @@ describe('prototype ride screens', () => {
       bookings: [
         {
           id: 'trip_2',
-          date: '07 abr 2026',
+          date: new Date().toISOString(),
           value: 'R$ 22,40',
           pickupAddress: 'Rua A, 10',
           destinationAddress: 'Praça Senador Salgado Filho, Centro, Rio de Janeiro',
