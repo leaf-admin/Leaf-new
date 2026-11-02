@@ -250,7 +250,7 @@ describe('woovi webhook guards', () => {
     process.env.NODE_ENV = 'test';
     try {
       configureHttpMiddleware({
-        app: { use: jest.fn(), post: jest.fn(), get: jest.fn() },
+        app: { use: jest.fn(), post: jest.fn(), get: jest.fn(), disable: jest.fn() },
         server: {},
         express: { json, raw: jest.fn(), urlencoded: jest.fn() },
         cors: jest.fn(),
@@ -288,7 +288,7 @@ describe('woovi webhook guards', () => {
     process.env.NODE_ENV = 'test';
     try {
       configureHttpMiddleware({
-        app: { use: jest.fn(), post: jest.fn(), get: jest.fn() },
+        app: { use: jest.fn(), post: jest.fn(), get: jest.fn(), disable: jest.fn() },
         server: {},
         express: { json: jest.fn(() => jest.fn()), raw: jest.fn(), urlencoded },
         cors: jest.fn(),
