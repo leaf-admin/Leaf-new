@@ -1,5 +1,6 @@
 const express = require('express');
 const admin = require('firebase-admin');
+const { verifyFirebaseIdToken } = require('../utils/firebase-id-token');
 const multer = require('multer');
 const { authenticateJWT, requireRole } = require('../middleware/jwt-auth');
 const campaignCenterService = require('../services/campaign-center-service');
@@ -89,7 +90,7 @@ async function attachOptionalFirebaseUser(req, _res, next) {
 
   try {
     const token = authHeader.slice('Bearer '.length);
-    req.firebaseUser = await admin.auth().verifyIdToken(token);
+    req.firebaseUser = await verifyFirebaseIdToken(admin.auth(), token);
   } catch (error) {
     logStructured('debug', 'Token Firebase opcional ignorado em Campaign Center', {
       service: 'campaign-center',

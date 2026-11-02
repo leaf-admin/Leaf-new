@@ -11,6 +11,7 @@ const geofenceService = require('../services/geofence-service');
 const h3VisualPolicyService = require('../services/h3-visual-policy-service');
 const { resolvePricingModelMode } = require('../services/pricing');
 const { MAX_DYNAMIC_MARKUP_PERCENT } = require('../services/pricing/calculateFare');
+const { getAppPublicStats } = require('../services/app-public-stats-service');
 const router = express.Router();
 
 const TRUTHY_VALUES = new Set(['1', 'true', 'yes', 'on', 'sim']);
@@ -313,17 +314,15 @@ router.get('/runtime-config', async (req, res) => {
 
 /**
  * GET /api/app/stats
- * Buscar estatísticas do app
+ * Números reais do app (dados operacionais desde a abertura, 02/11/2026).
  */
 router.get('/stats', async (req, res) => {
     try {
-        const stats = {
-            activeUsers: '50K+',
-            totalTrips: '100K+',
-            averageRating: '4.8'
-        };
-
-        res.json(stats);
+        const firestore = require('../firebase-config').getFirestore?.();
+        if (!firestore) {
+            return res.status(503).json({ error: 'Estatísticas indisponíveis' });
+        }
+        res.json(await getAppPublicStats({ firestore }));
     } catch (error) {
         logError(error, '❌ Erro ao buscar estatísticas:', { service: 'app-routes-routes' });
         res.status(500).json({ error: 'Erro ao buscar estatísticas' });

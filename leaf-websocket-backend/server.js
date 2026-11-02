@@ -24,6 +24,7 @@ const cluster = require('cluster');
 const os = require('os');
 const cors = require('cors');
 const admin = require('firebase-admin');
+const { verifyFirebaseIdToken } = require('./utils/firebase-id-token');
 const firebaseConfig = require('./firebase-config');
 
 // Bootstrap do HTTP (fase de modularização)
@@ -339,7 +340,7 @@ async function verifyFirebaseTokenCached(token) {
     }
 
     const verifyPromise = (async () => {
-        const decodedToken = await admin.auth().verifyIdToken(token);
+        const decodedToken = await verifyFirebaseIdToken(admin.auth(), token);
         const nowInner = Date.now();
         const tokenExpMs = decodedToken?.exp ? decodedToken.exp * 1000 : nowInner + AUTH_TOKEN_CACHE_TTL_MS;
         const cacheExpiresAt = Math.min(tokenExpMs, nowInner + AUTH_TOKEN_CACHE_TTL_MS);

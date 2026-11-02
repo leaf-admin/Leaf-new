@@ -1,4 +1,5 @@
 const admin = require('firebase-admin');
+const { verifyFirebaseIdToken } = require('../utils/firebase-id-token');
 const firebaseConfig = require('../firebase-config');
 const { logError } = require('../utils/logger');
 
@@ -26,7 +27,7 @@ async function requireFirebaseUser(req, res, next) {
       // initializeFirebase already logs failures and can reuse an existing app.
     }
 
-    const decoded = await admin.auth().verifyIdToken(token);
+    const decoded = await verifyFirebaseIdToken(admin.auth(), token);
     const uid = String(decoded?.uid || '').trim();
     if (!uid) {
       return res.status(401).json({

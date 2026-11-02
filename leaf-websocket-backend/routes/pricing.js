@@ -1,5 +1,6 @@
 const express = require('express');
 const admin = require('firebase-admin');
+const { verifyFirebaseIdToken } = require('../utils/firebase-id-token');
 const redisPool = require('../utils/redis-pool');
 const fareEstimationService = require('../services/fare-estimation-service');
 const passengerDiscountBenefitService = require('../services/passenger-discount-benefit-service');
@@ -386,7 +387,7 @@ async function resolveOptionalFirebaseUserId(req) {
   if (!header.startsWith('Bearer ')) return '';
 
   try {
-    const decoded = await admin.auth().verifyIdToken(header.slice('Bearer '.length).trim());
+    const decoded = await verifyFirebaseIdToken(admin.auth(), header.slice('Bearer '.length).trim());
     return String(decoded?.uid || '').trim();
   } catch (_error) {
     return '';

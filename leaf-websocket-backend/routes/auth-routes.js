@@ -1,5 +1,6 @@
 const express = require('express');
 const admin = require('firebase-admin');
+const { verifyFirebaseIdToken } = require('../utils/firebase-id-token');
 // const firebaseConfig = require('../firebase-config');
 const { logger, logStructured } = require('../utils/logger');
 
@@ -43,56 +44,8 @@ async function resolveOptionalFirestoreUserData(uid, req) {
   }
 }
 
-// Endpoint para login e geração de token
-router.post('/login', async (req, res) => {
-  try {
-    const { phone, password, userType } = req.body;
-
-    // Validar entrada básica
-    if (!phone || !password || !userType) {
-      return res.status(400).json({
-        success: false,
-        message: 'Dados inválidos: phone, password e userType são obrigatórios'
-      });
-    }
-
-    // Simular autenticação (em produção, usar Firebase Auth)
-    const user = await authenticateUser(phone, password, userType);
-
-    if (!user) {
-      return res.status(401).json({
-        success: false,
-        message: 'Credenciais inválidas'
-      });
-    }
-
-    // Gerar token JWT simples
-    const token = 'mock-jwt-token-' + Date.now();
-
-    // Log de auditoria simples
-    logStructured('info', `📋 LOGIN: ${user.name} (${user.userType}) - ${req.ip}`, { service: 'auth-routes-routes' });
-
-    res.json({
-      success: true,
-      token,
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        phone: user.phone,
-        userType: user.userType
-      },
-      expiresIn: '24h'
-    });
-
-  } catch (error) {
-    logStructured('error', '❌ Erro no login:', error.message, { service: 'auth-routes-routes' });
-    res.status(400).json({
-      success: false,
-      message: error.message
-    });
-  }
-});
+// O login mock (POST /login, usuários simulados) foi removido em 02/11/2026:
+// o app entra pelo Firebase (OTP ou senha) e o painel por /api/admin/auth.
 
 // Endpoint para verificar token Firebase
 // GET /auth/verify e /api/auth/verify
@@ -115,7 +68,7 @@ router.get('/verify', async (req, res) => {
 
     try {
       // Verificar token Firebase
-      const decodedToken = await admin.auth().verifyIdToken(token);
+      const decodedToken = await verifyFirebaseIdToken(admin.auth(), token);
 
       // Buscar dados adicionais do usuário no Firestore apenas quando explicitamente necessário
       const userData = await resolveOptionalFirestoreUserData(decodedToken.uid, req);
@@ -172,7 +125,7 @@ router.post('/verify', async (req, res) => {
     }
 
     try {
-      const decodedToken = await admin.auth().verifyIdToken(token);
+      const decodedToken = await verifyFirebaseIdToken(admin.auth(), token);
 
       const userData = await resolveOptionalFirestoreUserData(decodedToken.uid, req);
 
@@ -209,59 +162,5 @@ router.post('/verify', async (req, res) => {
     });
   }
 });
-
-// Função auxiliar para autenticação (simulada)
-async function authenticateUser(phone, password, userType) {
-  try {
-    // Em produção, não permitir mock login
-    if (process.env.NODE_ENV === 'production') {
-      logStructured('warn', 'Tentativa de login mock em produção', { phone, userType });
-      return null;
-    }
-
-    // Por enquanto, simular com dados mock para ambientes dev/test
-
-    const mockUsers = {
-      '+5511999999999': {
-        id: 'user-001',
-        name: 'João Silva',
-        email: 'joao@leaf.com',
-        phone: '+5511999999999',
-        userType: 'CUSTOMER',
-        password: '123456'
-      },
-      '+5511888888888': {
-        id: 'driver-001',
-        name: 'Maria Santos',
-        email: 'maria@leaf.com',
-        phone: '+5511888888888',
-        userType: 'DRIVER',
-        password: '123456'
-      },
-      '+5511777777777': {
-        id: 'admin-001',
-        name: 'Admin Leaf',
-        email: 'admin@leaf.com',
-        phone: '+5511777777777',
-        userType: 'ADMIN',
-        password: '123456'
-      }
-    };
-
-    const user = mockUsers[phone];
-
-    if (user && user.password === password && user.userType === userType) {
-      // Remover senha do retorno
-      delete user.password;
-      return user;
-    }
-
-    return null;
-
-  } catch (error) {
-    logStructured('error', '❌ Erro na autenticação:', error.message, { service: 'auth-routes-routes' });
-    return null;
-  }
-}
 
 module.exports = router;
