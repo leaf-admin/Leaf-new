@@ -184,6 +184,9 @@ const HOME_PICKUP_REVERSE_GEOCODE_DEBOUNCE_MS = 900;
 const HOME_PICKUP_REVERSE_GEOCODE_TIMEOUT_MS = 5500;
 const HOME_PICKUP_REVERSE_GEOCODE_PRECISION = 5;
 const HOME_PICKUP_REVERSE_GEOCODE_MAX_DISTANCE_METERS = 180;
+// A origem da estimativa só acompanha o GPS depois de um deslocamento real: cada
+// coordenada nova pede outra rota paga ao Google e refaz a cotação.
+const HOME_PICKUP_ROUTE_ANCHOR_METERS = 25;
 const HOME_QUOTE_VALIDITY_MS = 2 * 60 * 1000;
 const HOME_QUOTE_MAX_AUTOMATIC_REFRESHES = 2;
 const HOME_QUOTE_EXPIRY_WATCHDOG_MS = 2000;
@@ -2396,13 +2399,23 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   ).trim();
   const profileInitial = useMemo(() => resolveProfileInitial(profile), [profile]);
   const profileFirstName = useMemo(() => resolveProfileFirstName(profile), [profile]);
+  const homePickupRouteAnchorRef = useRef(null);
   const effectiveHomePickupCoordinate = useMemo(() => {
     if (homePickupAdjustedOnMap && isFiniteCoordinate(homePickupCoordinate)) {
       return homePickupCoordinate;
     }
 
     if (isFiniteCoordinate(currentCoordinate)) {
-      return currentCoordinate;
+      const anchor = homePickupRouteAnchorRef.current;
+      const movedMeters = calculateHomePickupDistanceMeters(anchor, currentCoordinate);
+      if (
+        !isFiniteCoordinate(anchor) ||
+        !Number.isFinite(movedMeters) ||
+        movedMeters > HOME_PICKUP_ROUTE_ANCHOR_METERS
+      ) {
+        homePickupRouteAnchorRef.current = currentCoordinate;
+      }
+      return homePickupRouteAnchorRef.current;
     }
 
     return null;
@@ -7782,9 +7795,11 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
 
       try {
         setHomeDestinationSearching(true);
+        // A Home pede a própria prévia de rota e a manda no pedido; o runtime não
+        // deve pedir outra rota paga para o mesmo trajeto.
         const resolvedDestination =
           typeof selectDestination === 'function'
-            ? await selectDestination(destinationInput)
+            ? await selectDestination({ ...destinationInput, skipGooglePreview: true })
             : await resolveDestinationInput(destinationInput);
 
         if (!resolvedDestination?.coordinate) {

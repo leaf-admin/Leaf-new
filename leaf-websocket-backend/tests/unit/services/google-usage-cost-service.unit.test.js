@@ -14,6 +14,10 @@ function createRedis() {
     async expire() {},
     async zadd(key, score, member) { const z = zsets.get(key) || new Map(); z.set(member, score); zsets.set(key, z); },
     async zremrangebyscore(key, min, max) { const z = zsets.get(key) || new Map(); for (const [m, s] of z) if (s >= min && s <= max) z.delete(m); },
+    strings: new Map(),
+    async get(key) { return redis.strings.get(key) ?? null; },
+    async set(key, value) { redis.strings.set(key, value); return 'OK'; },
+    async zrangebyscore(key, min, max) { return [...(zsets.get(key) || new Map())].filter(([, s]) => s >= min && s <= max).map(([m]) => m); },
     async zcount(key, min, max) { return [...(zsets.get(key) || new Map()).values()].filter((s) => s >= min && s <= max).length; },
     pipeline() {
       const ops = [];
@@ -92,6 +96,48 @@ describe('google usage cost', () => {
     expect(window.rides).toBe(2);
     expect(window.routesPerRide).toBe(2);
     expect(window.costPerRideUsd).toBeCloseTo(0.025, 6);
+  });
+
+  it('divides routes by accepted or completed rides, so a cancel after accept counts once', async () => {
+    const redis = createRedis();
+    await redis.hset(service.minuteKey(NOW - 40 * 60000), {
+      'routes.googleapis.com|google.maps.routing.v2.Routes.ComputeRoutes': 14
+    });
+    for (const id of ['b1', 'b2', 'b3', 'b4']) {
+      await service.recordRideAcceptanceForCost(redis, id, NOW - 35 * 60000);
+      await service.recordRideCompletionForCost(redis, id, NOW - 20 * 60000);
+    }
+    await service.recordRideAcceptanceForCost(redis, 'b5_cancelled', NOW - 10 * 60000);
+
+    const window = await service.readWindow(redis, { hours: 6, nowMs: NOW });
+
+    expect(window.rides).toBe(4);
+    expect(window.routeRides).toBe(5);
+    expect(window.routesPerRide).toBeCloseTo(2.8, 6);
+  });
+
+  it('sends a 6 h ratio alert once and repeats it only after new route calls', async () => {
+    const redis = createRedis();
+    const alertClient = { sendAlert: jest.fn() };
+    const fetchImpl = fakeFetch([]);
+    process.env.FIREBASE_PROJECT_ID = process.env.FIREBASE_PROJECT_ID || 'p';
+    const run = (nowMs) => service.runGoogleCostCycle(redis, { alertClient, nowMs, fetchImpl, token: 't' });
+    await redis.hset(service.minuteKey(NOW - 40 * 60000), {
+      'routes.googleapis.com|google.maps.routing.v2.Routes.ComputeRoutes': 20
+    });
+    for (const id of ['b1', 'b2', 'b3', 'b4']) {
+      await service.recordRideCompletionForCost(redis, id, NOW - 20 * 60000);
+    }
+
+    expect((await run(NOW)).alerts.map((alert) => alert.metric)).toEqual(['google_routes_per_ride']);
+    expect((await run(NOW + 31 * 60000)).alerts).toEqual([]);
+    expect((await run(NOW + 62 * 60000)).alerts).toEqual([]);
+
+    await redis.hset(service.minuteKey(NOW + 70 * 60000), {
+      'routes.googleapis.com|google.maps.routing.v2.Routes.ComputeRoutes': 2
+    });
+    expect((await run(NOW + 75 * 60000)).alerts.map((alert) => alert.metric)).toEqual(['google_routes_per_ride']);
+    expect(alertClient.sendAlert).toHaveBeenCalledTimes(2);
   });
 
   it('includes the current hour in day and week windows', async () => {

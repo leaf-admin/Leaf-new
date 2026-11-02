@@ -15584,7 +15584,7 @@ async function requestPrototypeRide(profile, payload) {
     bookingId: runtimeState.activeBookingId || `pending-${Date.now()}`,
     destination,
     fare,
-    etaMinutes: runtimeState.tripDurationMin,
+    etaMinutes: routeDurationMin ?? runtimeState.tripDurationMin,
     pickupAddress: originAddress,
     pickupCoordinate: origin,
     preferences: ridePreferences,
@@ -20538,6 +20538,11 @@ export function usePrototypeRideRuntime(options = null) {
               error?.message || error,
             );
           });
+      }
+
+      // Destino vindo da Home: a rota da estimativa já está publicada por ela.
+      if (destination?.skipGooglePreview === true) {
+        return;
       }
 
       previewDestinationOnMap(destination).catch((error) => {

@@ -902,7 +902,8 @@ describe('driver online toggle', () => {
         expect(directionsRequestCount).toBe(1);
         expect(screen.getByText('Tentar novamente')).toBeTruthy();
       });
-      expect(selectDestination).toHaveBeenCalledWith(destination);
+      // A Home já pede a prévia; o runtime não pede outra rota paga.
+      expect(selectDestination).toHaveBeenCalledWith({ ...destination, skipGooglePreview: true });
       expect(screen.getByTestId('mock-passenger-category-description').props.children)
         .toBe('Rota indisponível no momento');
       expect(screen.getByTestId('mock-passenger-category-price').props.children)
