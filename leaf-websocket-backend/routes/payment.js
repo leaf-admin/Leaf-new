@@ -1,5 +1,6 @@
 const express = require('express');
 const admin = require('firebase-admin');
+const { verifyFirebaseIdToken } = require('../utils/firebase-id-token');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
@@ -282,7 +283,7 @@ async function authenticatePaymentActor(req, res, next) {
 
   let firebaseAuthError = null;
   try {
-    const decoded = await admin.auth().verifyIdToken(token);
+    const decoded = await verifyFirebaseIdToken(admin.auth(), token);
     const actor = {
       type: 'firebase',
       uid: decoded.uid,

@@ -1,5 +1,6 @@
 const express = require('express');
 const admin = require('firebase-admin');
+const { verifyFirebaseIdToken } = require('../utils/firebase-id-token');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const redisPool = require('../utils/redis-pool');
@@ -134,7 +135,7 @@ async function requireFirebaseUser(req, res, next) {
       return res.status(401).json({ success: false, error: 'Token não fornecido' });
     }
 
-    const decoded = await admin.auth().verifyIdToken(token);
+    const decoded = await verifyFirebaseIdToken(admin.auth(), token);
     req.firebaseUser = decoded;
     return next();
   } catch (error) {

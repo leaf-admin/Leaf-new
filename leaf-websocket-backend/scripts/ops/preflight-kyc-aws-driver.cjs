@@ -503,6 +503,8 @@ async function runKycAwsPreflight(config, dependencies) {
         fetchImpl: dependencies.fetchImpl,
         baseUrl: config.baseUrl,
         path: '/health/runtime-flags',
+        // Runtime flags need an admin token (KYC_PREFLIGHT_ADMIN_TOKEN) since 2026-11-02.
+        headers: { authorization: `Bearer ${process.env.KYC_PREFLIGHT_ADMIN_TOKEN || config.firebaseIdToken}` },
         timeoutMs: config.timeoutMs
       }),
       validate: validateRuntimeFlags

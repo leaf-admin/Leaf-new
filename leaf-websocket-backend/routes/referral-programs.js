@@ -1,5 +1,6 @@
 const express = require('express');
 const admin = require('firebase-admin');
+const { verifyFirebaseIdToken } = require('../utils/firebase-id-token');
 const rateLimit = require('express-rate-limit');
 const crypto = require('crypto');
 const { authenticateJWT, requireRole } = require('../middleware/jwt-auth');
@@ -323,7 +324,7 @@ async function ensureUserFromFirebaseToken(req, res, next) {
       return res.status(401).json({ error: 'Token de autorização não fornecido' });
     }
     const token = authHeader.slice('Bearer '.length);
-    const decoded = await admin.auth().verifyIdToken(token);
+    const decoded = await verifyFirebaseIdToken(admin.auth(), token);
     req.firebaseUser = decoded;
     next();
   } catch (error) {

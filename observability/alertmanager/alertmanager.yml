@@ -32,3 +32,8 @@ receivers:
     webhook_configs:
       - url: 'http://host.docker.internal:3001/api/alerts/webhook/prometheus'
         send_resolved: true
+        # The backend refuses alerts without ALERT_WEBHOOK_SECRET in production.
+        http_config:
+          authorization:
+            type: Bearer
+            credentials_file: /run/secrets/alertmanager_leaf_webhook_secret

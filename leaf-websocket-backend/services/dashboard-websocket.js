@@ -2,6 +2,7 @@
 // Gerencia eventos WebSocket específicos para o dashboard
 
 const admin = require('firebase-admin');
+const { verifyFirebaseIdToken } = require('../utils/firebase-id-token');
 const { logStructured, logError } = require('../utils/logger');
 const { metrics } = require('../utils/prometheus-metrics');
 const { getAdminUser } = require('../utils/admin-user-cache');
@@ -311,7 +312,7 @@ class DashboardWebSocketService {
 
         try {
           // Verificar token Firebase usando Admin SDK
-          const decodedToken = await admin.auth().verifyIdToken(firebaseToken);
+          const decodedToken = await verifyFirebaseIdToken(admin.auth(), firebaseToken);
 
           const adminUserRecord = await getAdminUser(decodedToken.uid, {
             source: 'dashboard-websocket.authenticate.firebase',
