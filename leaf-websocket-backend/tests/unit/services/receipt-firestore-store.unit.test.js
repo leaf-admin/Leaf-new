@@ -109,10 +109,14 @@ describe('receipt Firestore store (only copy; RTDB retired)', () => {
       })).sort((a, b) => b.get().toMillis() - a.get().toMillis());
       const calls = { count: 0, gets: [] };
       const chain = (state) => ({
-        where: (field, op, value) => (field === 'historyIndex.listedAt'
-          ? chain({ ...state, filters: [...state.filters, { op, ms: value.ms }] })
-          : chain(state)),
-        orderBy: () => chain(state),
+        // Like Firestore: no filter after a cursor or an orderBy.
+        where: (field, op, value) => {
+          if (state.after !== undefined || state.ordered) throw new Error('where() after startAfter()/orderBy()');
+          return field === 'historyIndex.listedAt'
+            ? chain({ ...state, filters: [...state.filters, { op, ms: value.ms }] })
+            : chain(state);
+        },
+        orderBy: () => chain({ ...state, ordered: true }),
         startAfter: (ts) => chain({ ...state, after: ts.ms }),
         offset: () => chain(state),
         limit: (n) => chain({ ...state, limit: n }),

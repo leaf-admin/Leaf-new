@@ -461,9 +461,10 @@ export default function RobotaxiTripHistoryScreen({ navigation, route }) {
   }, [loadHistory, navigation]);
 
   useEffect(() => {
-    if (!periodNeedsMorePages || loadingHistory || loadingMore || refreshing) return;
+    // After a failed page, wait for the retry tap instead of looping on the server.
+    if (!periodNeedsMorePages || loadingHistory || loadingMore || refreshing || historyError) return;
     loadHistory({ append: true, after: pageInfo.endCursor, since: dateFilterStartMs });
-  }, [dateFilterStartMs, loadHistory, loadingHistory, loadingMore, pageInfo?.endCursor, periodNeedsMorePages, refreshing]);
+  }, [dateFilterStartMs, historyError, loadHistory, loadingHistory, loadingMore, pageInfo?.endCursor, periodNeedsMorePages, refreshing]);
 
   const openReceipt = useCallback((item) => {
     navigation.navigate('RobotaxiPrototypeReceipt', {
