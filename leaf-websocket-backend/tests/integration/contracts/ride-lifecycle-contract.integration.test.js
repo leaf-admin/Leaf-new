@@ -10,7 +10,8 @@ describe('Ride lifecycle source contract audit', () => {
     const authRoutes = read('leaf-websocket-backend/routes/auth-routes.js');
     const driverActivationRoutes = read('leaf-websocket-backend/routes/driver-activation.js');
 
-    expect(authRoutes).toContain("router.post('/login'");
+    // The mock login is gone; sign-in goes through Firebase.
+    expect(authRoutes).not.toContain("router.post('/login'");
     expect(authRoutes).toContain("router.get('/verify'");
     expect(authRoutes).toContain("router.post('/verify'");
     expect(driverActivationRoutes).toContain("router.get('/api/drivers/me/activation/status'");

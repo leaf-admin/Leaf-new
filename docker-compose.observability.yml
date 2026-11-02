@@ -57,6 +57,7 @@ services:
       - alertmanager-data:/alertmanager
     secrets:
       - alertmanager_slack_webhook_url
+      - alertmanager_leaf_webhook_secret
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
@@ -98,3 +99,6 @@ networks:
 secrets:
   alertmanager_slack_webhook_url:
     file: ${ALERTMANAGER_SLACK_WEBHOOK_FILE:?ALERTMANAGER_SLACK_WEBHOOK_FILE is required}
+  # Same value as ALERT_WEBHOOK_SECRET on the backend.
+  alertmanager_leaf_webhook_secret:
+    file: ${ALERTMANAGER_LEAF_WEBHOOK_SECRET_FILE:?ALERTMANAGER_LEAF_WEBHOOK_SECRET_FILE is required}

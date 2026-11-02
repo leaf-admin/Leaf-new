@@ -380,8 +380,10 @@ async function checkObservability(context) {
 
   const results = {};
 
+  // Runtime flags need an admin token since 2026-11-02 (same token as /metrics).
+  const adminHeaders = context.options.metricsToken ? { Authorization: `Bearer ${context.options.metricsToken}` } : {};
   for (const [name, url] of Object.entries({ health: urls.health, runtimeFlags: urls.runtimeFlags })) {
-    const result = await fetchTextArtifact(context, name, url);
+    const result = await fetchTextArtifact(context, name, url, name === 'runtimeFlags' ? adminHeaders : {});
     results[name] = result;
     if (!result.ok) {
       throw new Error(`${name}_http_${result.status}`);

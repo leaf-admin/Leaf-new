@@ -1,5 +1,6 @@
 const express = require('express');
 const admin = require('firebase-admin');
+const { verifyFirebaseIdToken } = require('../utils/firebase-id-token');
 const multer = require('multer');
 const path = require('path');
 const firebaseConfig = require('../firebase-config');
@@ -171,7 +172,7 @@ async function requireDriverAuth(req, res, next) {
       });
     }
 
-    const decoded = await admin.auth().verifyIdToken(token);
+    const decoded = await verifyFirebaseIdToken(admin.auth(), token);
     const uid = String(decoded?.uid || '').trim();
 
     if (!uid) {

@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const admin = require('firebase-admin');
+const { verifyFirebaseIdToken } = require('../utils/firebase-id-token');
 const vehicleStore = require('../services/vehicle-store');
 const { logger } = require('../utils/logger');
 const { assertAccountWritable, saveAccountProfile, projectRealtimeProfile, runAccountDeletion } = require('../services/account-lifecycle-service');
@@ -74,7 +75,7 @@ const requireFirebase = async (req, res, next) => {
     }
 
     const token = authHeader.split('Bearer ')[1];
-    const decodedToken = await admin.auth().verifyIdToken(token);
+    const decodedToken = await verifyFirebaseIdToken(admin.auth(), token);
     req.user = decodedToken;
     req.userToken = token;
     next();

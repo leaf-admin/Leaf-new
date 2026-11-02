@@ -12,6 +12,7 @@ const path = require('path');
 const multer = require('multer');
 
 const admin = require('firebase-admin');
+const { verifyFirebaseIdToken } = require('../../utils/firebase-id-token');
 
 const jwt = require('jsonwebtoken');
 
@@ -906,7 +907,7 @@ async function authenticateMapH3Access(req, res, next) {
       // initializeFirebase is idempotent and logs its own failures.
     }
 
-    const decodedFirebaseToken = await admin.auth().verifyIdToken(token);
+    const decodedFirebaseToken = await verifyFirebaseIdToken(admin.auth(), token);
     const uid = String(decodedFirebaseToken?.uid || '').trim();
     if (!uid) {
       return res.status(401).json({

@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const admin = require('firebase-admin');
+const { verifyFirebaseIdToken } = require('../utils/firebase-id-token');
 const { logger, logStructured } = require('../utils/logger');
 const rateLimit = require('express-rate-limit');
 const cityActivationStateService = require('../services/city-activation-state-service');
@@ -644,7 +645,7 @@ const requireFirebase = async (req, res, next) => {
     }
 
     const token = authHeader.split('Bearer ')[1];
-    const decodedToken = await admin.auth().verifyIdToken(token);
+    const decodedToken = await verifyFirebaseIdToken(admin.auth(), token);
     req.user = decodedToken;
     next();
   } catch (error) {

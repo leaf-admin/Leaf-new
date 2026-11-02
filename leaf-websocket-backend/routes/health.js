@@ -11,6 +11,11 @@ const { logStructured, logError } = require('../utils/logger');
 const { getPilotLaunchFlags } = require('../utils/pilot-launch-flags');
 const { getPublicPilotAccessSnapshot } = require('../services/pilot-access-control-service');
 const redisCriticalAuthorityService = require('../services/redis-critical-authority-service');
+const { authenticateSupport, requireSupportRoles } = require('../middleware/support-auth');
+
+// Internal runtime map: only the dashboard team and ops scripts with an admin token.
+const RUNTIME_FLAGS_ROLES = ['admin', 'manager', 'super-admin', 'viewer', 'development'];
+const runtimeFlagsAccess = [authenticateSupport, requireSupportRoles(RUNTIME_FLAGS_ROLES)];
 const TRUTHY_VALUES = new Set(['1', 'true', 'yes', 'on', 'sim']);
 const FALSY_VALUES = new Set(['0', 'false', 'no', 'off', 'nao', 'não']);
 const MIN_AWS_COMPARE_FACES_APPROVE_THRESHOLD = 0.95;
@@ -687,11 +692,11 @@ router.get('/health/liveness', (req, res) => {
  * GET /health/runtime-flags
  * Diagnóstico seguro de flags de runtime para execução de testes real-sandbox.
  */
-router.get('/health/runtime-flags', async (req, res) => {
+router.get('/health/runtime-flags', ...runtimeFlagsAccess, async (req, res) => {
   res.status(200).json(await buildRuntimeFlagsPayload());
 });
 
-router.get('/api/health/runtime-flags', async (req, res) => {
+router.get('/api/health/runtime-flags', ...runtimeFlagsAccess, async (req, res) => {
   res.status(200).json(await buildRuntimeFlagsPayload());
 });
 

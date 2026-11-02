@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const admin = require('firebase-admin');
+const { verifyFirebaseIdToken } = require('../utils/firebase-id-token');
 const { logError } = require('../utils/logger');
 const firebaseConfig = require('../firebase-config');
 const { resolveJwtSecretList } = require('../utils/jwt-secret-resolver');
@@ -89,7 +90,7 @@ async function verifyAdminToken(token) {
 async function verifyFirebaseUserToken(token) {
   try {
     firebaseConfig.initializeFirebase();
-    const decoded = await admin.auth().verifyIdToken(token);
+    const decoded = await verifyFirebaseIdToken(admin.auth(), token);
     if (!decoded?.uid) return null;
 
     return {

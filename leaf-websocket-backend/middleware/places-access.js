@@ -7,6 +7,7 @@
 // impedir um pedido de corrida.
 
 const admin = require('firebase-admin');
+const { verifyFirebaseIdToken } = require('../utils/firebase-id-token');
 const firebaseConfig = require('../firebase-config');
 const redisPool = require('../utils/redis-pool');
 const { logger } = require('../utils/logger');
@@ -55,7 +56,7 @@ async function verifyUid(token) {
   } catch (_error) {
     // initializeFirebase já registra a falha e reaproveita um app existente.
   }
-  const decoded = await admin.auth().verifyIdToken(token);
+  const decoded = await verifyFirebaseIdToken(admin.auth(), token);
   return String(decoded?.uid || '').trim() || null;
 }
 
