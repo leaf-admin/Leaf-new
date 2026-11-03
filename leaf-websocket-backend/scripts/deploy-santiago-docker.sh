@@ -24,6 +24,10 @@ export NGINX_UPSTREAM_FILE="nginx.d/upstream-leaf-backend.conf"
 
 bash "$SCRIPT_DIR/deploy-contabo-docker.sh" "$@"
 
+# Each rollout leaves a ~700 MB image; drop old ones so the disk never fills.
+ssh -o StrictHostKeyChecking=yes "${SANTIAGO_SSH:-leaf-scl-test}" "PRUNE_BUILD_CACHE=true bash /opt/leaf-app/scripts/ops/prune-leaf-images.sh" \
+  || echo "[deploy][warn] image cleanup failed; run scripts/ops/prune-leaf-images.sh on the host by hand" >&2
+
 if [ "${REFRESH_CONTABO_FALLBACK:-true}" = "true" ]; then
   bash "$SCRIPT_DIR/ops/refresh-contabo-standby.sh" "${PRODUCTION_RELEASE_SHA:-}" \
     || echo "[deploy][warn] Contabo standby refresh failed; run scripts/ops/refresh-contabo-standby.sh by hand" >&2

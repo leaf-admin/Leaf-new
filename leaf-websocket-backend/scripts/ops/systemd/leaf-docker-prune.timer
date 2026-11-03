@@ -1,0 +1,10 @@
+[Unit]
+Description=Leaf old image cleanup daily
+
+[Timer]
+OnCalendar=*-*-* 04:30:00
+RandomizedDelaySec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
