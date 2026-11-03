@@ -1,0 +1,12 @@
+# Removes old Leaf images (scripts/ops/prune-leaf-images.sh). Optional per-host
+# settings live in /etc/default/leaf-docker-prune, e.g. on Santiago:
+#   PRUNE_BUILD_CACHE=true
+[Unit]
+Description=Leaf old image cleanup
+After=docker.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/default/leaf-docker-prune
+ExecStart=/bin/bash /opt/leaf-app/scripts/ops/prune-leaf-images.sh
+Nice=10
