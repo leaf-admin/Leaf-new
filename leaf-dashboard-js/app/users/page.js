@@ -9,6 +9,7 @@ import KpiCard from "@/src/components/ui/KpiCard";
 import Panel from "@/src/components/ui/Panel";
 import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
 import { useAuth } from "@/src/contexts/AuthContext";
+import OnboardingFunnelPanel from "@/src/components/observability/OnboardingFunnelPanel";
 
 const statusTone = {
   active: "status-ok",
@@ -127,6 +128,10 @@ export default function UsersPage() {
           <KpiCard title="Clientes" value={summary.customers} />
           <KpiCard title="Ativos" value={summary.active} tone="positive" />
           <KpiCard title="Pendentes" value={summary.pending} tone="warning" />
+        </section>
+
+        <section className="grid">
+          <OnboardingFunnelPanel />
         </section>
 
         <section className="grid">
