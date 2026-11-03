@@ -11,6 +11,7 @@ import GoogleDriversMap from "@/src/components/map/GoogleDriversMap";
 import { TechnicalDetails } from "@/src/components/ui/DataViews";
 import { isAdminMutationEnabled, mutationBlockedMessage } from "@/src/utils/dashboard-access";
 import useConfirmAction from "@/src/hooks/useConfirmAction";
+import { buildGeofenceFile, normalizeRegionRings, suggestNextPolicyId } from "@/src/utils/geofence-region";
 
 const H3_VIEWPORT_DEBOUNCE_MS = 400;
 
@@ -19,46 +20,25 @@ function formatRegionDraft(region) {
   return JSON.stringify(region, null, 2);
 }
 
+// Aceita anel único, vários anéis ou GeoJSON; null quando o texto não forma uma área válida.
 function parseRegionDraft(regionDraft) {
   if (typeof regionDraft !== "string") return [];
-
-  let parsed = null;
+  if (!regionDraft.trim()) return [];
   try {
-    parsed = JSON.parse(regionDraft);
+    return normalizeRegionRings(JSON.parse(regionDraft));
   } catch {
     return null;
   }
+}
 
-  if (!Array.isArray(parsed)) return null;
-  if (parsed.length === 0) return [];
-
-  const normalized = [];
-  for (const point of parsed) {
-    let lng = null;
-    let lat = null;
-    if (Array.isArray(point) && point.length >= 2) {
-      lng = Number(point[0]);
-      lat = Number(point[1]);
-    } else if (point && typeof point === "object") {
-      lng = Number(point.lng);
-      lat = Number(point.lat);
-    } else {
-      return null;
-    }
-
-    if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
-      return null;
-    }
-    normalized.push([lng, lat]);
-  }
-
-  if (normalized.length < 3) return null;
-  const first = normalized[0];
-  const last = normalized[normalized.length - 1];
-  if (first[0] !== last[0] || first[1] !== last[1]) {
-    normalized.push([first[0], first[1]]);
-  }
-  return normalized;
+function downloadJson(filename, data) {
+  const blob = new Blob([`${JSON.stringify(data, null, 2)}\n`], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 function formatTimeLabel(isoDate) {
@@ -99,6 +79,9 @@ export default function MapsPage() {
   const [geofenceBusy, setGeofenceBusy] = useState(false);
   const [geofenceEnabledDraft, setGeofenceEnabledDraft] = useState(true);
   const [geofenceRegionDraft, setGeofenceRegionDraft] = useState("[]");
+  const [exportPolicyId, setExportPolicyId] = useState("");
+  const [exportName, setExportName] = useState("");
+  const [exportMessage, setExportMessage] = useState("");
   const h3ViewportRequestRef = useRef("");
   const [h3RefreshNonce, setH3RefreshNonce] = useState(0);
   const [runtimeFlags, setRuntimeFlags] = useState(null);
@@ -192,6 +175,8 @@ export default function MapsPage() {
       setGeoConfig(response);
       setGeofenceEnabledDraft(response?.geofence?.enabled !== false);
       setGeofenceRegionDraft(formatRegionDraft(response?.geofence?.region || []));
+      setExportPolicyId(suggestNextPolicyId(response?.geofence?.regionVersion));
+      setExportName(response?.geofence?.regionName || "");
       const states = response?.cityActivation?.states || [];
       if (states.length > 0) {
         setSelectedStateCode((prev) => {
@@ -261,14 +246,9 @@ export default function MapsPage() {
       setGeoError(readOnlyMessage);
       return;
     }
-    let parsedRegion = null;
-    try {
-      parsedRegion = JSON.parse(geofenceRegionDraft);
-      if (!Array.isArray(parsedRegion)) {
-        throw new Error("Formato invalido");
-      }
-    } catch {
-      setGeoError("Poligono invalido. Use JSON no formato [[lng,lat], ...].");
+    const parsedRegion = parseRegionDraft(geofenceRegionDraft);
+    if (!parsedRegion || parsedRegion.length === 0) {
+      setGeoError("Polígono inválido. Use [[lng,lat], ...] ou uma lista de áreas.");
       return;
     }
 
@@ -290,6 +270,36 @@ export default function MapsPage() {
   const resetGeofenceDraft = () => {
     setGeofenceEnabledDraft(geoConfig?.geofence?.enabled !== false);
     setGeofenceRegionDraft(formatRegionDraft(geoConfig?.geofence?.region || []));
+    setExportMessage("");
+  };
+
+  // O arquivo vai para leaf-websocket-backend/config/geofence.json por PR; nada é salvo daqui.
+  const buildExportFile = () => {
+    try {
+      setGeoError("");
+      return buildGeofenceFile(parseRegionDraft(geofenceRegionDraft), { policyId: exportPolicyId, name: exportName });
+    } catch (err) {
+      setGeoError(err?.message || "Não foi possível gerar o arquivo da geofence");
+      return null;
+    }
+  };
+
+  const downloadGeofenceFile = () => {
+    const file = buildExportFile();
+    if (!file) return;
+    downloadJson("geofence.json", file);
+    setExportMessage(`Arquivo ${file.metadata.policyId} gerado: ${file.metadata.polygonCount} áreas, ${file.metadata.pointCount} pontos.`);
+  };
+
+  const copyGeofenceFile = async () => {
+    const file = buildExportFile();
+    if (!file) return;
+    try {
+      await navigator.clipboard.writeText(`${JSON.stringify(file, null, 2)}\n`);
+      setExportMessage(`JSON ${file.metadata.policyId} copiado: ${file.metadata.polygonCount} áreas, ${file.metadata.pointCount} pontos.`);
+    } catch {
+      setGeoError("O navegador não deixou copiar. Use Baixar arquivo.");
+    }
   };
 
   useEffect(() => {
@@ -462,16 +472,20 @@ export default function MapsPage() {
 
   const allErrors = [error, geoError].filter(Boolean).join(" | ");
 
+  // Editar no mapa só muda o rascunho local; salvar ou gerar o arquivo é outro passo.
   const handleGeofenceMapChange = useCallback((nextRegion) => {
-    if (readOnly) return;
     const nextDraft = formatRegionDraft(nextRegion);
     setGeofenceRegionDraft((previous) => (previous === nextDraft ? previous : nextDraft));
-  }, [readOnly]);
+    setExportMessage("");
+  }, []);
 
   const summary = locations?.summary || {};
   const geofenceActive = Boolean(geoConfig?.geofence?.active);
   const geofenceEnabled = geoConfig?.geofence?.enabled !== false;
   const geofencePoints = Number(geoConfig?.geofence?.regionPoints || 0);
+  // Durante o piloto o backend só aceita o polígono do arquivo versionado.
+  const geofencePolicyLocked = Boolean(geoConfig?.geofence?.policyLocked);
+  const geofenceSaveBlocked = readOnly || geofencePolicyLocked;
   const mapUpdatedLabel = formatTimeLabel(locations?.lastUpdate);
 
   return (
@@ -508,7 +522,7 @@ export default function MapsPage() {
               onViewportChange={handleMapViewportChange}
               mapHeight="clamp(460px, 62vh, 720px)"
               geofenceRegion={geofenceRegionForMap}
-              geofenceEditable={!readOnly}
+              geofenceEditable
               onGeofenceChange={handleGeofenceMapChange}
               showH3SyncLabel={false}
             />
@@ -523,35 +537,76 @@ export default function MapsPage() {
               <span className="table-muted">{geofencePoints > 0 ? `${geofencePoints} pontos` : "Sem polígono"}</span>
             </div>
 
-            {readOnly ? (
+            <ol className="service-area-steps">
+              <li>No mapa, toque numa área para editar e arraste os vértices, ou use <strong>Desenhar nova área</strong>.</li>
+              <li>Confira a versão e gere o arquivo <strong>geofence.json</strong>.</li>
+              <li>O arquivo entra no backend por PR e passa a valer no deploy. O mapa aqui é só rascunho.</li>
+            </ol>
+            {geofenceSaveBlocked ? (
               <div className="notice-banner" role="status">
-                <p>Edição desligada neste ambiente. Para desenhar a área, ligue as alterações do painel (ENABLE_ADMIN_MUTATIONS).</p>
+                <p>
+                  {geofencePolicyLocked
+                    ? "Durante o piloto a área vem do arquivo versionado; salvar pelo painel está bloqueado."
+                    : "Salvar pelo painel está desligado neste ambiente (ENABLE_ADMIN_MUTATIONS)."}
+                  {geoConfig?.geofence?.regionVersion ? ` Versão em uso: ${geoConfig.geofence.regionVersion}.` : ""}
+                </p>
               </div>
-            ) : (
-              <ol className="service-area-steps">
-                <li>No mapa, toque em <strong>Traçar geofence</strong> e marque os pontos.</li>
-                <li>Toque em <strong>Concluir traçado</strong>; arraste os vértices para ajustar.</li>
-                <li>Salve a área. O backend valida antes de passar a valer.</li>
-              </ol>
-            )}
+            ) : null}
+
+            <div className="filters">
+              <label className="table-muted" htmlFor="geofence-export-version">Versão do arquivo</label>
+              <input
+                id="geofence-export-version"
+                value={exportPolicyId}
+                onChange={(event) => setExportPolicyId(event.target.value.trim().toLowerCase())}
+                placeholder="rio-zona-sul-v4"
+              />
+              <label className="table-muted" htmlFor="geofence-export-name">Nome</label>
+              <input
+                id="geofence-export-name"
+                value={exportName}
+                onChange={(event) => setExportName(event.target.value)}
+                placeholder="Piloto Rio - Zona Sul"
+              />
+            </div>
 
             <div className="service-area-actions">
               <button
                 className="btn-primary"
-                onClick={() => requestMapMutation({
-                  title: "Salvar área de atendimento?",
-                  description: "O polígono salvo passa a governar a elegibilidade operacional após a validação do backend.",
-                  confirmLabel: "Salvar área",
-                  task: saveGeofenceRegion,
-                })}
-                disabled={readOnly || confirmationOpen || geoLoading || geofenceBusy || geofenceDraftInvalid}
+                onClick={downloadGeofenceFile}
+                disabled={geoLoading || geofenceDraftInvalid || !geofenceDraftParsed?.length}
               >
-                Salvar área
+                Baixar geofence.json
+              </button>
+              <button
+                className="button-secondary"
+                onClick={copyGeofenceFile}
+                disabled={geoLoading || geofenceDraftInvalid || !geofenceDraftParsed?.length}
+              >
+                Copiar JSON
               </button>
               <button className="button-secondary" onClick={resetGeofenceDraft} disabled={geoLoading || geofenceBusy}>
                 Descartar rascunho
               </button>
             </div>
+            {exportMessage ? <p className="table-muted" role="status">{exportMessage}</p> : null}
+
+            {!geofenceSaveBlocked ? (
+              <div className="service-area-actions">
+                <button
+                  className="button-secondary"
+                  onClick={() => requestMapMutation({
+                    title: "Salvar área de atendimento?",
+                    description: "O polígono salvo passa a governar a elegibilidade operacional após a validação do backend.",
+                    confirmLabel: "Salvar área",
+                    task: saveGeofenceRegion,
+                  })}
+                  disabled={confirmationOpen || geoLoading || geofenceBusy || geofenceDraftInvalid}
+                >
+                  Salvar área no painel
+                </button>
+              </div>
+            ) : null}
 
             <details className="technical-details">
               <summary>Editar pontos em JSON</summary>
@@ -560,7 +615,6 @@ export default function MapsPage() {
                   id="geofence-region-draft"
                   value={geofenceRegionDraft}
                   onChange={(event) => setGeofenceRegionDraft(event.target.value)}
-                  disabled={readOnly}
                   rows={8}
                   style={{ width: "100%", resize: "vertical", fontFamily: "monospace" }}
                   placeholder='[[-43.8,-23.1],[-43.1,-23.1],[-43.1,-22.7],[-43.8,-22.7],[-43.8,-23.1]]'

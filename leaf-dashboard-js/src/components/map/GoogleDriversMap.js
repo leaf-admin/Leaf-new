@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { GoogleMap, MarkerClustererF, MarkerF, PolygonF, useJsApiLoader } from "@react-google-maps/api";
+import { countRegionPoints, countRingPoints, normalizeRegionRings, normalizeRing } from "@/src/utils/geofence-region";
 
 const BASE_MAP_STYLE = {
   width: "100%",
@@ -9,6 +10,8 @@ const BASE_MAP_STYLE = {
   borderRadius: "10px",
 };
 const GOOGLE_MAP_LIBRARIES = [];
+// Acima disso cada vértice vira uma alça no mapa e a edição fica lenta.
+const LARGE_RING_POINTS = 800;
 
 function getCenter(drivers = [], h3Cells = []) {
   if (drivers.length) {
@@ -40,49 +43,6 @@ function getCenter(drivers = [], h3Cells = []) {
   }
 
   return { lat: -22.9068, lng: -43.1729 };
-}
-
-function normalizeGeofenceRegion(region = []) {
-  if (!Array.isArray(region)) return [];
-
-  const normalized = [];
-  for (const point of region) {
-    let lng = null;
-    let lat = null;
-
-    if (Array.isArray(point) && point.length >= 2) {
-      lng = Number(point[0]);
-      lat = Number(point[1]);
-    } else if (point && typeof point === "object") {
-      lng = Number(point.lng);
-      lat = Number(point.lat);
-    } else {
-      continue;
-    }
-
-    if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
-      continue;
-    }
-
-    normalized.push([lng, lat]);
-  }
-
-  if (normalized.length < 3) return [];
-  const first = normalized[0];
-  const last = normalized[normalized.length - 1];
-  if (first[0] !== last[0] || first[1] !== last[1]) {
-    normalized.push([first[0], first[1]]);
-  }
-  return normalized;
-}
-
-function getGeofencePointCount(region = []) {
-  if (!Array.isArray(region) || region.length === 0) return 0;
-  if (region.length < 2) return region.length;
-  const first = region[0];
-  const last = region[region.length - 1];
-  const isClosed = first[0] === last[0] && first[1] === last[1];
-  return isClosed ? Math.max(region.length - 1, 0) : region.length;
 }
 
 function extractRegionFromPath(path) {
@@ -194,15 +154,22 @@ function GoogleDriversMapWithKey({
     [mapHeight],
   );
 
-  const normalizedGeofenceRegion = useMemo(() => normalizeGeofenceRegion(geofenceRegion), [geofenceRegion]);
-  const geofencePaths = useMemo(
-    () => normalizedGeofenceRegion.map(([lng, lat]) => ({ lat: Number(lat), lng: Number(lng) })),
-    [normalizedGeofenceRegion],
+  // Uma área por anel; só a área selecionada fica editável (alças em todas pesariam demais).
+  const geofenceRings = useMemo(() => normalizeRegionRings(geofenceRegion) || [], [geofenceRegion]);
+  const geofenceRingPaths = useMemo(
+    () => geofenceRings.map((ring) => ring.map(([lng, lat]) => ({ lat: Number(lat), lng: Number(lng) }))),
+    [geofenceRings],
   );
-  const geofencePointCount = useMemo(
-    () => getGeofencePointCount(normalizedGeofenceRegion),
-    [normalizedGeofenceRegion],
-  );
+  const geofencePointCount = useMemo(() => countRegionPoints(geofenceRings), [geofenceRings]);
+  const [selectedRingIndex, setSelectedRingIndex] = useState(null);
+  const activeRingIndex = selectedRingIndex !== null && selectedRingIndex < geofenceRings.length ? selectedRingIndex : null;
+  const geofencePaths = activeRingIndex === null ? null : geofenceRingPaths[activeRingIndex];
+  const ringsRef = useRef(geofenceRings);
+  const activeRingIndexRef = useRef(activeRingIndex);
+  useEffect(() => {
+    ringsRef.current = geofenceRings;
+    activeRingIndexRef.current = activeRingIndex;
+  }, [activeRingIndex, geofenceRings]);
   const h3LastSyncLabel = useMemo(() => {
     if (!h3LastUpdatedAt) return null;
     const date = new Date(h3LastUpdatedAt);
@@ -236,7 +203,7 @@ function GoogleDriversMapWithKey({
   const center = useMemo(() => getCenter(validDrivers, validCells), [validDrivers, validCells]);
   const drawingEnabled = geofenceEditable && isDrawingGeofence;
   const drawingRegionPaths = useMemo(
-    () => normalizeGeofenceRegion(drawingRegionDraft).map(([lng, lat]) => ({ lat: Number(lat), lng: Number(lng) })),
+    () => (normalizeRing(drawingRegionDraft) || []).map(([lng, lat]) => ({ lat: Number(lat), lng: Number(lng) })),
     [drawingRegionDraft],
   );
 
@@ -252,8 +219,10 @@ function GoogleDriversMapWithKey({
   const emitGeofenceChange = useCallback(
     (path) => {
       if (typeof onGeofenceChange !== "function") return;
-      const nextRegion = extractRegionFromPath(path);
-      onGeofenceChange(nextRegion);
+      const index = activeRingIndexRef.current;
+      const nextRing = extractRegionFromPath(path);
+      if (index === null || nextRing.length < 4) return;
+      onGeofenceChange(ringsRef.current.map((ring, ringIndex) => (ringIndex === index ? nextRing : ring)));
     },
     [onGeofenceChange],
   );
@@ -326,7 +295,7 @@ function GoogleDriversMapWithKey({
 
   useEffect(() => {
     const polygon = editableGeofenceRef.current;
-    if (!polygon) return;
+    if (!polygon || !geofencePaths) return;
 
     const currentPath = polygon.getPath();
     const currentPoints = [];
@@ -365,9 +334,16 @@ function GoogleDriversMapWithKey({
   const clearGeofence = useCallback(() => {
     setDrawingRegionDraft([]);
     setIsDrawingGeofence(false);
+    setSelectedRingIndex(null);
     if (typeof onGeofenceChange !== "function") return;
     onGeofenceChange([]);
   }, [onGeofenceChange]);
+
+  const removeSelectedRing = useCallback(() => {
+    if (activeRingIndex === null || typeof onGeofenceChange !== "function") return;
+    onGeofenceChange(geofenceRings.filter((_, ringIndex) => ringIndex !== activeRingIndex));
+    setSelectedRingIndex(null);
+  }, [activeRingIndex, geofenceRings, onGeofenceChange]);
 
   const handleMapClick = useCallback(
     (event) => {
@@ -387,12 +363,14 @@ function GoogleDriversMapWithKey({
   const completeDrawingGeofence = useCallback(() => {
     if (!drawingEnabled) return;
     if (typeof onGeofenceChange !== "function") return;
-    const normalized = normalizeGeofenceRegion(drawingRegionDraft);
-    if (normalized.length < 4) return;
-    onGeofenceChange(normalized);
+    const normalized = normalizeRing(drawingRegionDraft);
+    if (!normalized) return;
+    // A área desenhada entra como mais um polígono e já fica selecionada para ajuste.
+    onGeofenceChange([...geofenceRings, normalized]);
+    setSelectedRingIndex(geofenceRings.length);
     setDrawingRegionDraft([]);
     setIsDrawingGeofence(false);
-  }, [drawingEnabled, drawingRegionDraft, onGeofenceChange]);
+  }, [drawingEnabled, drawingRegionDraft, geofenceRings, onGeofenceChange]);
 
   if (loadError) {
     return <p>Falha ao carregar Google Maps.</p>;
@@ -440,7 +418,7 @@ function GoogleDriversMapWithKey({
               className={drawingEnabled ? "mode-btn mode-btn-active" : "mode-btn"}
               onClick={startDrawingGeofence}
             >
-              Traçar geofence
+              Desenhar nova área
             </button>
             {drawingEnabled ? (
               <button
@@ -462,17 +440,33 @@ function GoogleDriversMapWithKey({
                 Cancelar traçado
               </button>
             ) : null}
+            {!drawingEnabled && activeRingIndex !== null ? (
+              <>
+                <button type="button" className="mode-btn" onClick={removeSelectedRing}>
+                  Remover área selecionada
+                </button>
+                <button type="button" className="mode-btn" onClick={() => setSelectedRingIndex(null)}>
+                  Parar de editar
+                </button>
+              </>
+            ) : null}
             <button type="button" className="mode-btn" onClick={clearGeofence} disabled={geofencePointCount === 0}>
-              Limpar geofence
+              Limpar tudo
             </button>
             <span style={{ fontSize: 12, color: "#475569" }}>
               Geofence:{" "}
               {drawingEnabled
                 ? `${drawingRegionDraft.length} ponto${drawingRegionDraft.length === 1 ? "" : "s"} no rascunho`
                 : geofencePointCount > 0
-                  ? `${geofencePointCount} pontos`
+                  ? `${geofenceRings.length} área${geofenceRings.length === 1 ? "" : "s"}, ${geofencePointCount} pontos`
                   : "sem polígono"}
+              {!drawingEnabled && activeRingIndex !== null
+                ? ` · editando a área ${activeRingIndex + 1} (${countRingPoints(geofenceRings[activeRingIndex])} pontos)`
+                : !drawingEnabled && geofenceRings.length > 0 ? " · toque numa área para editar" : ""}
             </span>
+            {!drawingEnabled && activeRingIndex !== null && countRingPoints(geofenceRings[activeRingIndex]) > LARGE_RING_POINTS ? (
+              <span style={{ fontSize: 12, color: "#b45309" }}>Área com muitos pontos: a edição pode ficar lenta.</span>
+            ) : null}
           </>
         ) : null}
       </div>
@@ -526,24 +520,43 @@ function GoogleDriversMapWithKey({
             />
           ))}
 
-        {normalizedGeofenceRegion.length >= 4 ? (
-          <PolygonF
-            paths={geofencePaths}
-            options={{
-              clickable: false,
-              fillColor: "#16a34a",
-              fillOpacity: 0.14,
-              strokeColor: "#16a34a",
-              strokeOpacity: 0.92,
-              strokeWeight: 3,
-              editable: geofenceEditable && !drawingEnabled,
-              draggable: geofenceEditable && !drawingEnabled,
-              zIndex: 4,
-            }}
-            onLoad={handleGeofencePolygonLoad}
-            onUnmount={handleGeofencePolygonUnmount}
-          />
-        ) : null}
+        {geofenceRingPaths.map((paths, ringIndex) => {
+          const editing = geofenceEditable && !drawingEnabled && ringIndex === activeRingIndex;
+          return editing ? (
+            <PolygonF
+              key={`geofence-edit-${ringIndex}`}
+              paths={paths}
+              options={{
+                clickable: true,
+                fillColor: "#16a34a",
+                fillOpacity: 0.22,
+                strokeColor: "#14532d",
+                strokeOpacity: 1,
+                strokeWeight: 3,
+                editable: true,
+                draggable: true,
+                zIndex: 5,
+              }}
+              onLoad={handleGeofencePolygonLoad}
+              onUnmount={handleGeofencePolygonUnmount}
+            />
+          ) : (
+            <PolygonF
+              key={`geofence-${ringIndex}`}
+              paths={paths}
+              options={{
+                clickable: geofenceEditable && !drawingEnabled,
+                fillColor: "#16a34a",
+                fillOpacity: 0.14,
+                strokeColor: "#16a34a",
+                strokeOpacity: 0.92,
+                strokeWeight: 3,
+                zIndex: 4,
+              }}
+              onClick={() => setSelectedRingIndex(ringIndex)}
+            />
+          );
+        })}
 
         {drawingEnabled && drawingRegionPaths.length >= 4 ? (
           <PolygonF
