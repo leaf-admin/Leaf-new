@@ -82,6 +82,7 @@ export default function MapsPage() {
   const [exportPolicyId, setExportPolicyId] = useState("");
   const [exportName, setExportName] = useState("");
   const [exportMessage, setExportMessage] = useState("");
+  const [geofenceVersions, setGeofenceVersions] = useState([]);
   const h3ViewportRequestRef = useRef("");
   const [h3RefreshNonce, setH3RefreshNonce] = useState(0);
   const [runtimeFlags, setRuntimeFlags] = useState(null);
@@ -177,6 +178,11 @@ export default function MapsPage() {
       setGeofenceRegionDraft(formatRegionDraft(response?.geofence?.region || []));
       setExportPolicyId(suggestNextPolicyId(response?.geofence?.regionVersion));
       setExportName(response?.geofence?.regionName || "");
+      if (response?.geofence?.adminEditEnabled) {
+        leafAPI.listGeofenceVersions()
+          .then((result) => setGeofenceVersions(result?.versions || []))
+          .catch(() => setGeofenceVersions([]));
+      }
       const states = response?.cityActivation?.states || [];
       if (states.length > 0) {
         setSelectedStateCode((prev) => {
@@ -211,6 +217,8 @@ export default function MapsPage() {
   const mutationsEnabled = isAdminMutationEnabled(runtimeFlags);
   const readOnly = runtimeFlags === null || !mutationsEnabled;
   const readOnlyMessage = mutationBlockedMessage(runtimeFlags);
+  // Com GEOFENCE_ADMIN_EDIT_ENABLED o backend publica a área desenhada como versão nova.
+  const geofenceLiveEdit = Boolean(geoConfig?.geofence?.adminEditEnabled);
 
   const requestMapMutation = (action) => requestConfirmation({
     title: action.title || "Confirmar alteração geográfica?",
@@ -242,7 +250,7 @@ export default function MapsPage() {
   };
 
   const saveGeofenceRegion = async () => {
-    if (readOnly) {
+    if (!geofenceLiveEdit && readOnly) {
       setGeoError(readOnlyMessage);
       return;
     }
@@ -255,13 +263,29 @@ export default function MapsPage() {
     try {
       setGeofenceBusy(true);
       setGeoError("");
-      await leafAPI.updateGeofenceConfig({
-        region: parsedRegion,
-        enabled: geofenceEnabledDraft,
-      });
+      const response = await leafAPI.updateGeofenceConfig(geofenceLiveEdit
+        ? { region: parsedRegion, policyId: exportPolicyId, name: exportName }
+        : { region: parsedRegion, enabled: geofenceEnabledDraft });
       await loadGeoConfig();
+      if (response?.version?.policyId) {
+        setExportMessage(`Versão ${response.version.policyId} publicada: ${response.version.polygonCount} áreas, ${response.version.pointCount} pontos. Já vale para novas cotações e corridas.`);
+      }
     } catch (err) {
       setGeoError(err?.message || "Falha ao salvar poligono da geofence");
+    } finally {
+      setGeofenceBusy(false);
+    }
+  };
+
+  const restoreGeofenceVersion = async (version) => {
+    try {
+      setGeofenceBusy(true);
+      setGeoError("");
+      const response = await leafAPI.restoreGeofenceVersion(version.id);
+      await loadGeoConfig();
+      setExportMessage(`Voltou para ${response?.version?.policyId || version.policyId}. Já vale para novas cotações e corridas.`);
+    } catch (err) {
+      setGeoError(err?.message || "Falha ao voltar a versão da geofence");
     } finally {
       setGeofenceBusy(false);
     }
@@ -485,7 +509,7 @@ export default function MapsPage() {
   const geofencePoints = Number(geoConfig?.geofence?.regionPoints || 0);
   // Durante o piloto o backend só aceita o polígono do arquivo versionado.
   const geofencePolicyLocked = Boolean(geoConfig?.geofence?.policyLocked);
-  const geofenceSaveBlocked = readOnly || geofencePolicyLocked;
+  const geofenceSaveBlocked = geofenceLiveEdit ? false : readOnly || geofencePolicyLocked;
   const mapUpdatedLabel = formatTimeLabel(locations?.lastUpdate);
 
   return (
@@ -539,8 +563,17 @@ export default function MapsPage() {
 
             <ol className="service-area-steps">
               <li>No mapa, toque numa área para editar e arraste os vértices, ou use <strong>Desenhar nova área</strong>.</li>
-              <li>Confira a versão e gere o arquivo <strong>geofence.json</strong>.</li>
-              <li>O arquivo entra no backend por PR e passa a valer no deploy. O mapa aqui é só rascunho.</li>
+              {geofenceLiveEdit ? (
+                <>
+                  <li>Confira a versão e toque em <strong>Publicar nova versão</strong>.</li>
+                  <li>O backend valida e a área passa a valer em todos os servidores na hora. Dá para voltar a qualquer versão abaixo.</li>
+                </>
+              ) : (
+                <>
+                  <li>Confira a versão e gere o arquivo <strong>geofence.json</strong>.</li>
+                  <li>O arquivo entra no backend por PR e passa a valer no deploy. O mapa aqui é só rascunho.</li>
+                </>
+              )}
             </ol>
             {geofenceSaveBlocked ? (
               <div className="notice-banner" role="status">
@@ -551,10 +584,15 @@ export default function MapsPage() {
                   {geoConfig?.geofence?.regionVersion ? ` Versão em uso: ${geoConfig.geofence.regionVersion}.` : ""}
                 </p>
               </div>
-            ) : null}
+            ) : (
+              <p className="table-muted">
+                Versão em uso: <strong>{geoConfig?.geofence?.regionVersion || "-"}</strong>
+                {geoConfig?.geofence?.regionSource === "admin-live" ? " (publicada pelo painel)" : " (arquivo do backend)"}
+              </p>
+            )}
 
             <div className="filters">
-              <label className="table-muted" htmlFor="geofence-export-version">Versão do arquivo</label>
+              <label className="table-muted" htmlFor="geofence-export-version">Nova versão</label>
               <input
                 id="geofence-export-version"
                 value={exportPolicyId}
@@ -571,8 +609,24 @@ export default function MapsPage() {
             </div>
 
             <div className="service-area-actions">
+              {!geofenceSaveBlocked ? (
+                <button
+                  className="btn-primary"
+                  onClick={() => requestMapMutation({
+                    title: geofenceLiveEdit ? `Publicar ${exportPolicyId || "nova versão"}?` : "Salvar área de atendimento?",
+                    description: geofenceLiveEdit
+                      ? "A área desenhada passa a valer na hora para novas cotações e corridas em todos os servidores. Corridas em andamento não mudam."
+                      : "O polígono salvo passa a governar a elegibilidade operacional após a validação do backend.",
+                    confirmLabel: geofenceLiveEdit ? "Publicar" : "Salvar área",
+                    task: saveGeofenceRegion,
+                  })}
+                  disabled={confirmationOpen || geoLoading || geofenceBusy || geofenceDraftInvalid || !geofenceDraftParsed?.length}
+                >
+                  {geofenceLiveEdit ? "Publicar nova versão" : "Salvar área no painel"}
+                </button>
+              ) : null}
               <button
-                className="btn-primary"
+                className={geofenceSaveBlocked ? "btn-primary" : "button-secondary"}
                 onClick={downloadGeofenceFile}
                 disabled={geoLoading || geofenceDraftInvalid || !geofenceDraftParsed?.length}
               >
@@ -591,21 +645,41 @@ export default function MapsPage() {
             </div>
             {exportMessage ? <p className="table-muted" role="status">{exportMessage}</p> : null}
 
-            {!geofenceSaveBlocked ? (
-              <div className="service-area-actions">
-                <button
-                  className="button-secondary"
-                  onClick={() => requestMapMutation({
-                    title: "Salvar área de atendimento?",
-                    description: "O polígono salvo passa a governar a elegibilidade operacional após a validação do backend.",
-                    confirmLabel: "Salvar área",
-                    task: saveGeofenceRegion,
+            {geofenceLiveEdit && geofenceVersions.length > 0 ? (
+              <details className="technical-details">
+                <summary>Versões publicadas ({geofenceVersions.length})</summary>
+                <ul style={{ listStyle: "none", padding: "8px 12px", margin: 0, display: "grid", gap: 8 }}>
+                  {geofenceVersions.map((version) => {
+                    const current = geoConfig?.geofence?.liveVersion?.id === version.id;
+                    return (
+                      <li key={version.id} style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+                        <span className="table-muted">
+                          <strong>{version.policyId}</strong> · {version.polygonCount} áreas, {version.pointCount} pontos
+                          {" · "}{version.createdAt ? new Date(version.createdAt).toLocaleString("pt-BR") : "-"}
+                          {version.createdBy ? ` · ${version.createdBy}` : ""}
+                          {version.restoredFrom ? " · restaurada" : ""}
+                        </span>
+                        {current ? (
+                          <span className="status-ok">Em uso</span>
+                        ) : (
+                          <button
+                            className="button-secondary"
+                            onClick={() => requestMapMutation({
+                              title: `Voltar para ${version.policyId}?`,
+                              description: "Essa área volta a valer na hora para novas cotações e corridas em todos os servidores.",
+                              confirmLabel: "Voltar versão",
+                              task: () => restoreGeofenceVersion(version),
+                            })}
+                            disabled={confirmationOpen || geofenceBusy}
+                          >
+                            Voltar para esta
+                          </button>
+                        )}
+                      </li>
+                    );
                   })}
-                  disabled={confirmationOpen || geoLoading || geofenceBusy || geofenceDraftInvalid}
-                >
-                  Salvar área no painel
-                </button>
-              </div>
+                </ul>
+              </details>
             ) : null}
 
             <details className="technical-details">

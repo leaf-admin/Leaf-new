@@ -504,7 +504,7 @@ class GeofenceService {
      * @param {Array<Array<number>>} newRegion - Nova região [lng, lat]
      * @returns {boolean} true se atualizado com sucesso
      */
-    updateRegion(newRegion) {
+    updateRegion(newRegion, metadata = {}) {
         const normalized = normalizeRegionCoordinates(newRegion);
         if (!normalized) {
             logger.error('❌ Região inválida para atualização');
@@ -512,11 +512,12 @@ class GeofenceService {
         }
 
         this.allowedRegion = normalized;
-        this.regionSource = 'runtime';
+        // A versão salva pelo painel traz a própria identificação; sem ela vale o env.
+        this.regionSource = metadata.source || 'runtime';
         this.regionMetadata = {
-            version: String(process.env.GEOFENCE_REGION_VERSION || 'runtime').trim(),
-            updatedAt: new Date().toISOString(),
-            name: String(process.env.GEOFENCE_REGION_NAME || '').trim() || null
+            version: String(metadata.version || process.env.GEOFENCE_REGION_VERSION || 'runtime').trim(),
+            updatedAt: metadata.updatedAt || new Date().toISOString(),
+            name: String(metadata.name || process.env.GEOFENCE_REGION_NAME || '').trim() || null
         };
         logger.info('✅ Região de geofence atualizada', {
             polygons: normalized.length,

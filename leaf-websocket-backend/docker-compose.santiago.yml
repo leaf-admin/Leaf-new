@@ -18,6 +18,8 @@ x-santiago-gateway-env: &santiago_gateway_env
   BIOMETRIC_FACE_SERVICE_URL: ${SANTIAGO_FACE_COMPARE_URL:-http://10.77.0.2:8008}
   DAILY_EARNINGS_REPORT_ENABLED: ${LEAF_SANTIAGO_PRIMARY:-false}
   RIDE_FINALIZATION_OUTBOX_ENABLED: ${LEAF_SANTIAGO_PRIMARY:-false}
+  # Área de atendimento publicada pelo painel (versionada, vale nos dois gateways).
+  GEOFENCE_ADMIN_EDIT_ENABLED: ${GEOFENCE_ADMIN_EDIT_ENABLED:-false}
 
 services:
   redis:
