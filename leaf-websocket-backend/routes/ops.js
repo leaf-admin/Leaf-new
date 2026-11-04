@@ -13,6 +13,7 @@ const backofficeCommandCenterService = require('../services/backoffice-command-c
 const backofficeCostGuardService = require('../services/backoffice-cost-guard-service');
 const externalInsightsService = require('../services/external-insights-service');
 const pilotKpiService = require('../services/pilot-kpi-service');
+const onboardingFunnelService = require('../services/onboarding-funnel-service');
 const { logError } = require('../utils/logger');
 
 const router = express.Router();
@@ -119,6 +120,26 @@ router.get('/external-insights', async (req, res) => {
   } catch (error) {
     logError(error, { service: 'ops-routes', operation: 'external-insights' });
     res.status(500).json({ success: false, error: 'Erro ao buscar dados externos' });
+  }
+});
+
+// Funil do cadastro no app (PostHog), só contagens e em cache. days aceita 7, 14
+// ou 30; só quem pode mutar ignora o cache.
+router.get('/onboarding-funnel', async (req, res) => {
+  try {
+    const days = Number.parseInt(req.query?.days, 10);
+    if (req.query?.days !== undefined && !onboardingFunnelService.ALLOWED_DAYS.includes(days)) {
+      return res.status(400).json({ success: false, error: 'days deve ser 7, 14 ou 30' });
+    }
+    const snapshot = await onboardingFunnelService.getSnapshot({
+      days: Number.isFinite(days) ? days : undefined,
+      forceRefresh: req.query?.forceRefresh === 'true' && userCanBypassCommandCenterCache(req.user)
+    });
+    res.set('X-Leaf-Onboarding-Funnel-Cache', snapshot.cache || 'UNKNOWN');
+    return res.json({ success: true, ...snapshot });
+  } catch (error) {
+    logError(error, { service: 'ops-routes', operation: 'onboarding-funnel' });
+    return res.status(500).json({ success: false, error: 'Erro ao buscar o funil de cadastro' });
   }
 });
 

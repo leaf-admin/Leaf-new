@@ -405,6 +405,10 @@ class LeafApiService {
     return this.request(`/ops/external-insights${forceRefresh ? "?forceRefresh=true" : ""}`);
   }
 
+  async getOnboardingFunnel({ days = 14 } = {}) {
+    return this.request(`/ops/onboarding-funnel?days=${encodeURIComponent(days)}`);
+  }
+
   async getGoogleCost() {
     return this.request("/ops/google-cost");
   }
