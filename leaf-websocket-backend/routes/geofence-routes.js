@@ -5,6 +5,7 @@ const { logStructured, logError } = require('../utils/logger');
 const { isPilotControlledLaunch } = require('../utils/pilot-launch-flags');
 const { authenticateJWT, requireRole } = require('../middleware/jwt-auth');
 const { requireAdminMutationsEnabled } = require('../middleware/admin-mutation-guard');
+const geofenceLivePolicy = require('../services/geofence-live-policy-service');
 
 let firebaseConfig = null;
 try {
@@ -81,7 +82,8 @@ function normalizeGeofenceAdminConfig(rawConfig) {
         enabled: typeof rawConfig?.enabled === 'boolean' ? rawConfig.enabled : defaults.enabled,
         region: Array.isArray(rawConfig?.region) ? rawConfig.region : defaults.region,
         updatedAt: rawConfig?.updatedAt || defaults.updatedAt,
-        updatedBy: rawConfig?.updatedBy || defaults.updatedBy
+        updatedBy: rawConfig?.updatedBy || defaults.updatedBy,
+        liveVersion: rawConfig?.liveVersion || null
     };
 }
 
@@ -93,6 +95,9 @@ function applyGeofenceAdminConfig(configToApply) {
     // disable it or replace it with a legacy region during bootstrap.
     if (isPilotControlledLaunch()) {
         geofenceService.setEnabled(true);
+        // Exceção: a versão salva pelo painel com GEOFENCE_ADMIN_EDIT_ENABLED. Um
+        // registro antigo sem liveVersion nunca troca o arquivo.
+        geofenceLivePolicy.applyLiveConfig(config);
         return {
             ...config,
             enabled: true,
@@ -100,7 +105,9 @@ function applyGeofenceAdminConfig(configToApply) {
         };
     }
 
-    if (Array.isArray(config.region) && config.region.length > 0) {
+    if (geofenceLivePolicy.applyLiveConfig(config)) {
+        // Versão viva aplicada com a identificação dela.
+    } else if (Array.isArray(config.region) && config.region.length > 0) {
         const updated = geofenceService.updateRegion(config.region);
         if (!updated) {
             logStructured('warn', 'Regiao de geofence invalida no config admin, mantendo regiao atual', {
@@ -119,6 +126,17 @@ function applyGeofenceAdminConfig(configToApply) {
     }
 
     return config;
+}
+
+// No piloto a área só muda pelo arquivo, a não ser que a edição ao vivo esteja ligada.
+function isGeofencePolicyLocked() {
+    return isPilotControlledLaunch() && !geofenceLivePolicy.isEnabled();
+}
+
+// Com a edição ao vivo ligada, salvar a área não depende da flag geral de mutações.
+function requireGeofenceRegionMutation(req, res, next) {
+    if (geofenceLivePolicy.isEnabled()) return next();
+    return requireAdminMutationsEnabled(req, res, next);
 }
 
 function buildGeofenceResponse(config) {
@@ -141,8 +159,10 @@ function buildGeofenceResponse(config) {
         regionPolygons: operationalStatus.regionPolygons,
         regionPoints: operationalStatus.regionPoints,
         destinationInsideRegionRequired: operationalStatus.destinationInsideRegionRequired,
-        policyLocked: isPilotControlledLaunch(),
-        policyLockCode: isPilotControlledLaunch() ? 'GEOFENCE_POLICY_LOCKED' : null,
+        policyLocked: isGeofencePolicyLocked(),
+        policyLockCode: isGeofencePolicyLocked() ? 'GEOFENCE_POLICY_LOCKED' : null,
+        adminEditEnabled: geofenceLivePolicy.isEnabled(),
+        liveVersion: config?.liveVersion || null,
         region: currentRegion,
         updatedAt: config?.updatedAt || null,
         updatedBy: config?.updatedBy || null
@@ -402,7 +422,7 @@ async function syncGeofenceConfigToRuntime() {
     }
 }
 
-void syncGeofenceConfigToRuntime();
+void syncGeofenceConfigToRuntime().then(() => geofenceLivePolicy.start());
 
 /**
  * GET /api/geofence/check
@@ -542,9 +562,40 @@ router.get('/admin/config', authenticateJWT, requireRole(ADMIN_ROLES), async (re
  * PATCH /api/geofence/admin/config
  * Atualiza geofence sem reiniciar backend
  * Body: { enabled?: boolean, region?: Array<[lng,lat]> }
+ * Com GEOFENCE_ADMIN_EDIT_ENABLED: { region, policyId, name? } vira uma versão
+ * nova que vale em todos os gateways; desligar a área segue bloqueado no piloto.
  */
-router.patch('/admin/config', authenticateJWT, requireRole(ADMIN_ROLES), requireAdminMutationsEnabled, async (req, res) => {
+router.patch('/admin/config', authenticateJWT, requireRole(ADMIN_ROLES), requireGeofenceRegionMutation, async (req, res) => {
     try {
+        if (geofenceLivePolicy.isEnabled()) {
+            const { enabled, region, policyId, name } = req.body || {};
+            if (enabled === false && isPilotControlledLaunch()) {
+                return res.status(409).json({
+                    success: false,
+                    code: 'GEOFENCE_DISABLE_LOCKED',
+                    message: 'Durante o piloto a área não pode ser desligada pelo painel.'
+                });
+            }
+            if (region === undefined) {
+                return res.status(400).json({ success: false, message: 'Envie a área (region) e a versão (policyId).' });
+            }
+            const { config } = await loadGeofenceAdminConfig();
+            const saved = await geofenceLivePolicy.saveVersion({
+                region,
+                policyId,
+                name,
+                actor: extractAdminId(req),
+                baseConfig: config
+            });
+            return res.json({
+                success: true,
+                message: `Versão ${saved.version.policyId} publicada`,
+                version: saved.version,
+                geofence: buildGeofenceResponse(saved.config),
+                storage: 'firebase'
+            });
+        }
+
         if (isPilotControlledLaunch()) {
             return res.status(409).json({
                 success: false,
@@ -600,6 +651,9 @@ router.patch('/admin/config', authenticateJWT, requireRole(ADMIN_ROLES), require
             storage
         });
     } catch (error) {
+        if (error?.statusCode && error.statusCode < 500) {
+            return res.status(error.statusCode).json({ success: false, message: error.message });
+        }
         logError(error, 'Erro ao atualizar configuracao de geofence admin', {
             service: 'geofence-routes'
         });
@@ -607,6 +661,52 @@ router.patch('/admin/config', authenticateJWT, requireRole(ADMIN_ROLES), require
             success: false,
             message: 'Erro interno ao atualizar configuracao de geofence'
         });
+    }
+});
+
+/**
+ * GET /api/geofence/admin/versions
+ * Últimas versões salvas pelo painel (sem os pontos).
+ */
+router.get('/admin/versions', authenticateJWT, requireRole(ADMIN_ROLES), async (req, res) => {
+    if (!geofenceLivePolicy.isEnabled()) {
+        return res.json({ success: true, enabled: false, versions: [] });
+    }
+    try {
+        const versions = await geofenceLivePolicy.listVersions(req.query?.limit);
+        return res.json({ success: true, enabled: true, versions });
+    } catch (error) {
+        logError(error, 'Erro ao listar versões da geofence', { service: 'geofence-routes' });
+        return res.status(500).json({ success: false, message: 'Erro ao listar versões da geofence' });
+    }
+});
+
+/**
+ * POST /api/geofence/admin/versions/:versionId/restore
+ * Volta para uma versão anterior (gravada como versão nova, com restoredFrom).
+ */
+router.post('/admin/versions/:versionId/restore', authenticateJWT, requireRole(ADMIN_ROLES), async (req, res) => {
+    if (!geofenceLivePolicy.isEnabled()) {
+        return res.status(409).json({ success: false, message: 'Edição da geofence pelo painel está desligada.' });
+    }
+    try {
+        const { config } = await loadGeofenceAdminConfig();
+        const saved = await geofenceLivePolicy.restoreVersion(req.params.versionId, {
+            actor: extractAdminId(req),
+            baseConfig: config
+        });
+        return res.json({
+            success: true,
+            message: `Versão ${saved.version.policyId} restaurada`,
+            version: saved.version,
+            geofence: buildGeofenceResponse(saved.config)
+        });
+    } catch (error) {
+        if (error?.statusCode && error.statusCode < 500) {
+            return res.status(error.statusCode).json({ success: false, message: error.message });
+        }
+        logError(error, 'Erro ao restaurar versão da geofence', { service: 'geofence-routes' });
+        return res.status(500).json({ success: false, message: 'Erro ao restaurar versão da geofence' });
     }
 });
 

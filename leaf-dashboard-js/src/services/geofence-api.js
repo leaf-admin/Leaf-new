@@ -40,6 +40,14 @@ export class GeofenceApiClient {
       body: JSON.stringify(payload),
     });
   }
+
+  async listGeofenceVersions() {
+    return this.request("/geofence/admin/versions");
+  }
+
+  async restoreGeofenceVersion(versionId) {
+    return this.request(`/geofence/admin/versions/${encodeURIComponent(versionId)}/restore`, { method: "POST" });
+  }
 }
 
 export default GeofenceApiClient;

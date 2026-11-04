@@ -816,6 +816,14 @@ class LeafApiService {
     return this.geofenceApi.updateGeofenceConfig(payload);
   }
 
+  async listGeofenceVersions() {
+    return this.geofenceApi.listGeofenceVersions();
+  }
+
+  async restoreGeofenceVersion(versionId) {
+    return this.geofenceApi.restoreGeofenceVersion(versionId);
+  }
+
   async updateGeofenceState(stateCode, enabled) {
     return this.geofenceApi.updateGeofenceState(stateCode, enabled);
   }
