@@ -152,10 +152,16 @@ import { fetchDynamicPricingQuote } from '../../services/runtime/pricingQuoteSer
 import { confirmDriverEarlyEnd } from './home/driverEarlyEndConfirm';
 import Logger from '../../utils/Logger';
 import { resolveHomeQuoteFailurePresentation } from './home/homeQuoteFailurePresentation';
+import { checkServiceAreaCoverage, coverageCacheKey } from '../../services/serviceAreaCoverage';
+import { PILOT_SERVICE_AREA_LABEL } from '../../config/driverFeePolicy';
 import { useLiveRouteTiming } from './liveRouteTiming';
 import { leafButtonMetrics } from '../../components/prototype/LeafRideUI';
 
 const HOME_AVAILABILITY_RETRY_MS = 15000;
+const PASSENGER_COVERAGE_NOTICE = {
+  title: 'A Leaf ainda não chega aqui',
+  message: `Por enquanto, atendemos só a ${PILOT_SERVICE_AREA_LABEL}. Escolha um embarque dentro dessa área para pedir.`,
+};
 
 // Telas empilhadas por cima da Início de onde uma oferta nova traz o motorista de volta.
 const OFFER_RETURNS_HOME_FROM_ROUTES = new Set([
@@ -10108,6 +10114,23 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   // Onde o ponto de embarque está na tela, para a etiqueta "Seu embarque" ficar presa a ele.
   const [landingPickupAnchor, setLandingPickupAnchor] = useState(null);
   const [landingMapMoving, setLandingMapMoving] = useState(false);
+  // Embarque fora da área: avisa na tela inicial, antes de qualquer busca ou rota paga.
+  const [homePickupCoverage, setHomePickupCoverage] = useState(null);
+  const homePickupCoverageKey = coverageCacheKey(effectiveHomePickupCoordinate);
+  useEffect(() => {
+    if (!passengerLandingVisible || landingMapMoving || !homePickupCoverageKey) return undefined;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      checkServiceAreaCoverage(effectiveHomePickupCoordinate).then((status) => {
+        if (!cancelled) setHomePickupCoverage(status);
+      });
+    }, 500);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+    // A chave arredondada (~100 m) evita uma consulta a cada movimento do mapa.
+  }, [homePickupCoverageKey, landingMapMoving, passengerLandingVisible]);
   const landingPickupLatitude = effectiveHomePickupCoordinate?.latitude;
   const landingPickupLongitude = effectiveHomePickupCoordinate?.longitude;
   const landingMapRegionRef = useRef(null);
@@ -10595,6 +10618,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
 
         {passengerLandingVisible ? <LeafPassengerLanding
           insets={insets}
+          coverageNotice={homePickupCoverage === 'outside' ? PASSENGER_COVERAGE_NOTICE : null}
           pickupLabel={homePickupDisplayLabel}
           onDestinationPress={() => handleOpenPassengerDestination()}
           onVoicePress={() => handleOpenPassengerDestination({ autoStartVoice: true })}

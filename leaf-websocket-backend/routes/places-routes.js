@@ -14,6 +14,7 @@ const { placesAccess } = require('../middleware/places-access');
 const { requireFirebaseUser } = require('../middleware/firebase-user-auth');
 const redisPool = require('../utils/redis-pool');
 const rideRoutePlanStore = require('../services/ride-route-plan-store');
+const geofenceService = require('../services/geofence-service');
 const streetGraphService = require('../services/street-graph-service');
 const { authenticateJWT, requireRole } = require('../middleware/jwt-auth');
 
@@ -44,6 +45,25 @@ function normalizeText(value, fallback = '') {
   }
   const normalized = value.trim();
   return normalized.length > 0 ? normalized : fallback;
+}
+
+// Prévias do passageiro antes de cotar: fora da área não há corrida, então não
+// vale pagar o Google. A navegação do motorista fica de fora (ele pode vir de
+// fora da área até o embarque).
+const PASSENGER_PREVIEW_SCOPES = new Set([
+  'passenger_home_preview',
+  'passenger_home_category_preview',
+  'passenger_quote_preview',
+]);
+
+function validatePassengerPreviewCoverage(routeScope, startLoc, destLoc) {
+  if (!PASSENGER_PREVIEW_SCOPES.has(normalizeText(routeScope, '').toLowerCase())) return null;
+  if (!geofenceService.isActive()) return null;
+  const pickup = rideRoutePlanStore.parsePoint(startLoc);
+  const destination = rideRoutePlanStore.parsePoint(destLoc);
+  if (!pickup || !destination) return null;
+  const validation = geofenceService.validateRideLocations(pickup, destination);
+  return validation.valid ? null : validation;
 }
 
 function requiresCanonicalDirectionsRoute(routeScope = '') {
@@ -844,6 +864,16 @@ router.post('/api/places/directions', placesAccess('directions'), async (req, re
       return res.status(400).json({
         status: 'error',
         message: 'startLoc e destLoc são obrigatórios no formato "lat,lng".',
+      });
+    }
+
+    const coverage = validatePassengerPreviewCoverage(routeScope, startLoc, destLoc);
+    if (coverage) {
+      return res.status(422).json({
+        status: 'error',
+        code: coverage.code || 'ROUTE_OUT_OF_COVERAGE',
+        retryable: coverage.retryable === true,
+        message: coverage.error || 'Origem ou destino fora da área de operação da Leaf.',
       });
     }
 
