@@ -32,7 +32,16 @@ jest.mock('../../../services/ride-cost-telemetry-service', () => ({
   getReport: (...args) => mockGetReport(...args),
 }));
 
+const mockGeofenceActive = jest.fn(() => false);
+const mockValidateRideLocations = jest.fn(() => ({ valid: true }));
+jest.mock('../../../services/geofence-service', () => ({
+  isActive: (...args) => mockGeofenceActive(...args),
+  validateRideLocations: (...args) => mockValidateRideLocations(...args),
+}));
+
 jest.mock('../../../utils/logger', () => ({
+  logStructured: jest.fn(),
+  logError: jest.fn(),
   logger: {
     info: jest.fn(),
     warn: jest.fn(),
@@ -69,6 +78,8 @@ describe('places routes', () => {
     mockIngestGoogleSkuUsage.mockResolvedValue({});
     mockIngestOperationalUsage.mockResolvedValue({});
     mockGetReport.mockResolvedValue(null);
+    mockGeofenceActive.mockReturnValue(false);
+    mockValidateRideLocations.mockReturnValue({ valid: true });
   });
 
   it('uses backend autocomplete and records booking telemetry when bookingId is provided', async () => {
@@ -692,5 +703,51 @@ describe('places routes', () => {
       code: 'invalid_route_geometry',
     }));
     expect(mockIngestGoogleSkuUsage).not.toHaveBeenCalled();
+  });
+
+  describe('passenger preview outside the service area', () => {
+    const previewBody = {
+      startLoc: '-23.0000,-43.3650',
+      destLoc: '-22.9711,-43.1823',
+      routeScope: 'passenger_home_preview',
+    };
+
+    it('answers 422 without calling Google when the pickup is outside', async () => {
+      mockGeofenceActive.mockReturnValue(true);
+      mockValidateRideLocations.mockReturnValue({
+        valid: false, code: 'PICKUP_OUTSIDE_REGION', error: 'Origem fora da região de operação permitida',
+      });
+
+      const response = await request(createApp()).post('/api/places/directions').send(previewBody);
+
+      expect(response.status).toBe(422);
+      expect(response.body).toMatchObject({ status: 'error', code: 'PICKUP_OUTSIDE_REGION' });
+      expect(mockValidateRideLocations).toHaveBeenCalledWith(
+        { lat: -23, lng: -43.365 },
+        { lat: -22.9711, lng: -43.1823 },
+      );
+      expect(mockFetchDirectionsRoute).not.toHaveBeenCalled();
+    });
+
+    it('keeps driver navigation out of the check', async () => {
+      mockGeofenceActive.mockReturnValue(true);
+      mockValidateRideLocations.mockReturnValue({ valid: false, code: 'PICKUP_OUTSIDE_REGION' });
+
+      await request(createApp()).post('/api/places/directions').send({ ...previewBody, routeScope: 'active_ride_navigation' });
+
+      expect(mockValidateRideLocations).not.toHaveBeenCalled();
+      expect(mockFetchDirectionsRoute).toHaveBeenCalled();
+    });
+
+    it('lets the preview through inside the area or with the geofence off', async () => {
+      mockGeofenceActive.mockReturnValue(true);
+      await request(createApp()).post('/api/places/directions').send(previewBody);
+      expect(mockFetchDirectionsRoute).toHaveBeenCalledTimes(1);
+
+      mockGeofenceActive.mockReturnValue(false);
+      mockValidateRideLocations.mockReturnValue({ valid: false, code: 'PICKUP_OUTSIDE_REGION' });
+      await request(createApp()).post('/api/places/directions').send(previewBody);
+      expect(mockFetchDirectionsRoute).toHaveBeenCalledTimes(2);
+    });
   });
 });

@@ -69,6 +69,7 @@ export default function LeafPassengerLanding({
   onPickupPress,
   onSettingsPress,
   onRecenterPress,
+  coverageNotice = null,
 }) {
   return <View pointerEvents="box-none" style={StyleSheet.absoluteFill} testID="leaf-passenger-landing">
     <LinearGradient
@@ -96,6 +97,22 @@ export default function LeafPassengerLanding({
           <Text style={styles.now}>Agora</Text>
         </View>
       </LeafTouchable>
+      {coverageNotice ? (
+        <View style={styles.coverage} accessibilityRole="alert" testID="passenger-home-coverage-notice">
+          <View style={styles.coverageIcon}>
+            <Ionicons name="location-outline" size={18} color="#222222" />
+          </View>
+          <View style={styles.coverageText}>
+            <Text style={styles.coverageTitle}>{coverageNotice.title}</Text>
+            <Text style={styles.coverageMessage}>{coverageNotice.message}</Text>
+            {onPickupPress ? (
+              <LeafTouchable onPress={onPickupPress} accessibilityRole="button" testID="passenger-home-coverage-change-pickup">
+                <Text style={styles.coverageAction}>Mudar embarque</Text>
+              </LeafTouchable>
+            ) : null}
+          </View>
+        </View>
+      ) : null}
     </View>
 
     <PickupMapLabel anchor={pickupAnchor} moving={mapMoving} label={pickupLabel} onPress={onPickupPress} />
@@ -132,6 +149,16 @@ const styles = StyleSheet.create({
   lens: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', backgroundColor: '#222222' },
   searchTitle: { ...leafTypography.semiBold, fontSize: 21, lineHeight: 27, letterSpacing: -0.4, color: '#222222', flex: 1 },
   now: { ...leafTypography.regular, fontSize: 12, lineHeight: 17, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 18, backgroundColor: '#F2F4EF', color: '#222222' },
+  coverage: {
+    flexDirection: 'row', gap: 12, padding: 14, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.98)',
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(17,20,16,0.08)',
+    shadowColor: '#0E1F12', shadowOpacity: 0.12, shadowOffset: { width: 0, height: 6 }, shadowRadius: 16, elevation: 6,
+  },
+  coverageIcon: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F2F4EF' },
+  coverageText: { flex: 1, gap: 3 },
+  coverageTitle: { ...leafTypography.semiBold, fontSize: 15, lineHeight: 20, color: '#222222' },
+  coverageMessage: { ...leafTypography.regular, fontSize: 13, lineHeight: 18, color: '#4A4A4A' },
+  coverageAction: { ...leafTypography.semiBold, fontSize: 13, lineHeight: 18, color: '#222222', textDecorationLine: 'underline', marginTop: 4 },
   recenter: { position: 'absolute', right: 20 },
   pickupLabelWrap: { position: 'absolute', maxWidth: 260 },
   pickupLabel: {
