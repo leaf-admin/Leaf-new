@@ -206,7 +206,6 @@ describe('KYC liveness error presentation', () => {
   test.each([
     'KYC_CANONICAL_ROUTE_REQUIRED',
     'KYC_SANDBOX_LEGACY_ROUTE_DISABLED',
-    'KYC_IDENTITY_RETRY_BINDING_REQUIRED',
     'KYC_IDENTITY_RETRY_AUTHORIZATION_REQUIRED',
     'KYC_IDENTITY_RETRY_SESSION_BINDING_REQUIRED',
   ])('keeps internal route and retry bindings out of the UI (%s)', (code) => {
@@ -220,6 +219,22 @@ describe('KYC liveness error presentation', () => {
       message: 'Não foi possível preparar a validação agora. Tente novamente em alguns minutos.',
       allowLocalFallback: false,
     });
+    expect(`${presentation.title} ${presentation.message}`).not.toMatch(TECHNICAL_TERMS);
+  });
+
+  test('sends a lost retry binding to support instead of asking to wait', () => {
+    // The backend answers 409 for this state: it never heals by retrying later.
+    const presentation = resolveKycLivenessErrorPresentation({
+      code: 'KYC_IDENTITY_RETRY_BINDING_REQUIRED',
+      message: 'A nova tentativa perdeu o vinculo de autorizacao',
+    });
+
+    expect(presentation).toEqual({
+      title: 'Nova tentativa necessária',
+      message: 'Precisamos liberar uma nova tentativa. Fale com o suporte.',
+      allowLocalFallback: false,
+    });
+    expect(presentation.message).not.toMatch(/alguns minutos/);
     expect(`${presentation.title} ${presentation.message}`).not.toMatch(TECHNICAL_TERMS);
   });
 

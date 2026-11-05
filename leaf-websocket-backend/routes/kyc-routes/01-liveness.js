@@ -26,6 +26,31 @@ const {
 const userStore = require('../../services/user-store');
 
 // Current identity reverification challenge on users/{uid}; null when unreadable.
+function notifyRetryBindingLost(userId, context = {}) {
+  try {
+    const alertService = require('../../services/alert-service');
+    Promise.resolve(alertService.sendAlert({
+      severity: 'warning',
+      service: 'kyc-identity-review',
+      // Per driver, so the in-memory cooldown does not hide a second driver.
+      metric: `kyc_identity_retry_binding_lost:${String(userId || 'unknown').slice(0, 64)}`,
+      value: 1,
+      threshold: 0,
+      message: 'Motorista com nova tentativa de validacao autorizada, mas sem o registro de reverificacao. '
+        + 'Ele nao consegue validar a identidade sozinho: o suporte precisa liberar uma nova tentativa.',
+      metadata: {
+        driverId: userId || null,
+        retryAuthorizationId: context?.retryAuthorizationId || null,
+        retryKind: context?.retryAuthorizationKind || null,
+        namespace: context?.kycNamespace || null,
+        reverificationRecord: context?.identityStatePresent ? (context?.identityStatus || 'present') : 'missing'
+      }
+    })).catch(() => null);
+  } catch (_error) {
+    // Alerting must never change the response to the driver.
+  }
+}
+
 async function readIdentityReverification(userId) {
   const firestore = userStore.resolveFirestore();
   if (!firestore) return null;
@@ -180,6 +205,13 @@ class KYCRoutesLiveness {
           if (!canonicalBindingValid) {
             const error = new Error('A nova tentativa perdeu o vinculo de autorizacao');
             error.code = 'KYC_IDENTITY_RETRY_BINDING_REQUIRED';
+            error.retryBindingContext = {
+              retryAuthorizationId: retryAuthorizationId || null,
+              retryAuthorizationKind: identityReviewGate.retryAuthorizationKind || null,
+              identityStatePresent: Boolean(identityState),
+              identityStatus: canonicalStatus || null,
+              kycNamespace: kycRuntime.namespace || null
+            };
             throw error;
           }
           effectiveChallengeId = canonicalChallengeId;
@@ -566,10 +598,16 @@ class KYCRoutesLiveness {
           'KYC_AWS_COST_OPERATION_STATE_INVALID',
           'KYC_AWS_ADMISSION_CONTROL_REQUIRED',
           'KYC_AWS_ADMISSION_CONTROL_UNAVAILABLE',
-          'KYC_IDENTITY_RETRY_BINDING_REQUIRED',
           'KYC_IDENTITY_RETRY_AUTHORIZATION_REQUIRED'
         ].includes(error?.code)
           || String(error?.code || '').startsWith('PERSISTENCE_');
+        // The retry authorization exists but its reverification record is gone
+        // (e.g. it lived only in RTDB). It never heals by waiting: support must
+        // authorize a new attempt, so tell the driver and alert operations.
+        const retryBindingLost = error?.code === 'KYC_IDENTITY_RETRY_BINDING_REQUIRED';
+        if (retryBindingLost) {
+          notifyRetryBindingLost(req.body?.userId, error.retryBindingContext);
+        }
         const identityPermanentlyBlocked = error?.code === 'KYC_IDENTITY_FRAUD_PERMANENT_BLOCK';
         const challengeStale =
           error?.code === 'KYC_IDENTITY_REVERIFY_CHALLENGE_STALE';
@@ -582,12 +620,14 @@ class KYCRoutesLiveness {
         }
         const statusCode = identityPermanentlyBlocked
           ? 423
-          : ((activeTripDeferred || verificationBusy || retryResumeUnavailable || challengeStale)
+          : ((activeTripDeferred || verificationBusy || retryResumeUnavailable || challengeStale || retryBindingLost)
             ? 409
             : ((isDisabled || stateUnavailable || admissionCapacityExhausted) ? 503 : 500));
         logError(error, 'Erro ao criar sessão AWS liveness', { service: 'kyc-routes-routes' });
         const publicError = identityPermanentlyBlocked
           ? 'Esta conta nao pode usar o modo motorista.'
+          : retryBindingLost
+            ? 'Precisamos liberar uma nova tentativa. Fale com o suporte.'
           : challengeStale
             ? 'Sua solicitacao de validacao foi atualizada. Tente novamente.'
           : retryResumeUnavailable
