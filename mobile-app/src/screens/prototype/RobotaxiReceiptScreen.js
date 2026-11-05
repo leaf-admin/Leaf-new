@@ -677,6 +677,23 @@ const earlyEndPromptedReceiptIds = new Set();
 // the server kept refusing the answer.
 const earlyEndRetriedReceiptIds = new Set();
 
+// Ponto e quadrado das prévias da rota no recibo. Sem tracksViewChanges, o padrão do
+// react-native-maps é true: no Android ele recriava os ícones a cada 40 ms enquanto o recibo
+// ficava aberto, e o mapa redesenhava a ~40 quadros/s (150% de CPU, QA 2026-11-05). O desenho
+// não muda: captura por um instante depois de montar (antes disso o bitmap sai vazio) e congela.
+function ReceiptRouteMarker({ coordinate, children }) {
+  const [tracksViewChanges, setTracksViewChanges] = useState(true);
+  useEffect(() => {
+    const timer = setTimeout(() => setTracksViewChanges(false), 700);
+    return () => clearTimeout(timer);
+  }, []);
+  return (
+    <Marker coordinate={coordinate} anchor={{ x: 0.5, y: 0.5 }} tracksViewChanges={tracksViewChanges}>
+      {children}
+    </Marker>
+  );
+}
+
 export default function RobotaxiReceiptScreen({ navigation, route }) {
   const {
     tripHistory,
@@ -1681,19 +1698,16 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
             lineJoin="round"
           />
           {/* App endpoint markers (dot = pickup, square = destination), not default pins. */}
-          <Marker coordinate={routePreviewCoordinates[0]} anchor={{ x: 0.5, y: 0.5 }}>
+          <ReceiptRouteMarker coordinate={routePreviewCoordinates[0]}>
             <View style={styles.driverRouteSnapshotMarkerOuter}>
               <View style={[styles.driverRouteSnapshotMarkerInner, styles.driverRouteSnapshotMarkerPickup]} />
             </View>
-          </Marker>
-          <Marker
-            coordinate={routePreviewCoordinates[routePreviewCoordinates.length - 1]}
-            anchor={{ x: 0.5, y: 0.5 }}
-          >
+          </ReceiptRouteMarker>
+          <ReceiptRouteMarker coordinate={routePreviewCoordinates[routePreviewCoordinates.length - 1]}>
             <View style={styles.driverRouteSnapshotMarkerOuter}>
               <View style={[styles.driverRouteSnapshotMarkerInner, styles.driverRouteSnapshotMarkerDropoff]} />
             </View>
-          </Marker>
+          </ReceiptRouteMarker>
         </MapView>
       );
     }
@@ -2638,9 +2652,8 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                             strokeWidth={4}
                           />
                           {pickupCoordinate ? (
-                            <Marker
+                            <ReceiptRouteMarker
                               coordinate={pickupCoordinate}
-                              anchor={{ x: 0.5, y: 0.5 }}
                             >
                               <View
                                 style={styles.driverRouteSnapshotMarkerOuter}
@@ -2652,12 +2665,11 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                                   ]}
                                 />
                               </View>
-                            </Marker>
+                            </ReceiptRouteMarker>
                           ) : null}
                           {destinationCoordinate ? (
-                            <Marker
+                            <ReceiptRouteMarker
                               coordinate={destinationCoordinate}
-                              anchor={{ x: 0.5, y: 0.5 }}
                             >
                               <View
                                 style={styles.driverRouteSnapshotMarkerOuter}
@@ -2669,7 +2681,7 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                                   ]}
                                 />
                               </View>
-                            </Marker>
+                            </ReceiptRouteMarker>
                           ) : null}
                         </MapView>
                         <View style={styles.driverRouteSnapshotBadge}>
