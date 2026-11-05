@@ -190,6 +190,8 @@ const HOME_PICKUP_REVERSE_GEOCODE_DEBOUNCE_MS = 900;
 const HOME_PICKUP_REVERSE_GEOCODE_TIMEOUT_MS = 5500;
 const HOME_PICKUP_REVERSE_GEOCODE_PRECISION = 5;
 const HOME_PICKUP_REVERSE_GEOCODE_MAX_DISTANCE_METERS = 180;
+const HOME_CURRENT_PICKUP_REVERSE_MAX_TRIES = 2;
+const HOME_CURRENT_PICKUP_REVERSE_RETRY_MS = 30 * 1000;
 // A origem da estimativa só acompanha o GPS depois de um deslocamento real: cada
 // coordenada nova pede outra rota paga ao Google e refaz a cotação.
 const HOME_PICKUP_ROUTE_ANCHOR_METERS = 25;
@@ -2079,6 +2081,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
   const homePickupSearchSessionTokenRef = useRef('');
   const homePickupReverseRequestKeyRef = useRef('');
   const homeCurrentPickupReverseRequestKeyRef = useRef('');
+  const homeCurrentPickupLastAttemptRef = useRef(null);
   const passengerHomeResetTokenRef = useRef('');
   const latestPrototypeHomeAutomationPayload = useMemo(
     () => getLatestPrototypeHomeAutomationPayload(),
@@ -3160,10 +3163,54 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     selectedHomeDriverUnavailable,
   ]);
 
+  const passengerRideCycleActive = Boolean(
+    !isDriverRole && (activeBookingId || normalizedBookingStatus !== 'idle')
+  );
   useEffect(() => {
+    // A new ride ends this pickup session: the next idle home resolves once again.
+    if (passengerRideCycleActive) {
+      homeCurrentPickupLastAttemptRef.current = null;
+    }
+  }, [passengerRideCycleActive]);
+
+  const shouldResolveCurrentPickupAddress = Boolean(
+    !isDriverRole &&
+      isScreenFocused &&
+      !activeBookingId &&
+      normalizedBookingStatus === 'idle'
+  );
+
+  useEffect(() => {
+    // Paid lookup (Google Geocoding via backend). Only the idle passenger home
+    // needs the current pickup label: the driver keeps this screen mounted
+    // under the trip and used to resolve every GPS fix (~1 call/s per ride).
+    if (!shouldResolveCurrentPickupAddress) {
+      return undefined;
+    }
+
     if (homePickupAdjustedOnMap || !isFiniteCoordinate(currentCoordinate)) {
       setCachedHomePickupAddress(previous => (previous ? '' : previous));
       return undefined;
+    }
+
+    // One lookup per passenger home session: the pickup does not follow the GPS.
+    // Every fix is a new coordinate (and a cache miss), so re-resolving on
+    // movement paid Google for nothing. Only a failed lookup may retry, once,
+    // after 30 s. The session resets when a ride starts.
+    const lastAttempt = homeCurrentPickupLastAttemptRef.current;
+    if (lastAttempt) {
+      if (lastAttempt.address) {
+        setCachedHomePickupAddress(previous => (
+          previous === lastAttempt.address ? previous : lastAttempt.address
+        ));
+        return undefined;
+      }
+      if (
+        lastAttempt.tries >= HOME_CURRENT_PICKUP_REVERSE_MAX_TRIES ||
+        Date.now() - lastAttempt.at < HOME_CURRENT_PICKUP_REVERSE_RETRY_MS
+      ) {
+        return undefined;
+      }
     }
 
     let cancelled = false;
@@ -3196,6 +3243,11 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
             cachedAddress &&
             isHomePickupReverseGeocodeMatch(currentCoordinate, parsed)
           ) {
+            homeCurrentPickupLastAttemptRef.current = {
+              address: cachedAddress,
+              at: Date.now(),
+              tries: 0,
+            };
             setCachedHomePickupAddress(cachedAddress);
             return;
           }
@@ -3204,6 +3256,12 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
         // Local cache failure should not block current pickup resolution.
       }
 
+      const attempt = {
+        address: '',
+        at: Date.now(),
+        tries: (homeCurrentPickupLastAttemptRef.current?.tries || 0) + 1,
+      };
+      homeCurrentPickupLastAttemptRef.current = attempt;
       const resolved = await fetchHomePickupReverseGeocode(
         currentCoordinate,
         {
@@ -3218,18 +3276,24 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
         },
       );
 
-      if (cancelled || homeCurrentPickupReverseRequestKeyRef.current !== cacheKey) {
-        return;
-      }
-
       const resolvedAddress = resolvePickupAddressCandidate(
         resolved?.address,
         resolved?.name,
       );
-      if (
+      const resolvedMatches = Boolean(
         resolvedAddress &&
         isHomePickupReverseGeocodeMatch(currentCoordinate, resolved)
-      ) {
+      );
+      if (resolvedMatches && homeCurrentPickupLastAttemptRef.current === attempt) {
+        // Kept even if this effect was superseded: nearby fixes reuse it.
+        attempt.address = resolvedAddress;
+      }
+
+      if (cancelled || homeCurrentPickupReverseRequestKeyRef.current !== cacheKey) {
+        return;
+      }
+
+      if (resolvedMatches) {
         setCachedHomePickupAddress(resolvedAddress);
         AsyncStorage.setItem(
           cacheKey,
@@ -3257,6 +3321,7 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     homePickupAdjustedOnMap,
     profile?.uid,
     profileUid,
+    shouldResolveCurrentPickupAddress,
   ]);
 
   const isHomeRoute =
