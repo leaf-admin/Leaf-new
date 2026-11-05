@@ -74,6 +74,9 @@ jest.mock('firebase-admin', () => ({
 
 // users/{uid} reads go through services/user-store; the scenarios keep
 // describing them per path through mockGetFromRealtimeDB.
+const mockSendAlert = jest.fn(() => Promise.resolve());
+jest.mock('../../../services/alert-service', () => ({ sendAlert: (...args) => mockSendAlert(...args) }));
+
 jest.mock('../../../services/user-store', () => ({
   resolveFirestore: jest.fn(() => ({})),
   readUser: jest.fn(async (_firestore, uid) => (await mockGetFromRealtimeDB(`users/${uid}`)) ?? null),
@@ -1492,10 +1495,49 @@ describe('kyc routes auth', () => {
         requirement: 'IDENTITY_REVERIFICATION'
       });
 
-    expect(response.status).toBe(503);
+    // It never heals by waiting: 409 with a support message, plus an ops alert.
+    expect(response.status).toBe(409);
     expect(response.body.code).toBe('KYC_IDENTITY_RETRY_BINDING_REQUIRED');
+    expect(response.body.error).toBe('Precisamos liberar uma nova tentativa. Fale com o suporte.');
     expect(mockClaimVerificationWindow).not.toHaveBeenCalled();
     expect(mockCreateSession).not.toHaveBeenCalled();
+    expect(mockSendAlert).toHaveBeenCalledWith(expect.objectContaining({
+      severity: 'warning',
+      service: 'kyc-identity-review',
+      metric: 'kyc_identity_retry_binding_lost:driver-1',
+      metadata: expect.objectContaining({
+        driverId: 'driver-1',
+        retryAuthorizationId: `kyc_ir_${'f'.repeat(32)}`,
+        reverificationRecord: 'requested'
+      })
+    }));
+  });
+
+  it('alerts operations when the authorized retry has no reverification record at all', async () => {
+    mockAssertKycOperationAllowed.mockResolvedValueOnce({
+      allowed: true,
+      identityReviewHold: false,
+      cleanRetryAuthorized: true,
+      retryAuthorizationId: `kyc_ir_${'e'.repeat(32)}`,
+      retryAuthorizationKind: 'manual_review'
+    });
+    mockGetFromRealtimeDB.mockResolvedValueOnce(null);
+
+    const response = await request(createApp())
+      .post('/api/kyc/liveness/aws/session')
+      .set('Authorization', 'Bearer firebase-token')
+      .send({ userId: 'driver-1' });
+
+    expect(response.status).toBe(409);
+    expect(response.body.code).toBe('KYC_IDENTITY_RETRY_BINDING_REQUIRED');
+    expect(mockCreateSession).not.toHaveBeenCalled();
+    expect(mockSendAlert).toHaveBeenCalledWith(expect.objectContaining({
+      metadata: expect.objectContaining({
+        driverId: 'driver-1',
+        retryKind: 'manual_review',
+        reverificationRecord: 'missing'
+      })
+    }));
   });
 
   it('rebinds a stale activation request to the canonical authorized retry before AWS dispatch', async () => {
