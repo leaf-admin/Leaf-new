@@ -67,7 +67,7 @@ describe('dashboard KYC identity review boundary', () => {
   it('keeps list, evidence, reconcile and decisions behind the restricted KYC role', () => {
     expect(start).toBeGreaterThan(0);
     expect(reviewRoutes).toContain('authenticateJWT');
-    expect(reviewRoutes.match(/requireRole\(DASHBOARD_KYC_REVIEW_ROLES\)/g)).toHaveLength(5);
+    expect(reviewRoutes.match(/requireRole\(DASHBOARD_KYC_REVIEW_ROLES\)/g)).toHaveLength(6);
     expect(source).toContain("const DASHBOARD_KYC_REVIEW_ROLES = ['admin', 'super-admin', 'manager']");
   });
 
@@ -81,6 +81,20 @@ describe('dashboard KYC identity review boundary', () => {
     expect(listRoute).toContain('getOrphanHoldRecoveryCandidate');
     expect(listRoute).toContain('orphanRecoveryCandidate');
     expect(listRoute).not.toMatch(/referenceImageSha256|documentSha256/);
+  });
+
+  it('restores a lost retry binding only through the scoped gate, with reason and audit', () => {
+    const restoreStart = source.indexOf(
+      "'/api/drivers/:driverId/kyc/identity-reviews/:caseId/retry-binding/restore'"
+    );
+    expect(restoreStart).toBeGreaterThan(0);
+    const restoreRoute = source.slice(restoreStart, source.indexOf("router.post('/api/drivers/:driverId/approve'", restoreStart));
+    expect(restoreRoute).toContain('requireRole(DASHBOARD_KYC_REVIEW_ROLES)');
+    expect(restoreRoute).toContain('requireDashboardKycScopedPolicy(kycRuntime)');
+    expect(restoreRoute).toContain('normalizeKycReviewReason(req.body?.reason)');
+    expect(restoreRoute).toContain('applyGate: applyDashboardIdentityReverificationGate');
+    expect(restoreRoute).toContain("action: 'KYC_IDENTITY_RETRY_BINDING_RESTORED'");
+    expect(listRoute).toContain('retryBindingRestoreCandidate');
   });
 
   it('streams only integrity-checked evidence through Leaf with no public provider URL', () => {
@@ -247,7 +261,7 @@ describe('dashboard KYC identity review boundary', () => {
   });
 
   it('resolves scoped workflow, evidence and trust for every identity-review route', () => {
-    expect(allIdentityReviewRoutes.match(/resolveDashboardKycRuntime\(/g)).toHaveLength(6);
+    expect(allIdentityReviewRoutes.match(/resolveDashboardKycRuntime\(/g)).toHaveLength(7);
     expect(allIdentityReviewRoutes).toContain('kycRuntime.workflow.authorizeOrphanHoldRecovery');
     expect(reviewRoutes).toContain('kycRuntime.workflow.openCaseFromTicket');
     expect(reviewRoutes).toContain('kycRuntime.workflow.listCasesForDriver');
@@ -264,13 +278,13 @@ describe('dashboard KYC identity review boundary', () => {
     expect(reviewRoutes).toContain(
       '}, dashboardKycPersistenceContext(kycRuntime));'
     );
-    expect(allIdentityReviewRoutes.match(/dashboardKycAuditEnvelope\(kycRuntime\)/g)).toHaveLength(2);
+    expect(allIdentityReviewRoutes.match(/dashboardKycAuditEnvelope\(kycRuntime\)/g)).toHaveLength(3);
     expect(allIdentityReviewRoutes).toContain('persistenceScope: kycRuntime.scope.namespace');
     expect(reviewRoutes).toContain("'X-Leaf-KYC-Scope': kycRuntime.scope.namespace");
   });
 
   it('requires a capable policy in the same sandbox context before challenge mutations', () => {
-    expect(allIdentityReviewRoutes.match(/requireDashboardKycScopedPolicy\(kycRuntime\)/g)).toHaveLength(2);
+    expect(allIdentityReviewRoutes.match(/requireDashboardKycScopedPolicy\(kycRuntime\)/g)).toHaveLength(3);
     expect(source).toContain("'KYC_DASHBOARD_SANDBOX_POLICY_UNAVAILABLE'");
     expect(source).toContain("'KYC_DASHBOARD_SANDBOX_POLICY_SCOPE_MISMATCH'");
     expect(source).toContain('runtime?.capabilities?.challengePolicyMutations !== true');

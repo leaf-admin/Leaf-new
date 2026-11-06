@@ -9,7 +9,11 @@ const mockRedis = {
   hset: jest.fn(),
   hgetall: jest.fn(),
   zrevrange: jest.fn(),
+  zrangebyscore: jest.fn(),
+  zrem: jest.fn(),
+  zremrangebyscore: jest.fn(),
 };
+const sortedSets = new Map();
 
 const mockEnsureConnection = jest.fn(async () => undefined);
 const mockGetConnection = jest.fn(() => mockRedis);
@@ -30,6 +34,7 @@ describe('ride-cost-telemetry-service', () => {
     redisData.clear();
     redisHashes.clear();
     recentScores.clear();
+    sortedSets.clear();
     jest.clearAllMocks();
 
     mockGetConnection.mockImplementation(() => mockRedis);
@@ -38,10 +43,26 @@ describe('ride-cost-telemetry-service', () => {
       redisData.set(key, value);
       return 'OK';
     });
-    mockRedis.zadd.mockImplementation(async (_key, score, member) => {
+    mockRedis.zadd.mockImplementation(async (key, score, member) => {
+      if (String(key).includes(':pending_google:')) {
+        const set = sortedSets.get(key) || new Map();
+        set.set(member, score);
+        sortedSets.set(key, set);
+        return 1;
+      }
       recentScores.set(member, score);
       return 1;
     });
+    mockRedis.zrangebyscore.mockImplementation(async (key, min, max) => (
+      Array.from((sortedSets.get(key) || new Map()).entries())
+        .filter(([, score]) => score >= Number(min) && score <= Number(max))
+        .map(([member]) => member)
+    ));
+    mockRedis.zrem.mockImplementation(async (key, ...members) => {
+      members.forEach((member) => sortedSets.get(key)?.delete(member));
+      return members.length;
+    });
+    mockRedis.zremrangebyscore.mockImplementation(async () => 0);
     mockRedis.expire.mockImplementation(async () => 1);
     mockRedis.hset.mockImplementation(async (key, value) => {
       redisHashes.set(key, {
@@ -422,5 +443,64 @@ describe('ride-cost-telemetry-service', () => {
         costTelemetryDatabaseWrites: '1',
       }),
     );
+  });
+  it('adds repeated Google calls of the same source instead of keeping only the last', async () => {
+    for (let index = 0; index < 3; index += 1) {
+      await service.ingestGoogleSkuUsage({
+        bookingId: 'booking_acc',
+        skuKey: 'geocoding',
+        sourceKey: 'mobile:pickup_reverse:customer_1',
+        sourceMeta: { userId: 'customer_1', userType: 'customer' },
+      });
+    }
+    const report = JSON.parse(redisData.get('ride_cost_telemetry:booking_acc'));
+    const sku = report.sources['mobile:pickup_reverse:customer_1'].snapshot.google.skus.geocoding;
+    expect(sku.requestCount).toBe(3);
+    expect(sku.estimatedCostUsd).toBeCloseTo(0.015, 6);
+    expect(report.totals.google.requestCount).toBe(3);
+  });
+
+  it('attributes paid calls made before the booking to the ride that completes', async () => {
+    const bookingCreatedAt = 1793913651204;
+    await service.recordPendingGoogleUsage({
+      userId: 'customer_1', userType: 'customer', skuKey: 'placeDetailsLegacy',
+      surface: 'pickup_details', atMs: bookingCreatedAt - 5 * 60 * 1000,
+    });
+    await service.recordPendingGoogleUsage({
+      userId: 'customer_1', userType: 'customer', skuKey: 'placeDetailsLegacy',
+      surface: 'destination_resolution', atMs: bookingCreatedAt - 4 * 60 * 1000,
+    });
+    await service.recordPendingGoogleUsage({
+      userId: 'driver_1', userType: 'driver', skuKey: 'routesPreferredTrafficAwarePolyline',
+      surface: 'driver_accept', atMs: bookingCreatedAt + 2 * 60 * 1000,
+    });
+    // Too old: belongs to nothing in this ride.
+    await service.recordPendingGoogleUsage({
+      userId: 'customer_1', userType: 'customer', skuKey: 'geocoding',
+      atMs: bookingCreatedAt - 90 * 60 * 1000,
+    });
+
+    const result = await service.attachPendingGoogleUsage(`booking_${bookingCreatedAt}_customer_1`, {
+      participants: [
+        { userId: 'customer_1', userType: 'customer' },
+        { userId: 'driver_1', userType: 'driver' },
+      ],
+      fromMs: bookingCreatedAt - service.PENDING_GOOGLE_USAGE_LOOKBACK_MS,
+      toMs: bookingCreatedAt + 30 * 60 * 1000,
+    });
+
+    expect(result.attached).toBe(3);
+    const report = JSON.parse(redisData.get(`ride_cost_telemetry:booking_${bookingCreatedAt}_customer_1`));
+    expect(report.sources['pending_google:customer:customer_1'].snapshot.google.skus.placeDetailsLegacy.requestCount).toBe(2);
+    expect(report.sources['pending_google:driver:driver_1'].snapshot.google.skus.routesPreferredTrafficAwarePolyline.requestCount).toBe(1);
+    expect(report.totals.google.requestCount).toBe(3);
+
+    // Attributed calls are removed: a second completion attaches nothing.
+    const again = await service.attachPendingGoogleUsage('booking_other', {
+      participants: [{ userId: 'customer_1', userType: 'customer' }],
+      fromMs: bookingCreatedAt - service.PENDING_GOOGLE_USAGE_LOOKBACK_MS,
+      toMs: bookingCreatedAt + 30 * 60 * 1000,
+    });
+    expect(again.attached).toBe(0);
   });
 });

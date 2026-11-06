@@ -460,6 +460,28 @@ function registerSocketCompleteTripHandler({
                     .recordRideCompletionForCost(redis, resultBookingId || bookingId)
                     .catch(() => {});
 
+                // Chamadas pagas sem bookingId (busca, cotação, rota do aceite) entram no
+                // relatório desta corrida: passageiro desde 30 min antes do pedido.
+                {
+                    const rideCostTelemetryService = require('../services/ride-cost-telemetry-service');
+                    const completedBookingId = resultBookingId || bookingId;
+                    const createdAtMs = Number(String(completedBookingId || '').match(/^booking_(\d{13})_/)?.[1]) || null;
+                    const lookbackMs = rideCostTelemetryService.PENDING_GOOGLE_USAGE_LOOKBACK_MS;
+                    rideCostTelemetryService.attachPendingGoogleUsage(completedBookingId, {
+                        participants: [
+                            { userId: customerId, userType: 'customer' },
+                            { userId: resultDriverId || driverId, userType: 'driver' }
+                        ],
+                        fromMs: (createdAtMs || Date.now() - 2 * 60 * 60 * 1000) - lookbackMs,
+                        toMs: Date.now()
+                    }).catch((attachError) => {
+                        logStructured('warn', 'Falha ao anexar custo Google pendente à corrida', {
+                            bookingId: completedBookingId,
+                            error: attachError.message
+                        });
+                    });
+                }
+
                 // ✅ REFATORAÇÃO: Publicar evento no EventBus (listeners vão processar notificações)
                 if (event) {
                     // ✅ FASE 1.3: Criar span para Event publish
