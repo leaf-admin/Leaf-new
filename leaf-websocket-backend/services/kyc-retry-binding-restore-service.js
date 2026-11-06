@@ -4,8 +4,8 @@
 // already authorized. Some authorizations kept that record only in RTDB
 // (users/{id}/identityReverification) and lost it when KYC moved to Firestore
 // (#461): the driver then hits KYC_IDENTITY_RETRY_BINDING_REQUIRED forever.
-// This rebuilds exactly what the dashboard decision writes (same challenge id
-// and attempt scope), so the authorized retry becomes usable again.
+// This rebuilds what the dashboard decision writes (same attempt scope, a new
+// challenge id), so the authorized retry becomes usable again.
 const crypto = require('crypto');
 
 const MANUAL_REVIEW_RETRY_SCOPE_PREFIX = 'manual_review_retry_';
@@ -18,6 +18,14 @@ function retryAttemptScopeForCase(caseId) {
 // Same formula as the FALSE_POSITIVE decision route.
 function retryChallengeIdForCase(caseId) {
   return `idrev_review_${crypto.createHash('sha1').update(String(caseId)).digest('hex').slice(0, 18)}`;
+}
+
+// The decision's challenge (fixed id per case) expires after 20 min and stays
+// in Firestore, so creating it again fails with ALREADY_EXISTS. A restore uses
+// a new id; the retry only checks the idrev_ prefix and the attempt scope.
+function restoreChallengeIdForCase(caseId, nowMs = Date.now()) {
+  const digest = crypto.createHash('sha1').update(`${caseId}:restore:${nowMs}`).digest('hex').slice(0, 18);
+  return `idrev_restore_${digest}`;
 }
 
 function isRetryBindingValid(identityState, caseId) {
@@ -67,7 +75,8 @@ async function restoreRetryBinding({
   driverId,
   caseId,
   reviewerContext,
-  ticketId = null
+  ticketId = null,
+  nowMs = Date.now()
 }) {
   const candidate = await getRetryBindingRestoreCandidate({
     workflow: runtime.workflow,
@@ -89,7 +98,7 @@ async function restoreRetryBinding({
         reporterId: reviewerContext?.uid || null,
         reporterType: 'admin',
         supportTicketId: ticketId || null,
-        challengeId: retryChallengeIdForCase(candidate.caseId),
+        challengeId: restoreChallengeIdForCase(candidate.caseId, nowMs),
         payload: {
           reasonCode: 'kyc_identity_false_positive_retry_authorized',
           publicReason: 'Uma nova validacao de identidade foi autorizada pelo suporte.',
@@ -106,6 +115,7 @@ async function restoreRetryBinding({
 module.exports = {
   retryAttemptScopeForCase,
   retryChallengeIdForCase,
+  restoreChallengeIdForCase,
   isRetryBindingValid,
   getRetryBindingRestoreCandidate,
   restoreRetryBinding

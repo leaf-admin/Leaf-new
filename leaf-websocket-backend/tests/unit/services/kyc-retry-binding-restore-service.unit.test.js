@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const {
   retryAttemptScopeForCase,
   retryChallengeIdForCase,
+  restoreChallengeIdForCase,
   isRetryBindingValid,
   getRetryBindingRestoreCandidate,
   restoreRetryBinding
@@ -28,6 +29,13 @@ describe('kyc retry binding restore', () => {
     const expected = `idrev_review_${crypto.createHash('sha1').update(CASE_ID).digest('hex').slice(0, 18)}`;
     expect(retryChallengeIdForCase(CASE_ID)).toBe(expected);
     expect(retryAttemptScopeForCase(CASE_ID)).toBe(`manual_review_retry_${CASE_ID}`);
+  });
+
+  it('restores with a new challenge id, never the expired one of the decision', () => {
+    const restored = restoreChallengeIdForCase(CASE_ID, 1793920000000);
+    expect(restored).toMatch(/^idrev_restore_[0-9a-f]{18}$/);
+    expect(restored).not.toBe(retryChallengeIdForCase(CASE_ID));
+    expect(restoreChallengeIdForCase(CASE_ID, 1793920000001)).not.toBe(restored);
   });
 
   it('accepts only a requested/failed/validating record bound to the case scope', () => {
@@ -93,7 +101,8 @@ describe('kyc retry binding restore', () => {
       driverId: 'driver-1',
       caseId: CASE_ID,
       reviewerContext: { uid: 'admin-1' },
-      ticketId: 'TICKET-1'
+      ticketId: 'TICKET-1',
+      nowMs: 1793920000000
     });
 
     expect(workflow.runWithVerificationWindow).toHaveBeenCalledWith(
@@ -106,7 +115,7 @@ describe('kyc retry binding restore', () => {
       reporterId: 'admin-1',
       reporterType: 'admin',
       supportTicketId: 'TICKET-1',
-      challengeId: retryChallengeIdForCase(CASE_ID),
+      challengeId: restoreChallengeIdForCase(CASE_ID, 1793920000000),
       notify: true,
       payload: expect.objectContaining({ attemptScope: retryAttemptScopeForCase(CASE_ID) })
     }));
