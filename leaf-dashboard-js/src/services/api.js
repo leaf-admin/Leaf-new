@@ -633,6 +633,17 @@ class LeafApiService {
     );
   }
 
+  async restoreDriverKycRetryBinding(driverId, caseId, payload = {}, context = {}) {
+    return this.requestKyc(
+      `/drivers/${encodeURIComponent(driverId)}/kyc/identity-reviews/${encodeURIComponent(caseId)}/retry-binding/restore`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+      context,
+    );
+  }
+
   async reconcileDriverKycIdentityReview(driverId, payload = {}, context = {}) {
     return this.requestKyc(
       `/drivers/${encodeURIComponent(driverId)}/kyc/identity-reviews/reconcile`,
