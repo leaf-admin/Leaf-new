@@ -6,6 +6,9 @@ const dailyEarningsReportService = require('./daily-earnings-report-service');
 
 const RIDE_COST_TELEMETRY_PREFIX = 'ride_cost_telemetry';
 const RIDE_COST_TELEMETRY_RECENT_INDEX = `${RIDE_COST_TELEMETRY_PREFIX}:recent`;
+const PENDING_GOOGLE_USAGE_RETENTION_MS = 2 * 60 * 60 * 1000;
+// Passenger calls this long before the booking (search, quote) belong to the ride.
+const PENDING_GOOGLE_USAGE_LOOKBACK_MS = 30 * 60 * 1000;
 const RIDE_COST_TELEMETRY_TTL_SECONDS = Number.parseInt(
   process.env.RIDE_COST_TELEMETRY_TTL_SECONDS || `${60 * 60 * 24 * 30}`,
   10,
@@ -395,6 +398,96 @@ function buildSkuBreakdownFromMetadata(metadata = {}, sourceMeta = {}, usage = {
 }
 
 class RideCostTelemetryService {
+  async readSourceGoogleSkus(bookingId, { sourceKey, userId, userType } = {}) {
+    try {
+      await redisPool.ensureConnection();
+      const redis = redisPool.getConnection();
+      const report = safeJsonParse(await redis.get(this.buildReportKey(bookingId)), null);
+      const key = this.normalizeSourceKey({ sourceKey, userId, userType });
+      const skus = report?.sources?.[key]?.snapshot?.google?.skus;
+      return skus && typeof skus === 'object' ? safeJsonClone(skus, {}) : {};
+    } catch (_error) {
+      return {};
+    }
+  }
+
+  buildPendingGoogleUsageKey(userId) {
+    return `${RIDE_COST_TELEMETRY_PREFIX}:pending_google:${userId}`;
+  }
+
+  // A paid Google call without a bookingId (search, quote, pickup address,
+  // driver route before the app knows the booking). Kept per authenticated
+  // user so the ride that follows can claim it when it completes.
+  async recordPendingGoogleUsage({ userId, userType = null, skuKey, requestCount = 1, billableUnits = null, surface = null, atMs = Date.now() } = {}) {
+    const normalizedUserId = sanitizeText(userId, '');
+    const resolvedSku = this.resolveGoogleSkuDefinition(skuKey, {});
+    if (!normalizedUserId || !resolvedSku.normalizedSkuKey) {
+      return false;
+    }
+    const entry = JSON.stringify({
+      skuKey: resolvedSku.normalizedSkuKey,
+      userType: sanitizeText(userType, '') || null,
+      requestCount: Math.max(1, normalizeNonNegativeInteger(requestCount, 1)),
+      billableUnits: normalizeNonNegativeNumber(billableUnits, Math.max(1, normalizeNonNegativeInteger(requestCount, 1))),
+      surface: sanitizeText(surface, '') || null,
+      atMs,
+      nonce: Math.random().toString(36).slice(2, 10),
+    });
+    await redisPool.ensureConnection();
+    const redis = redisPool.getConnection();
+    const key = this.buildPendingGoogleUsageKey(normalizedUserId);
+    await redis.zadd(key, atMs, entry);
+    await redis.zremrangebyscore(key, '-inf', atMs - PENDING_GOOGLE_USAGE_RETENTION_MS);
+    await redis.expire(key, Math.ceil(PENDING_GOOGLE_USAGE_RETENTION_MS / 1000));
+    return true;
+  }
+
+  // On completion, moves each participant's pending calls in the ride window
+  // into the report (one source per participant) and removes them, so a call
+  // is attributed to one ride only.
+  async attachPendingGoogleUsage(bookingId, { participants = [], fromMs, toMs = Date.now() } = {}) {
+    const normalizedBookingId = sanitizeText(bookingId, '');
+    if (!normalizedBookingId) {
+      return { attached: 0 };
+    }
+    await redisPool.ensureConnection();
+    const redis = redisPool.getConnection();
+    let attached = 0;
+    for (const participant of participants) {
+      const userId = sanitizeText(participant?.userId, '');
+      if (!userId) continue;
+      const userType = normalizeUserType(participant?.userType);
+      const key = this.buildPendingGoogleUsageKey(userId);
+      const raw = await redis.zrangebyscore(key, fromMs, toMs);
+      if (!Array.isArray(raw) || raw.length === 0) continue;
+      await redis.zrem(key, ...raw);
+      const bySku = new Map();
+      for (const item of raw) {
+        const entry = safeJsonParse(item, null);
+        if (!entry?.skuKey) continue;
+        const current = bySku.get(entry.skuKey) || { requestCount: 0, billableUnits: 0, surfaces: {} };
+        current.requestCount += normalizeNonNegativeInteger(entry.requestCount, 1);
+        current.billableUnits += normalizeNonNegativeNumber(entry.billableUnits, 1);
+        const surface = entry.surface || 'unknown';
+        current.surfaces[surface] = (current.surfaces[surface] || 0) + 1;
+        bySku.set(entry.skuKey, current);
+      }
+      for (const [skuKey, usage] of bySku) {
+        await this.ingestGoogleSkuUsage({
+          bookingId: normalizedBookingId,
+          skuKey,
+          sourceKey: `pending_google:${userType}:${userId}`,
+          sourceMeta: { userId, userType, surface: 'pending_google_attribution' },
+          requestCount: usage.requestCount,
+          billableUnits: usage.billableUnits,
+          metadata: { attributedFrom: 'pending_user_window', surfaces: usage.surfaces },
+        });
+        attached += usage.requestCount;
+      }
+    }
+    return { attached };
+  }
+
   buildReportKey(bookingId) {
     return `${RIDE_COST_TELEMETRY_PREFIX}:${bookingId}`;
   }
@@ -468,22 +561,38 @@ class RideCostTelemetryService {
     const normalizedMetadata = safeJsonClone(metadata, {}) || {};
     const normalizedSourceMeta = normalizeSourceMeta(sourceMeta || {});
 
+    // ingestSnapshot replaces the whole source: add this call to what the
+    // source already holds, or every call would overwrite the previous one.
+    const previousSkus = await this.readSourceGoogleSkus(normalizedBookingId, {
+      sourceKey,
+      userId: normalizedSourceMeta.userId,
+      userType: normalizedSourceMeta.userType,
+    });
+    const previousSku = previousSkus[resolvedSku.normalizedSkuKey] || null;
+    const incomingBreakdown = buildSkuBreakdownFromMetadata(
+      normalizedMetadata,
+      normalizedSourceMeta,
+      usagePayload,
+    );
     const snapshot = {
       google: {
         skus: {
+          ...previousSkus,
           [resolvedSku.normalizedSkuKey]: {
             label: resolvedSku.label,
             family: resolvedSku.family,
             unit: resolvedSku.unit,
-            requestCount: normalizedRequestCount,
-            billableUnits: normalizedBillableUnits,
-            estimatedCostUsd: resolvedEstimatedCostUsd,
-            lastMetadata: normalizedMetadata,
-            breakdown: buildSkuBreakdownFromMetadata(
-              normalizedMetadata,
-              normalizedSourceMeta,
-              usagePayload,
+            requestCount: normalizeNonNegativeInteger(previousSku?.requestCount, 0) + normalizedRequestCount,
+            billableUnits: roundUnits(
+              normalizeNonNegativeNumber(previousSku?.billableUnits, 0) + normalizedBillableUnits,
             ),
+            estimatedCostUsd: roundCurrency(
+              normalizeNonNegativeNumber(previousSku?.estimatedCostUsd, 0) + resolvedEstimatedCostUsd,
+            ),
+            lastMetadata: normalizedMetadata,
+            breakdown: previousSku?.breakdown
+              ? mergeSkuBreakdown(previousSku.breakdown, incomingBreakdown)
+              : incomingBreakdown,
           },
         },
       },
@@ -1253,3 +1362,4 @@ class RideCostTelemetryService {
 }
 
 module.exports = new RideCostTelemetryService();
+module.exports.PENDING_GOOGLE_USAGE_LOOKBACK_MS = PENDING_GOOGLE_USAGE_LOOKBACK_MS;
