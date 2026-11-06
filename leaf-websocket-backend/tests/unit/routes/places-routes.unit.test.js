@@ -119,8 +119,45 @@ describe('places routes', () => {
       expect.objectContaining({
         bookingId: 'booking_abc',
         skuKey: 'autocompleteLegacyPerRequest',
+        // Own source: the app snapshot under customer:abc must not erase it.
+        sourceKey: 'backend:places:customer:abc',
+        // Session token: billed with the Place Details that closes the session.
+        billableUnits: 0,
+        metadata: expect.objectContaining({ pricing: 'session_billed_with_details' }),
       }),
     );
+  });
+
+  it('bills autocomplete per request when the app sends no session token', async () => {
+    const app = createApp();
+    mockFetchAutocompletePredictions.mockResolvedValue([]);
+
+    const response = await request(app)
+      .post('/api/places/autocomplete')
+      .send({
+        query: 'rua barata ribeiro',
+        telemetry: {
+          bookingId: 'booking_abc',
+          sourceMeta: { userId: 'abc', userType: 'customer' },
+        },
+      });
+
+    expect(response.status).toBe(200);
+    expect(mockIngestGoogleSkuUsage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skuKey: 'autocompleteLegacyPerRequest',
+        sourceKey: 'backend:places:autocomplete',
+        billableUnits: 1,
+        metadata: expect.objectContaining({ pricing: 'per_request' }),
+      }),
+    );
+  });
+
+  it('keeps backend Google sources apart from the app snapshot source', () => {
+    const { backendGoogleSourceKey } = placesRoutes.__test__;
+    expect(backendGoogleSourceKey('driver:uid_1')).toBe('backend:places:driver:uid_1');
+    expect(backendGoogleSourceKey('backend:places:directions')).toBe('backend:places:directions');
+    expect(backendGoogleSourceKey('')).toBeNull();
   });
 
   it('serves autocomplete from the prefix cache before calling Google', async () => {

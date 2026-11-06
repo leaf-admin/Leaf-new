@@ -409,6 +409,22 @@ function shouldTryAutocompleteCache(query = '') {
   return normalized.split(/\s+/).filter(Boolean).length >= 2;
 }
 
+// The app's socket snapshot (rideCostTelemetry) is stored under
+// `<userType>:<userId>` and replaces that whole source. Paid Google calls made
+// here must live in their own source, or the next app snapshot erases them.
+function backendGoogleSourceKey(sourceKey) {
+  const normalized = normalizeText(sourceKey, null);
+  if (!normalized) return null;
+  return normalized.startsWith('backend:') ? normalized : `backend:places:${normalized}`;
+}
+
+// Legacy session pricing: an autocomplete request carrying a session token is
+// billed with the Place Details that closes the session, so it costs nothing
+// on its own. Without a token every request is billed.
+function autocompleteBillableUnits(sessionToken) {
+  return sessionToken ? 0 : 1;
+}
+
 async function captureBookingGoogleTelemetry({
   bookingId,
   sourceKey,
@@ -444,7 +460,7 @@ async function captureBookingGoogleTelemetry({
     await rideCostTelemetryService.ingestGoogleSkuUsage({
       bookingId,
       skuKey,
-      sourceKey,
+      sourceKey: backendGoogleSourceKey(sourceKey),
       sourceMeta,
       requestCount,
       billableUnits,
@@ -761,13 +777,14 @@ router.post('/api/places/autocomplete', placesAccess('autocomplete'), async (req
       requestMeta: telemetry.requestMeta,
       skuKey: 'autocompleteLegacyPerRequest',
       requestCount: 1,
-      billableUnits: 1,
+      billableUnits: autocompleteBillableUnits(sessionToken),
       metadata: {
         telemetrySurface: telemetry.sourceMeta?.surface || 'places_autocomplete_backend',
         routeScope: 'destination_search',
         cacheMode: 'none',
         predictionCount: predictions.length,
         sessionTokenUsed: Boolean(sessionToken),
+        pricing: sessionToken ? 'session_billed_with_details' : 'per_request',
         queryLength: query.length,
       },
     });
@@ -1249,3 +1266,4 @@ router.post('/api/places/metrics/reset', authenticateJWT, requireRole(['admin', 
 });
 
 module.exports = router;
+module.exports.__test__ = { backendGoogleSourceKey, autocompleteBillableUnits };
