@@ -44,6 +44,11 @@ const {
 } = require('./shared');
 
 const driverListData = require('../../services/dashboard-driver-list-data');
+const kycRetryBindingRestoreService = require('../../services/kyc-retry-binding-restore-service');
+
+function readDashboardIdentityReverification(driverId) {
+  return userStore.readUserField(userStore.resolveFirestore(), driverId, 'identityReverification');
+}
 const ratingService = require('../../services/rating-service');
 const { toView } = require('../../services/native-record-view');
 const adminReadBudget = require('../../utils/admin-read-budget');
@@ -932,7 +937,7 @@ router.get(
       const driverId = req.params.driverId;
       const kycRuntime = await resolveDashboardKycRuntime(req, driverId);
       const reviewerContext = getDashboardKycReviewer(req);
-      const [cases, orphanRecoveryCandidate, verificationStatus] = await Promise.all([
+      const [cases, orphanRecoveryCandidate, verificationStatus, retryBindingRestoreCandidate] = await Promise.all([
         kycRuntime.workflow.listCasesForDriver(driverId, { reviewerContext }),
         kycRuntime.workflow.getOrphanHoldRecoveryCandidate(
           driverId,
@@ -941,7 +946,12 @@ router.get(
         kycRuntime.workflow.getDashboardIdentityStatus(
           driverId,
           { reviewerContext }
-        )
+        ),
+        kycRetryBindingRestoreService.getRetryBindingRestoreCandidate({
+          workflow: kycRuntime.workflow,
+          readIdentityReverification: readDashboardIdentityReverification,
+          driverId
+        }).catch(() => ({ available: false }))
       ]);
       res.set('Cache-Control', 'private, no-store, max-age=0');
       return res.json({
@@ -949,7 +959,8 @@ router.get(
         persistenceScope: kycRuntime.scope.namespace,
         cases,
         orphanRecoveryCandidate,
-        verificationStatus
+        verificationStatus,
+        retryBindingRestoreCandidate
       });
     } catch (error) {
       logError(error, 'Falha ao listar casos KYC de identidade', {
@@ -1216,6 +1227,63 @@ router.post(
       });
     } catch (error) {
       logError(error, 'Falha ao decidir revisao KYC', {
+        service: 'dashboard-routes',
+        driverId: req.params.driverId,
+        caseId: req.params.caseId
+      });
+      return respondKycReviewError(res, error);
+    }
+  }
+);
+
+/**
+ * Restaura o vinculo de uma nova tentativa ja autorizada (falso positivo)
+ * cujo registro de reverificacao se perdeu na saida do RTDB.
+ */
+router.post(
+  '/api/drivers/:driverId/kyc/identity-reviews/:caseId/retry-binding/restore',
+  authenticateJWT,
+  requireRole(DASHBOARD_KYC_REVIEW_ROLES),
+  async (req, res) => {
+    try {
+      const { driverId, caseId } = req.params;
+      const kycRuntime = await resolveDashboardKycRuntime(req, driverId);
+      requireDashboardKycScopedPolicy(kycRuntime);
+      const reason = normalizeKycReviewReason(req.body?.reason);
+      const ticketId = String(req.body?.ticketId || '').trim() || null;
+      const reviewerContext = getDashboardKycReviewer(req);
+      const result = await kycRetryBindingRestoreService.restoreRetryBinding({
+        runtime: kycRuntime,
+        applyGate: applyDashboardIdentityReverificationGate,
+        readIdentityReverification: readDashboardIdentityReverification,
+        driverId,
+        caseId,
+        reviewerContext,
+        ticketId
+      });
+      await auditService.logEvent({
+        ...dashboardKycAuditEnvelope(kycRuntime),
+        userId: reviewerContext.uid,
+        action: 'KYC_IDENTITY_RETRY_BINDING_RESTORED',
+        resource: 'kyc_identity_review_case',
+        severity: 'WARNING',
+        success: true,
+        details: {
+          driverId,
+          caseId: result.caseId,
+          ticketId,
+          previousRecord: result.previousRecord,
+          reason
+        }
+      });
+      return res.json({
+        success: true,
+        persistenceScope: kycRuntime.scope.namespace,
+        caseId: result.caseId,
+        retryChallenge: result.challenge
+      });
+    } catch (error) {
+      logError(error, 'Falha ao restaurar vinculo da nova tentativa KYC', {
         service: 'dashboard-routes',
         driverId: req.params.driverId,
         caseId: req.params.caseId
