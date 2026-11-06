@@ -45,7 +45,26 @@ function describeRecord(identityState) {
   return String(identityState.status || 'present').trim().toLowerCase() || 'present';
 }
 
-async function getRetryBindingRestoreCandidate({ workflow, readIdentityReverification, driverId }) {
+// Where the retry binding lives depends on the KYC scope: the operational
+// policy writes users/{id}.identityReverification; the sandbox policy keeps a
+// pending step-up challenge (with the attempt scope) and never touches users.
+async function readRetryIdentityState({ runtime, readIdentityReverification, driverId }) {
+  if (runtime?.namespace === 'sandbox') {
+    const policy = runtime.policy || runtime.policyService || null;
+    if (!policy || typeof policy.getStepUpChallenge !== 'function') return null;
+    const challenge = await Promise.resolve(policy.getStepUpChallenge(null, driverId)).catch(() => null);
+    if (!challenge) return null;
+    return {
+      challengeId: challenge.challengeId,
+      requirement: challenge.requirement,
+      status: challenge.status === 'pending' ? 'requested' : challenge.status,
+      attemptScope: challenge.metadata?.attemptScope || null
+    };
+  }
+  return readIdentityReverification(driverId);
+}
+
+async function getRetryBindingRestoreCandidate({ runtime = null, workflow = runtime?.workflow, readIdentityReverification, driverId }) {
   let gate;
   try {
     gate = await workflow.assertKycOperationAllowed(driverId);
@@ -57,7 +76,7 @@ async function getRetryBindingRestoreCandidate({ workflow, readIdentityReverific
   if (gate?.cleanRetryAuthorized !== true || gate?.retryAuthorizationKind !== 'manual_review' || !caseId) {
     return { available: false };
   }
-  const identityState = await readIdentityReverification(driverId);
+  const identityState = await readRetryIdentityState({ runtime, readIdentityReverification, driverId });
   if (isRetryBindingValid(identityState, caseId)) {
     return { available: false };
   }
@@ -79,7 +98,7 @@ async function restoreRetryBinding({
   nowMs = Date.now()
 }) {
   const candidate = await getRetryBindingRestoreCandidate({
-    workflow: runtime.workflow,
+    runtime,
     readIdentityReverification,
     driverId
   });
@@ -117,6 +136,7 @@ module.exports = {
   retryChallengeIdForCase,
   restoreChallengeIdForCase,
   isRetryBindingValid,
+  readRetryIdentityState,
   getRetryBindingRestoreCandidate,
   restoreRetryBinding
 };

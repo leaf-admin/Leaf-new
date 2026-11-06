@@ -948,7 +948,7 @@ router.get(
           { reviewerContext }
         ),
         kycRetryBindingRestoreService.getRetryBindingRestoreCandidate({
-          workflow: kycRuntime.workflow,
+          runtime: kycRuntime,
           readIdentityReverification: readDashboardIdentityReverification,
           driverId
         }).catch(() => ({ available: false }))

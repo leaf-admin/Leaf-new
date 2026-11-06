@@ -89,6 +89,38 @@ describe('kyc retry binding restore', () => {
     })).resolves.toEqual({ available: false });
   });
 
+  it('reads a sandbox binding from the pending challenge, not from the user record', async () => {
+    const readIdentityReverification = jest.fn(async () => null);
+    const boundRuntime = {
+      namespace: 'sandbox',
+      workflow: workflowWith(authorizedGate),
+      policy: {
+        getStepUpChallenge: jest.fn(async () => ({
+          challengeId: 'idrev_restore_abc',
+          requirement: 'IDENTITY_REVERIFICATION',
+          status: 'pending',
+          metadata: { attemptScope: retryAttemptScopeForCase(CASE_ID) }
+        }))
+      }
+    };
+    await expect(getRetryBindingRestoreCandidate({
+      runtime: boundRuntime,
+      readIdentityReverification,
+      driverId: 'driver-1'
+    })).resolves.toEqual({ available: false });
+    expect(readIdentityReverification).not.toHaveBeenCalled();
+
+    const expiredRuntime = {
+      ...boundRuntime,
+      policy: { getStepUpChallenge: jest.fn(async () => null) }
+    };
+    await expect(getRetryBindingRestoreCandidate({
+      runtime: expiredRuntime,
+      readIdentityReverification,
+      driverId: 'driver-1'
+    })).resolves.toEqual({ available: true, caseId: CASE_ID, reverificationRecord: 'missing' });
+  });
+
   it('rebuilds the record through the scoped gate inside the verification window', async () => {
     const workflow = workflowWith(authorizedGate);
     const applyGate = jest.fn(async () => ({ challengeId: retryChallengeIdForCase(CASE_ID) }));
