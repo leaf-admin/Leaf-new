@@ -418,9 +418,26 @@ async function captureBookingGoogleTelemetry({
   requestCount = 1,
   billableUnits = 1,
   metadata = {},
+  userId = null,
 }) {
   if (!bookingId) {
-    return false;
+    // No ride yet: keep it under the authenticated user so the ride claims it.
+    if (!userId) {
+      return false;
+    }
+    try {
+      return await rideCostTelemetryService.recordPendingGoogleUsage({
+        userId,
+        userType: sourceMeta?.userType || null,
+        skuKey,
+        requestCount,
+        billableUnits,
+        surface: sourceMeta?.surface || null,
+      });
+    } catch (telemetryError) {
+      logger.warn(`⚠️ [PlacesRoute] Falha ao guardar custo pendente: ${telemetryError.message}`);
+      return false;
+    }
   }
 
   try {
@@ -613,6 +630,7 @@ router.post('/api/places/reverse-geocode', placesAccess('reverse-geocode'), asyn
     const telemetryCaptured = result.cached !== true && billedGoogleRequest
       ? await captureBookingGoogleTelemetry({
         bookingId: telemetry.bookingId,
+        userId: req.authenticatedUser?.uid || null,
         sourceKey: telemetry.sourceKey || 'backend:places:reverse-geocode',
         sourceMeta: {
           ...telemetry.sourceMeta,
@@ -734,6 +752,7 @@ router.post('/api/places/autocomplete', placesAccess('autocomplete'), async (req
 
     const telemetryCaptured = await captureBookingGoogleTelemetry({
       bookingId: telemetry.bookingId,
+      userId: req.authenticatedUser?.uid || null,
       sourceKey: telemetry.sourceKey || 'backend:places:autocomplete',
       sourceMeta: {
         ...telemetry.sourceMeta,
@@ -801,6 +820,7 @@ router.post('/api/places/details', placesAccess('details'), async (req, res) => 
     const servedFromCache = details.cached === true;
     const telemetryCaptured = servedFromCache ? false : await captureBookingGoogleTelemetry({
       bookingId: telemetry.bookingId,
+      userId: req.authenticatedUser?.uid || null,
       sourceKey: telemetry.sourceKey || 'backend:places:details',
       sourceMeta: {
         ...telemetry.sourceMeta,
@@ -1052,6 +1072,7 @@ router.post('/api/places/directions', placesAccess('directions'), async (req, re
     const telemetryCaptured = result.cached !== true && billedGoogleRequest
       ? await captureBookingGoogleTelemetry({
         bookingId: telemetry.bookingId,
+        userId: req.authenticatedUser?.uid || null,
         sourceKey: telemetrySourceKey,
         sourceMeta: telemetrySourceMeta,
         requestMeta: telemetry.requestMeta,
