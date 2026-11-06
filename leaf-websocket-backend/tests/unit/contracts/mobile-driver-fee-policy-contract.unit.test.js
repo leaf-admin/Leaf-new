@@ -36,6 +36,8 @@ describe('mobile driver fee policy matches the backend', () => {
 
   test('launch promotion', () => {
     expect(DRIVER_INTRO_FEE_POLICY.paymentFeeIncluded).toBe(true);
+    expect(DRIVER_INTRO_FEE_POLICY.pixExcessChargedToDriver).toBe(true);
+    expect(numbersAfter('promoLeafFeeCents')).toBe(DRIVER_INTRO_FEE_POLICY.leafFeeCents);
     expect(numbersAfter('promoTotalFeeCents')).toBe(DRIVER_INTRO_FEE_POLICY.operationalFeeCents);
     expect(numbersAfter('promoQualifyingRides')).toBe(DRIVER_INTRO_FEE_POLICY.qualifyingRideLimit);
   });
