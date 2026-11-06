@@ -4874,6 +4874,9 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     Keyboard.dismiss();
   }, [canShowPassengerHomeOverlay, homeDestinationSearchActive, homePickupSearchActive]);
 
+  const homePickupSearchBiasCoordinateRef = useRef(effectiveHomePickupCoordinate);
+  homePickupSearchBiasCoordinateRef.current = effectiveHomePickupCoordinate;
+
   useEffect(() => {
     if (!homePickupSearchActive) {
       return undefined;
@@ -4893,7 +4896,8 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
         homePickupSearchSessionTokenRef.current ||
         createHomePickupSearchSessionToken();
       homePickupSearchSessionTokenRef.current = sessionToken;
-      const location = normalizeHomePlaceSearchLocation(effectiveHomePickupCoordinate);
+      // Read through a ref: the search reruns on typing, not on every GPS fix.
+      const location = normalizeHomePlaceSearchLocation(homePickupSearchBiasCoordinateRef.current);
       const telemetryContext = {
         sourceKey: `mobile:pickup_search:${profileUid || profile?.uid || 'anonymous'}`,
         sourceMeta: {
@@ -4942,7 +4946,6 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     };
   }, [
     activeRole,
-    effectiveHomePickupCoordinate,
     homePickupSearchActive,
     homePickupSearchQuery,
     profile?.uid,
@@ -4994,8 +4997,9 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
 
       setHomeDestinationSearching(true);
       try {
+        // Ref, not a dependency: a GPS fix must not rerun the same search.
         const suggestions = await loadDestinationSuggestions(trimmedQuery, {
-          location: effectiveHomePickupCoordinate,
+          location: homePickupSearchBiasCoordinateRef.current,
         });
         if (!cancelled) {
           setHomeDestinationResults(
@@ -5025,7 +5029,6 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
     canShowPassengerHomeOverlay,
     homePickupSearchActive,
     homeCategorySurfaceVisible,
-    effectiveHomePickupCoordinate,
     loadDestinationSuggestions,
     loadRecentDestinations,
   ]);
