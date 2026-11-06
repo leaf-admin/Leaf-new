@@ -95,7 +95,8 @@ async function getDriverIntroFeeReport({
       enabled: env.DRIVER_INTRO_FEE_ENABLED === 'true',
       rideLimit: DRIVER_INTRO_FEE_POLICY.qualifyingRideLimit,
       feeCents: DRIVER_INTRO_FEE_POLICY.operationalFeeCents,
-      paymentFeeIncluded: DRIVER_INTRO_FEE_POLICY.paymentFeeIncluded
+      paymentFeeIncluded: DRIVER_INTRO_FEE_POLICY.paymentFeeIncluded,
+      pixExcessChargedToDriver: DRIVER_INTRO_FEE_POLICY.pixExcessChargedToDriver
     },
     summary: {
       drivers: drivers.length,

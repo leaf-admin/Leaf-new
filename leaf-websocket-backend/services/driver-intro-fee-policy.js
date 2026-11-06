@@ -1,11 +1,16 @@
 // Owner-approved on 2026-10-22 (#405). Pure policy; no provider calls or activation.
 // Owner-approved on 2026-10-31: during the promotion the R$ 0,99 is the driver's whole
 // fee, Pix included. policyId stays: it keys the Redis and Firestore ride counters.
+// Owner-approved on 2026-11-06: the R$ 0,99 covers the minimum Pix cost (R$ 0,50) and
+// R$ 0,49 for Leaf. Above R$ 62,50 the Pix grows past the minimum and the driver pays
+// the excess; Leaf always keeps R$ 0,49 and never absorbs Pix.
 const DRIVER_INTRO_FEE_POLICY = Object.freeze({
   policyId: 'driver_first_25_destination_completions_v1',
   qualifyingRideLimit: 25,
   operationalFeeCents: 99,
-  paymentFeeIncluded: true
+  paymentFeeIncluded: true,
+  pixExcessChargedToDriver: true,
+  leafFeeCents: 49
 });
 // Sandbox (QA) rides count on their own counter, never on the operational one.
 const DRIVER_INTRO_FEE_NAMESPACES = Object.freeze(['operational', 'sandbox']);
@@ -24,7 +29,8 @@ function buildDriverIntroFeeContext({
   historyVerified,
   historySnapshotId,
   namespace = 'operational',
-  paymentFeeIncluded = DRIVER_INTRO_FEE_POLICY.paymentFeeIncluded
+  paymentFeeIncluded = DRIVER_INTRO_FEE_POLICY.paymentFeeIncluded,
+  pixExcessChargedToDriver = DRIVER_INTRO_FEE_POLICY.pixExcessChargedToDriver
 } = {}) {
   if (historyVerified !== true || typeof historySnapshotId !== 'string' || !historySnapshotId.trim()) {
     throw policyError('DRIVER_INTRO_FEE_HISTORY_UNVERIFIED');
@@ -46,7 +52,11 @@ function buildDriverIntroFeeContext({
     historySnapshotId: historySnapshotId.trim(),
     eligible,
     operationalFeeCents: eligible ? DRIVER_INTRO_FEE_POLICY.operationalFeeCents : null,
-    paymentFeeIncluded: paymentFeeIncluded === true
+    paymentFeeIncluded: paymentFeeIncluded === true,
+    pixExcessChargedToDriver: paymentFeeIncluded === true && pixExcessChargedToDriver === true,
+    leafFeeCents: eligible && paymentFeeIncluded === true && pixExcessChargedToDriver === true
+      ? DRIVER_INTRO_FEE_POLICY.leafFeeCents
+      : null
   });
 }
 
@@ -58,7 +68,13 @@ function normalizeDriverIntroFeeContext(context) {
   // Recompute derived fields when reading a stored context; never accept an
   // arbitrary monetary override or an eligibility flag supplied by a caller.
   // A context stored without the flag was accepted under the Pix-separate terms.
-  return buildDriverIntroFeeContext({ ...context, paymentFeeIncluded: context.paymentFeeIncluded === true });
+  // One without pixExcessChargedToDriver was accepted under the 2026-10-31 terms
+  // (R$ 0,99 total at any fare, Leaf absorbing the Pix excess).
+  return buildDriverIntroFeeContext({
+    ...context,
+    paymentFeeIncluded: context.paymentFeeIncluded === true,
+    pixExcessChargedToDriver: context.pixExcessChargedToDriver === true
+  });
 }
 
 module.exports = {

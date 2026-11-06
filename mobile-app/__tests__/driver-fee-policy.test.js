@@ -41,8 +41,15 @@ describe('driver fee policy shown in onboarding', () => {
     expect(text).not.toMatch(/woovi|openpix|stripe|mercado ?pago/);
     expect(text).toContain('r$ 1,00');
     expect(text).toContain('pix incluso');
+    expect(text).toContain('pix incluso em corridas de até r$ 62,50');
+    expect(text).toContain('você paga a diferença');
     expect(text).toContain('condição promocional');
     expect(text).toContain('grátis até r$ 100,00, r$ 4,90 até r$ 200,00, r$ 7,90 até r$ 300,00, r$ 12,90 até r$ 500,00, r$ 14,90 acima de r$ 500,00');
     expect(DRIVER_FEE_POLICY.withdrawalFeeCents).toBe(100);
+  });
+
+  it('charges the Pix above its minimum to the driver in the launch promotion', () => {
+    expect(resolveDriverNetExample(6250).promoNetCents).toBe(6151);
+    expect(resolveDriverNetExample(10000).promoNetCents).toBe(9871);
   });
 });

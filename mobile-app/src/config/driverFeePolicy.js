@@ -8,8 +8,11 @@
 export const PILOT_SERVICE_AREA_LABEL = 'Zona Sul do Rio de Janeiro';
 
 export const DRIVER_FEE_POLICY = Object.freeze({
-  // Promoção de lançamento (services/driver-intro-fee-policy.js): total da corrida, Pix incluso.
+  // Promoção de lançamento (services/driver-intro-fee-policy.js): R$ 0,99 com o Pix
+  // mínimo incluso (R$ 0,49 da Leaf + R$ 0,50 do Pix). Acima de R$ 62,50 o Pix passa
+  // do mínimo e o motorista paga a diferença; a parte da Leaf fica em R$ 0,49.
   promoTotalFeeCents: 99,
+  promoLeafFeeCents: 49,
   promoQualifyingRides: 25,
   serviceFeeBands: Object.freeze([
     Object.freeze({ upToCents: 1000, feeCents: 79 }),
@@ -69,8 +72,13 @@ export function resolveDriverNetExample(fareCents, policy = DRIVER_FEE_POLICY) {
     processingCents,
     netCents,
     netPercent: fare > 0 ? Math.round((netCents / fare) * 1000) / 10 : 0,
-    promoNetCents: Math.max(0, fare - policy.promoTotalFeeCents),
+    promoNetCents: Math.max(0, fare - policy.promoLeafFeeCents - processingCents),
   };
+}
+
+// Valor da corrida até o qual o Pix fica no mínimo (R$ 62,50 com 0,8% e mínimo de R$ 0,50).
+export function promoPixIncludedUpToCents(policy = DRIVER_FEE_POLICY) {
+  return Math.round(policy.paymentProcessingMinimumCents / policy.paymentProcessingPercentage);
 }
 
 export function describeDailySubscriptionTiers(policy = DRIVER_FEE_POLICY) {
@@ -91,7 +99,7 @@ export function buildDriverFeeRows(policy = DRIVER_FEE_POLICY) {
       key: 'promo',
       title: `Promoção nas ${policy.promoQualifyingRides} primeiras corridas`,
       value: formatCents(policy.promoTotalFeeCents),
-      detail: `Taxa total por corrida concluída no destino, com o Pix incluso. É uma condição promocional e pode ser alterada. Depois, valem as taxas abaixo.`,
+      detail: `Taxa total por corrida concluída no destino, com o Pix incluso em corridas de até ${formatCents(promoPixIncludedUpToCents(policy))}. Acima disso, o Pix passa de ${formatCents(policy.paymentProcessingMinimumCents)} e você paga a diferença. É uma condição promocional e pode ser alterada. Depois, valem as taxas abaixo.`,
     },
     {
       key: 'service',
