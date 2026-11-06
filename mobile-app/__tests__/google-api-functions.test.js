@@ -157,9 +157,45 @@ describe('GoogleAPIFunctions address search', () => {
     });
 
     const savedPayload = JSON.parse(AsyncStorage.setItem.mock.calls[0][1]);
-    expect(savedPayload.place_id).toBe('ferry-building');
-    expect(savedPayload.location).toBeUndefined();
-    expect(savedPayload.locationSource).toBeUndefined();
+    expect(savedPayload.predictions).toHaveLength(1);
+    expect(savedPayload.predictions[0].place_id).toBe('ferry-building');
+    expect(savedPayload.predictions[0].location).toBeUndefined();
+    expect(savedPayload.predictions[0].locationSource).toBeUndefined();
+  });
+
+  it('keeps every suggestion of a query in the local cache, not only the first', async () => {
+    const predictions = ['shopping-leblon', 'leblon-office', 'leblon-beach'].map((id) => ({
+      place_id: id,
+      description: `${id}, Rio de Janeiro`,
+      structured_formatting: { main_text: id, secondary_text: 'Rio de Janeiro' },
+      types: ['establishment'],
+    }));
+    AsyncStorage.getItem.mockResolvedValueOnce(null);
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ status: 'success', cached: false, predictions }),
+    });
+
+    const first = await fetchPlacesAutocomplete('Shopping Leblon', 'token-a', {
+      lat: -22.98,
+      lng: -43.22,
+    });
+    expect(first).toHaveLength(3);
+
+    const saved = AsyncStorage.setItem.mock.calls[0][1];
+    AsyncStorage.getItem.mockResolvedValueOnce(saved);
+    const second = await fetchPlacesAutocomplete('Shopping Leblon', 'token-b', {
+      lat: -22.98,
+      lng: -43.22,
+    });
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(second.map((item) => item.place_id)).toEqual([
+      'shopping-leblon',
+      'leblon-office',
+      'leblon-beach',
+    ]);
   });
 
   it('ignores legacy local cache coordinates that were not marked as resolved place coordinates', async () => {

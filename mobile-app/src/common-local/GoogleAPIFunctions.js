@@ -139,33 +139,59 @@ const buildBackendRideTelemetryPayload = (telemetryContext = null, fallbackSurfa
     };
 };
 
+// Local entries keep every prediction of the query ({ predictions: [...] }).
+// Older entries stored only the first one; they are still read as one item.
+const LOCAL_CACHE_MAX_PREDICTIONS = 8;
+
 const getFromLocalCache = async (query) => {
     try {
         const cacheKey = getLocalCacheKey(query);
         const cached = await AsyncStorage.getItem(cacheKey);
-        const entry = cached
-            ? sanitizeLocalPlaceCacheEntry(JSON.parse(cached))
-            : null;
-        if (isBroadAreaAutocompleteCacheEntry(entry)) {
+        const parsed = cached ? JSON.parse(cached) : null;
+        const rawEntries = Array.isArray(parsed?.predictions) ? parsed.predictions : [parsed];
+        const entries = rawEntries
+            .map((entry) => sanitizeLocalPlaceCacheEntry(entry))
+            .filter(Boolean);
+        if (entries.length === 0) {
+            return null;
+        }
+        if (isBroadAreaAutocompleteCacheEntry(entries[0])) {
             Logger.log(
                 '↩️ [PlacesCache] Cache local amplo ignorado; buscando destinos específicos.',
             );
             return null;
         }
-        return entry;
+        return entries;
     } catch (error) {
         Logger.log('⚠️ [PlacesCache] Erro ao ler cache local:', error.message);
         return null;
     }
 };
 
-const saveToLocalCache = async (query, placeData) => {
+const toLocalCachePrediction = (prediction = {}) => {
+    const resolvedLocation = normalizePlaceLocation(prediction?.location);
+    return {
+        ...prediction,
+        ...(resolvedLocation
+            ? { location: resolvedLocation, locationSource: 'place_coordinates' }
+            : {}),
+    };
+};
+
+const saveToLocalCache = async (query, predictions = []) => {
     try {
         const cacheKey = getLocalCacheKey(query);
-        await AsyncStorage.setItem(cacheKey, JSON.stringify(sanitizeLocalPlaceCacheEntry({
-            ...placeData,
+        const entries = (Array.isArray(predictions) ? predictions : [predictions])
+            .slice(0, LOCAL_CACHE_MAX_PREDICTIONS)
+            .map((prediction) => sanitizeLocalPlaceCacheEntry(toLocalCachePrediction(prediction)))
+            .filter(Boolean);
+        if (entries.length === 0) {
+            return;
+        }
+        await AsyncStorage.setItem(cacheKey, JSON.stringify({
+            predictions: entries,
             cachedAt: Date.now()
-        })));
+        }));
         Logger.log('💾 [PlacesCache] Resultado salvo no cache local.');
     } catch (error) {
         Logger.log('⚠️ [PlacesCache] Erro ao salvar cache local:', error.message);
@@ -432,7 +458,7 @@ export const fetchPlacesAutocomplete = (searchKeyword, sessionToken, location = 
                             queryLength: String(searchKeyword || '').trim().length
                         }
                     }, telemetryContext);
-                    resolve([localCached]);
+                    resolve(localCached);
                     return;
                 }
             }
@@ -471,17 +497,7 @@ export const fetchPlacesAutocomplete = (searchKeyword, sessionToken, location = 
                         }
 
                         if (canUseAutocompleteCache) {
-                            const firstPrediction = backendResult.predictions[0];
-                            const resolvedLocation = normalizePlaceLocation(firstPrediction?.location);
-                            await saveToLocalCache(searchKeyword, {
-                                ...firstPrediction,
-                                ...(resolvedLocation
-                                    ? {
-                                        location: resolvedLocation,
-                                        locationSource: 'place_coordinates'
-                                    }
-                                    : {})
-                            });
+                            await saveToLocalCache(searchKeyword, backendResult.predictions);
                         }
 
                         resolve(backendResult.predictions);
@@ -560,16 +576,7 @@ export const fetchPlacesAutocomplete = (searchKeyword, sessionToken, location = 
                     saveToCache(searchKeyword, searchResults[0], location).catch(error => {
                         Logger.warn('⚠️ [PlacesCache] Erro ao salvar no cache remoto:', error.message);
                     });
-                    const resolvedLocation = normalizePlaceLocation(searchResults[0]?.location);
-                    await saveToLocalCache(searchKeyword, {
-                        ...searchResults[0],
-                        ...(resolvedLocation
-                            ? {
-                                location: resolvedLocation,
-                                locationSource: 'place_coordinates'
-                            }
-                            : {})
-                    });
+                    await saveToLocalCache(searchKeyword, searchResults);
                 }
                 
                 resolve(searchResults);
