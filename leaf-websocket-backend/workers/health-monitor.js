@@ -116,7 +116,7 @@ class WorkerHealthMonitor {
     }
 
     /**
-     * Obter lag do stream (eventos não processados)
+     * Estimar lag temporal do stream em ms (não é contagem de eventos)
      */
     async getStreamLag() {
         try {
@@ -129,16 +129,36 @@ class WorkerHealthMonitor {
                 return null;
             }
 
-            // Último ID processado pelo grupo
-            const lastDeliveredId = groupInfo['last-delivered-id'] || '0-0';
+            const parseStreamId = (value) => (
+                typeof value === 'string'
+                && /^\d+-\d+$/.test(value)
+                && Number.isSafeInteger(Number(value.split('-')[0]))
+                    ? value
+                    : null
+            );
+
+            const lastDeliveredId = parseStreamId(groupInfo['last-delivered-id']);
             
             // Último ID no stream
             const streamInfo = await this.redis.xinfo('STREAM', this.streamName);
-            const lastEntryId = streamInfo.find((v, i) => streamInfo[i - 1] === 'last-entry') || '0-0';
+            if (!Array.isArray(streamInfo)) {
+                return null;
+            }
+            const streamFields = this.parseStreamFields(streamInfo);
+            const lastEntry = streamFields['last-entry'];
+            // last-generated-id também cobre streams vazios ou com a última entrada removida.
+            const lastEntryId = parseStreamId(streamFields['last-generated-id'])
+                || parseStreamId(Array.isArray(lastEntry) ? lastEntry[0] : lastEntry);
 
-            // Calcular lag (simplificado - comparar IDs)
-            // Em produção, usar biblioteca para comparar IDs corretamente
-            const lag = parseInt(lastEntryId.split('-')[0]) - parseInt(lastDeliveredId.split('-')[0]);
+            if (!lastDeliveredId || !lastEntryId) {
+                return null;
+            }
+
+            // Estimativa existente: diferença entre timestamps dos IDs, não contagem de eventos.
+            const lag = Number(lastEntryId.split('-')[0]) - Number(lastDeliveredId.split('-')[0]);
+            if (!Number.isFinite(lag) || lag < 0) {
+                return null;
+            }
 
             return {
                 lag,
@@ -331,7 +351,7 @@ class WorkerHealthMonitor {
                     idle: c.idle
                 }))
             },
-            lag: lag?.lag || 0,
+            lag: lag?.lag ?? null,
             pendingEvents: pending.length,
             dlqSize,
             timestamp: new Date().toISOString()
@@ -341,9 +361,12 @@ class WorkerHealthMonitor {
         if (consumers.length === 0) {
             health.status = 'unhealthy';
             health.reason = 'Nenhum consumer ativo';
+        } else if (!lag) {
+            health.status = 'degraded';
+            health.reason = 'Lag indisponível';
         } else if (lag && lag.lag > 1000) {
             health.status = 'degraded';
-            health.reason = `Lag alto: ${lag.lag} eventos`;
+            health.reason = `Lag alto: ${lag.lag} ms`;
         } else if (dlqSize > 100) {
             health.status = 'degraded';
             health.reason = `DLQ grande: ${dlqSize} eventos`;

@@ -39,6 +39,14 @@ function normalizeStatus(value) {
   return String(value || '').trim().toLowerCase();
 }
 
+function normalizeWorkerLag(workerLag) {
+  const value = workerLag && typeof workerLag === 'object' ? workerLag.lag : workerLag;
+  const raw = value && typeof value === 'object' ? value.lag : value;
+  if (typeof raw !== 'number' && (typeof raw !== 'string' || raw.trim() === '')) return null;
+  const lag = Number(raw);
+  return Number.isFinite(lag) && lag >= 0 ? lag : null;
+}
+
 function classifyStatus({ sources = [], health, workerHealth, workerLag, workerDLQ, opsOverview } = {}) {
   const criticalFailures = sources.filter((source) => source.critical && source.status === 'error').length;
   if (criticalFailures > 0) return 'unhealthy';
@@ -50,14 +58,14 @@ function classifyStatus({ sources = [], health, workerHealth, workerLag, workerD
   if (['unhealthy', 'error'].includes(workerStatus)) return 'unhealthy';
 
   const dlqSize = toNumber(workerDLQ?.dlqSize ?? workerDLQ?.size ?? workerDLQ?.count, 0);
-  const lag = toNumber(workerLag?.lag?.lag ?? workerLag?.lag ?? workerLag, 0);
+  const lag = normalizeWorkerLag(workerLag);
   const supportBreaches = toNumber(opsOverview?.supportQueue?.overdueAckCount, 0)
     + toNumber(opsOverview?.supportQueue?.overdueFirstResponseCount, 0);
 
   if (sources.some((source) => source.status === 'error')) return 'warning';
   if (['warning', 'warn', 'degraded'].includes(healthStatus)) return 'warning';
   if (['warning', 'warn', 'degraded'].includes(workerStatus)) return 'warning';
-  if (dlqSize > 0 || lag > 100 || supportBreaches > 0) return 'warning';
+  if (lag === null || dlqSize > 0 || lag > 100 || supportBreaches > 0) return 'warning';
 
   return 'healthy';
 }
@@ -77,7 +85,7 @@ function buildDomainHealth({
   paymentRuntime
 }) {
   const dlqSize = toNumber(workerDLQ?.dlqSize ?? workerDLQ?.size ?? workerDLQ?.count, 0);
-  const lag = toNumber(workerLag?.lag?.lag ?? workerLag?.lag ?? workerLag, 0);
+  const lag = normalizeWorkerLag(workerLag);
   const supportBreaches = toNumber(opsOverview?.supportQueue?.overdueAckCount, 0)
     + toNumber(opsOverview?.supportQueue?.overdueFirstResponseCount, 0);
   const pendingDocuments = toNumber(driverOnboardingSummary?.byStatus?.pending, 0);
@@ -99,11 +107,13 @@ function buildDomainHealth({
     {
       id: 'socket',
       label: 'Socket e tempo real',
-      status: sourceStatus(sources, 'workerHealth') === 'ok' && lag <= 100 ? 'healthy' : 'warning',
+      status: sourceStatus(sources, 'workerHealth') === 'ok' && lag !== null && lag <= 100 ? 'healthy' : 'warning',
       source: 'workerHealth',
-      action: lag > 100
-        ? 'Checar lag dos workers e consumidores ativos.'
-        : 'Conexões em acompanhamento pelo snapshot.'
+      action: lag === null
+        ? 'Lag indisponível. Verificar leitura do stream e consumidores ativos.'
+        : lag > 100
+          ? 'Checar lag dos workers e consumidores ativos.'
+          : 'Conexões em acompanhamento pelo snapshot.'
     },
     {
       id: 'payment-runtime',
@@ -171,11 +181,13 @@ function buildDomainHealth({
     {
       id: 'workers',
       label: 'Workers e filas',
-      status: dlqSize > 0 || lag > 100 ? 'warning' : 'healthy',
+      status: lag === null || dlqSize > 0 || lag > 100 ? 'warning' : 'healthy',
       source: 'workerDLQ',
       action: dlqSize > 0
         ? 'Inspecionar DLQ antes de novos canaries.'
-        : 'Sem DLQ crítica no snapshot.'
+        : lag === null
+          ? 'Lag indisponível. Verificar leitura do stream e consumidores ativos.'
+          : 'Sem DLQ crítica no snapshot.'
     }
   ];
 
@@ -199,7 +211,7 @@ function buildActionItems({
 }) {
   const items = [];
   const dlqSize = toNumber(workerDLQ?.dlqSize ?? workerDLQ?.size ?? workerDLQ?.count, 0);
-  const lag = toNumber(workerLag?.lag?.lag ?? workerLag?.lag ?? workerLag, 0);
+  const lag = normalizeWorkerLag(workerLag);
   const supportBreaches = toNumber(opsOverview?.supportQueue?.overdueAckCount, 0)
     + toNumber(opsOverview?.supportQueue?.overdueFirstResponseCount, 0);
   const ticketsWithoutOwner = toNumber(opsOverview?.supportQueue?.ticketsWithoutOwner, 0);
@@ -278,12 +290,16 @@ function buildActionItems({
     });
   }
 
-  if (dlqSize > 0 || lag > 100) {
+  if (lag === null || dlqSize > 0 || lag > 100) {
     items.push({
       id: 'workers-attention',
       priority: dlqSize > 0 ? 'alta' : 'media',
       title: 'Workers pedem atenção',
-      description: dlqSize > 0 ? `${dlqSize} item(ns) em DLQ.` : `Lag em ${lag}.`,
+      description: dlqSize > 0
+        ? `${dlqSize} item(ns) em DLQ.`
+        : lag === null
+          ? 'Lag indisponível. Verificar leitura do stream e consumidores ativos.'
+          : `Lag em ${lag}.`,
       href: '/observability'
     });
   }
