@@ -27,4 +27,24 @@ describe('resolveDriverActivationSteps', () => {
     expect(result.remaining).toBe(0);
     expect(result.summary).toBe('Tudo pronto para ficar online');
   });
+
+  it('mostra a fila quando o cadastro está completo mas a Leaf ainda não liberou', () => {
+    const result = resolveDriverActivationSteps({ activationState: 'ACTIVE' }, true, { waitListStatus: 'pending', position: 3, isApproved: false });
+    expect(result.remaining).toBe(1);
+    expect(result.waitlisted).toBe(true);
+    expect(result.summary).toBe('Cadastro completo. Você está na fila, posição 3');
+    expect(result.steps.at(-1)).toEqual({ id: 'release', label: 'Liberação da Leaf', done: false });
+  });
+
+  it('ignora a fila para quem já foi aprovado', () => {
+    const result = resolveDriverActivationSteps({ activationState: 'ACTIVE' }, true, { waitListStatus: 'pending', position: 3, isApproved: true });
+    expect(result.remaining).toBe(0);
+    expect(result.summary).toBe('Tudo pronto para ficar online');
+  });
+
+  it('avisa quando a entrada foi recusada', () => {
+    const result = resolveDriverActivationSteps({ activationState: 'ACTIVE' }, true, { waitListStatus: 'rejected', isApproved: false });
+    expect(result.summary).toBe('Sua entrada precisa de revisão');
+    expect(result.waitlisted).toBe(false);
+  });
 });

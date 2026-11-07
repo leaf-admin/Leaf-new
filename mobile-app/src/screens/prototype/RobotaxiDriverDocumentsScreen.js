@@ -1,5 +1,5 @@
 import leafTypography from '../../components/prototype/LeafTypography';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   ScrollView,
@@ -22,6 +22,7 @@ import {
 import { LeafButton, LeafEmptyState, leafRideColors } from '../../components/prototype/LeafRideUI';
 import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
 import { usePrototypeRideRuntime } from './prototypeRideRuntime';
+import { loadDriverWaitlistStatus } from '../../services/runtime/driverWaitlistService';
 import {
   resolveCanonicalDriverActivationGates,
   resolveCanonicalLivenessGate,
@@ -53,7 +54,9 @@ export function resolveDocStatus(documents, analysisByType, docId) {
 }
 
 // Etapas que o backend exige para liberar o modo online, na ordem em que o motorista as faz.
-export function resolveDriverActivationSteps(remoteSnapshot = null, canGoOnline = false) {
+// `entry` é o status da lista de espera: na entrada controlada, o cadastro completo ainda
+// espera a liberação da Leaf antes de ficar online.
+export function resolveDriverActivationSteps(remoteSnapshot = null, canGoOnline = false, entry = null) {
   const gates = resolveCanonicalDriverActivationGates(remoteSnapshot);
   const liveness = resolveCanonicalLivenessGate(remoteSnapshot);
   const steps = [
@@ -63,9 +66,23 @@ export function resolveDriverActivationSteps(remoteSnapshot = null, canGoOnline 
     { id: 'face', label: 'Verificação de rosto', done: liveness.completed || canGoOnline === true },
   ];
   const remaining = canGoOnline === true ? 0 : steps.filter(step => !step.done).length;
+  const entryStatus = String(entry?.waitListStatus || '').toLowerCase();
+  const heldByEntry = remaining === 0 && entry?.isApproved !== true && ['pending', 'rejected'].includes(entryStatus);
+  if (heldByEntry) {
+    const position = Number(entry?.position) > 0 ? Number(entry.position) : null;
+    return {
+      steps: [...steps, { id: 'release', label: 'Liberação da Leaf', done: false }],
+      remaining: 1,
+      waitlisted: entryStatus === 'pending',
+      summary: entryStatus === 'rejected'
+        ? 'Sua entrada precisa de revisão'
+        : `Cadastro completo. Você está na fila${position ? `, posição ${position}` : ''}`,
+    };
+  }
   return {
     steps,
     remaining,
+    waitlisted: false,
     summary: remaining === 0
       ? 'Tudo pronto para ficar online'
       : `Falta${remaining === 1 ? '' : 'm'} ${remaining} etapa${remaining === 1 ? '' : 's'} para ficar online`,
@@ -98,9 +115,21 @@ export default function RobotaxiDriverDocumentsScreen({ navigation, route }) {
     [analysisByType, documents],
   );
   const documentsComplete = approvedCount === DRIVER_DOCS.length;
+  const [entryStatus, setEntryStatus] = useState(null);
+  const loadEntryStatus = useCallback(async () => {
+    if (!driverCanGoOnline) return;
+    try {
+      setEntryStatus(await loadDriverWaitlistStatus());
+    } catch (_error) {
+      setEntryStatus(null);
+    }
+  }, [driverCanGoOnline]);
+  useEffect(() => {
+    loadEntryStatus();
+  }, [loadEntryStatus]);
   const activationSteps = useMemo(
-    () => resolveDriverActivationSteps(driverActivationRemote, driverCanGoOnline),
-    [driverActivationRemote, driverCanGoOnline],
+    () => resolveDriverActivationSteps(driverActivationRemote, driverCanGoOnline, entryStatus),
+    [driverActivationRemote, driverCanGoOnline, entryStatus],
   );
   const operationallyReleasedBeforeDocumentSync = driverCanGoOnline && !documentsComplete;
 
@@ -123,6 +152,7 @@ export default function RobotaxiDriverDocumentsScreen({ navigation, route }) {
     setRefreshing(true);
     try {
       await refreshDriverActivationRemote();
+      await loadEntryStatus();
     } finally {
       setRefreshing(false);
     }
@@ -189,9 +219,21 @@ export default function RobotaxiDriverDocumentsScreen({ navigation, route }) {
                     key={step.id}
                     label={step.label}
                     value={step.done ? 'Feito' : 'Falta'}
-                    last={index === activationSteps.steps.length - 1}
+                    last={index === activationSteps.steps.length - 1 && !activationSteps.waitlisted}
                   />
                 ))}
+                {activationSteps.waitlisted ? (
+                  <PrototypeMenuRow
+                    icon="people-outline"
+                    title="Lista de espera"
+                    subtitle="Avisamos quando liberar sua entrada"
+                    badge="Na fila"
+                    badgeTone="warning"
+                    last
+                    onPress={() => navigation.navigate('RobotaxiPrototypeDriverWaitlistStatus')}
+                    testID="robotaxi-driver-documents-waitlist-row"
+                  />
+                ) : null}
               </PrototypeMenuSection>
 
               <PrototypeMenuSection title="Resumo">

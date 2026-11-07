@@ -84,7 +84,7 @@ describe('waitlist-notification-service', () => {
     expect(fcmService.sendNotificationToUser).toHaveBeenCalledWith(
       'driver_1',
       expect.objectContaining({
-        title: 'Voce entrou na lista da Leaf',
+        title: 'Você entrou na lista da Leaf',
         priority: 'high',
         data: expect.objectContaining({
           waitlistEvent: 'joined',
