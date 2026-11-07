@@ -75,14 +75,8 @@ class AppInfoService {
             };
         } catch (error) {
             Logger.error('❌ Erro ao buscar estatísticas:', error);
-            return {
-                success: true,
-                stats: {
-                    activeUsers: '50K+',
-                    totalTrips: '100K+',
-                    averageRating: '4.8'
-                }
-            };
+            // Sem número inventado: quem chama decide o que mostrar quando a API falha.
+            return { success: false, error: 'Estatísticas indisponíveis' };
         }
     }
 }

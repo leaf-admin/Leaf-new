@@ -1,5 +1,5 @@
 import leafTypography from '../../components/prototype/LeafTypography';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -134,7 +134,9 @@ export default function RobotaxiSupportTicketScreen({ navigation, route }) {
     : 'trip';
   const [selectedTypeId, setSelectedTypeId] = useState(initialType);
   const [showTicketTypes, setShowTicketTypes] = useState(false);
-  const [subject, setSubject] = useState(route?.params?.subject || '');
+  const prefilledSubject = route?.params?.subject || '';
+  const [subject, setSubject] = useState(prefilledSubject);
+  const descriptionInputRef = useRef(null);
   const [description, setDescription] = useState(route?.params?.description || '');
   const [createdTicket, setCreatedTicket] = useState(null);
   const { openSupportTicket, supportLoading, supportError } = usePrototypeRideRuntime();
@@ -320,7 +322,13 @@ export default function RobotaxiSupportTicketScreen({ navigation, route }) {
                 />
               )}
             >
-              <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+              <ScrollView
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={styles.content}
+                keyboardShouldPersistTaps="handled"
+                keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+                automaticallyAdjustKeyboardInsets
+              >
                 <PrototypeMenuSection title="Tipo de atendimento">
                   <TicketTypeRow
                     item={selectedType}
@@ -333,7 +341,12 @@ export default function RobotaxiSupportTicketScreen({ navigation, route }) {
                       key={item.id}
                       item={item}
                       active={false}
-                      onPress={() => { setSelectedTypeId(item.id); setShowTicketTypes(false); }}
+                      onPress={() => {
+                        setSelectedTypeId(item.id);
+                        setShowTicketTypes(false);
+                        // O assunto sugerido pela tela anterior (ex.: "Problema com Pix") não vale para outro tipo.
+                        if (item.id !== initialType && subject === prefilledSubject) setSubject('');
+                      }}
                     />
                   )) : null}
                 </PrototypeMenuSection>
@@ -346,12 +359,16 @@ export default function RobotaxiSupportTicketScreen({ navigation, route }) {
                     placeholder={selectedType.title}
                     placeholderTextColor={leafRideColors.muted}
                     style={styles.input}
+                    returnKeyType="next"
+                    blurOnSubmit={false}
+                    onSubmitEditing={() => descriptionInputRef.current?.focus()}
                     testID="robotaxi-support-ticket-subject"
                     accessibilityLabel={isIdentityReviewFlow ? 'Assunto do pedido de revisão' : 'Assunto do chamado de suporte'}
                     accessibilityHint={selectedType.title}
                   />
                   <Text style={styles.inputLabel}>Detalhes</Text>
                   <TextInput
+                    ref={descriptionInputRef}
                     value={description}
                     onChangeText={setDescription}
                     placeholder="Explique o que aconteceu e quando percebeu o problema."

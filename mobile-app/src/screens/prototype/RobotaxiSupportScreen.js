@@ -228,7 +228,6 @@ export default function RobotaxiSupportScreen({ navigation, route }) {
       priority: selectedOption.priority,
       severity: selectedOption.severity,
       subject: selectedOption.title,
-      description: selectedOption.subtitle,
       ...supportRideContext,
     });
   }, [
@@ -236,7 +235,6 @@ export default function RobotaxiSupportScreen({ navigation, route }) {
     selectedOption.id,
     selectedOption.priority,
     selectedOption.severity,
-    selectedOption.subtitle,
     selectedOption.title,
     supportRideContext,
   ]);
@@ -261,7 +259,6 @@ export default function RobotaxiSupportScreen({ navigation, route }) {
       priority: selectedOption.priority,
       severity: selectedOption.severity,
       subject: selectedOption.title,
-      description: selectedOption.subtitle,
       source: supportRideContext.source || 'prototype-support',
     });
   }, [
@@ -270,7 +267,6 @@ export default function RobotaxiSupportScreen({ navigation, route }) {
     selectedOption.id,
     selectedOption.priority,
     selectedOption.severity,
-    selectedOption.subtitle,
     selectedOption.title,
     supportLastTicket,
     supportRideContext,
