@@ -134,6 +134,10 @@ const DASHBOARD_SUPPORT_ROLES = ['admin', 'super-admin', 'manager', 'support', '
 
 const DASHBOARD_FINANCIAL_ROLES = ['admin', 'super-admin', 'manager'];
 
+// Leitura financeira: os papéis financeiros e, só em GET/HEAD, o usuário somente leitura dos
+// bots com adminUsers.financialRead. Escritas financeiras seguem com requireRole puro.
+const requireFinancialReadRole = requireRole(DASHBOARD_FINANCIAL_ROLES, { allowReadOnlyFinancial: true });
+
 const DASHBOARD_MONITORING_ROLES = ['admin', 'super-admin', 'manager', 'development'];
 
 const DASHBOARD_KYC_REVIEW_ROLES = ['admin', 'super-admin', 'manager'];
@@ -735,7 +739,9 @@ function hardenDashboardApiRoutes() {
 
     const methods = getDashboardRouteMethods(layer);
     const roles = resolveDashboardHardeningRoles(methods, routePath);
-    const roleMiddleware = requireRole(roles);
+    const roleMiddleware = requireRole(roles, {
+      allowReadOnlyFinancial: roles === DASHBOARD_FINANCIAL_ROLES
+    });
     roleMiddleware._dashboardAutoMiddleware = 'dashboardAutoRequireRole';
 
     layer.route.stack.unshift(
@@ -2777,6 +2783,7 @@ module.exports = {
   requireDashboardCnhMutationWindow,
   requireDashboardKycScopedPolicy,
   requirePermission,
+  requireFinancialReadRole,
   requireRole,
   resolveActiveTripForDriver,
   resolveDashboardHardeningRoles,

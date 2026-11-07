@@ -5,7 +5,7 @@ const { logError } = require('../utils/logger');
 const firebaseConfig = require('../firebase-config');
 const { resolveJwtSecretList } = require('../utils/jwt-secret-resolver');
 const { getAdminUser } = require('../utils/admin-user-cache');
-const { rejectReadOnlyWrite } = require('./read-only-user');
+const { rejectReadOnlyWrite, allowsReadOnlyFinancial } = require('./read-only-user');
 
 const SUPPORT_TIER_ROLES = ['support', 'support_n1', 'support_n2', 'support_n3'];
 const ADMIN_ROLES = new Set(['admin', 'manager', 'super-admin', 'viewer', ...SUPPORT_TIER_ROLES, 'development']);
@@ -71,6 +71,7 @@ async function verifyAdminToken(token) {
           }
           if (data.readOnly === true) {
             user.readOnly = true;
+            if (data.financialRead === true) user.financialRead = true;
           }
           user.email = user.email || data.email || null;
         }
@@ -139,12 +140,19 @@ function isSupportAgent(user) {
   return AGENT_ROLES.has(String(user?.role || '').toLowerCase());
 }
 
-function requireSupportRoles(roles) {
+// options.allowReadOnlyFinancial: true, ou uma função (req) => boolean que restringe a
+// quais caminhos a leitura financeira do usuário somente leitura se aplica.
+function requireSupportRoles(roles, options = {}) {
   const normalized = new Set((roles || []).map((role) => String(role).toLowerCase()));
+  const financialScope = options.allowReadOnlyFinancial;
 
   return (req, res, next) => {
     const role = String(req.user?.role || '').toLowerCase();
     if (!normalized.has(role)) {
+      const scopeMatches = typeof financialScope === 'function'
+        ? financialScope(req) === true
+        : financialScope === true;
+      if (scopeMatches && allowsReadOnlyFinancial(req)) return next();
       return res.status(403).json({ success: false, error: 'Acesso negado' });
     }
     return next();

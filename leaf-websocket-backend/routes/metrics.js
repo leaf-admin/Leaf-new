@@ -192,10 +192,13 @@ router.get('/api/metrics/overview', async (req, res) => {
 });
 
 // Hotfix de seguranca: apenas endpoints publicos da landing permanecem sem auth.
+// O usuário somente leitura dos bots com adminUsers.financialRead lê só /api/metrics/financial/*.
+const isFinancialMetricsPath = (req) =>
+  /^\/api\/metrics\/financial(\/|$)/.test(String(req.originalUrl || '').split('?')[0]);
 router.use(
   '/api/metrics',
   authenticateSupport,
-  requireSupportRoles(METRICS_READ_ROLES)
+  requireSupportRoles(METRICS_READ_ROLES, { allowReadOnlyFinancial: isFinancialMetricsPath })
 );
 
 // ==========================================

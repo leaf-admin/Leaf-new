@@ -3,7 +3,7 @@ const admin = require('firebase-admin');
 const { logError } = require('../utils/logger');
 const { resolveJwtSecret } = require('../utils/jwt-secret-resolver');
 const { getAdminUser } = require('../utils/admin-user-cache');
-const { rejectReadOnlyWrite } = require('./read-only-user');
+const { rejectReadOnlyWrite, allowsReadOnlyFinancial } = require('./read-only-user');
 
 const JWT_SECRET = resolveJwtSecret(['JWT_SECRET', 'ADMIN_JWT_SECRET'], {
   context: 'jwt-auth'
@@ -55,7 +55,8 @@ const authenticateJWT = async (req, res, next) => {
       email: decoded.email || userData.email,
       role: userData.role || 'viewer',
       permissions: Array.isArray(userData.permissions) ? userData.permissions : [],
-      ...(userData.readOnly === true ? { readOnly: true } : {})
+      ...(userData.readOnly === true ? { readOnly: true } : {}),
+      ...(userData.readOnly === true && userData.financialRead === true ? { financialRead: true } : {})
     };
 
     if (rejectReadOnlyWrite(req, res)) return;
@@ -107,8 +108,10 @@ const requirePermission = (permission) => {
 /**
  * Middleware para verificar se usuário tem um dos roles especificados
  * @param {string[]} roles - Array de roles permitidos (ex: ['admin', 'super-admin'])
+ * @param {{ allowReadOnlyFinancial?: boolean }} [options] - deixa passar o usuário somente
+ *   leitura com financialRead, só em GET/HEAD (leitura financeira dos bots)
  */
-const requireRole = (roles) => {
+const requireRole = (roles, options = {}) => {
   return (req, res, next) => {
     if (!req.user) {
       return res.status(401).json({
@@ -118,6 +121,9 @@ const requireRole = (roles) => {
     }
 
     if (!roles.includes(req.user.role)) {
+      if (options.allowReadOnlyFinancial === true && allowsReadOnlyFinancial(req)) {
+        return next();
+      }
       return res.status(403).json({
         success: false,
         error: 'Acesso negado',

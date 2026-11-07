@@ -11,4 +11,14 @@ function rejectReadOnlyWrite(req, res) {
   return true;
 }
 
-module.exports = { rejectReadOnlyWrite, SAFE_METHODS };
+// Leitura financeira dos bots (adminUsers.financialRead = true). Vale só para usuário
+// somente leitura e só em GET/HEAD: abre a leitura das rotas financeiras sem trocar o papel
+// do usuário e sem nenhuma escrita. Um usuário comum com a flag não ganha nada.
+const FINANCIAL_READ_METHODS = new Set(['GET', 'HEAD']);
+
+function allowsReadOnlyFinancial(req) {
+  if (req?.user?.readOnly !== true || req.user.financialRead !== true) return false;
+  return FINANCIAL_READ_METHODS.has(String(req.method || '').toUpperCase());
+}
+
+module.exports = { rejectReadOnlyWrite, allowsReadOnlyFinancial, SAFE_METHODS };
