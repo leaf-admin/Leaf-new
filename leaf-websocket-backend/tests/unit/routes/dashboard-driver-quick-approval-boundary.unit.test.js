@@ -51,8 +51,8 @@ describe('dashboard driver quick approval boundary', () => {
     expect(source).toContain("normalizedPath.includes('/reports')");
     // Leitura financeira: papéis financeiros + bots somente leitura com financialRead (só GET).
     expect(source).toContain("const requireFinancialReadRole = requireRole(DASHBOARD_FINANCIAL_ROLES, { allowReadOnlyFinancial: true })");
-    expect(source).toContain("router.get('/api/reports/comprehensive', authenticateJWT, requireFinancialReadRole");
-    expect(source).toContain("router.get('/api/reports/export/:reportId', authenticateJWT, requireFinancialReadRole");
+    expect(source).toContain("router.get('/api/reports/comprehensive', authenticateJWT, requireRole(DASHBOARD_FINANCIAL_ROLES, { allowReadOnlyFinancial: true })");
+    expect(source).toContain("router.get('/api/reports/export/:reportId', authenticateJWT, requireRole(DASHBOARD_FINANCIAL_ROLES, { allowReadOnlyFinancial: true })");
   });
 
   it('stores integrity-bound dashboard uploads without returning provider URLs', () => {
