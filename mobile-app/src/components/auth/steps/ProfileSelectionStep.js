@@ -5,6 +5,10 @@ import { saveStepData } from '../../../utils/secureOnboardingStorage';
 import ContinueButton from '../common/ContinueButton';
 import EditorialOnboardingScreen from '../common/EditorialOnboardingLayout';
 import { RoleCard } from '../../onboarding/onboardingSteps';
+import { DRIVER_FEE_POLICY, formatCents, promoPixIncludedUpToCents } from '../../../config/driverFeePolicy';
+
+// A promoção de lançamento é o principal argumento para o motorista: o cartão segue a política de taxas.
+const DRIVER_ROLE_DESCRIPTION = `${formatCents(DRIVER_FEE_POLICY.promoTotalFeeCents)} por corrida nas ${DRIVER_FEE_POLICY.promoQualifyingRides} primeiras, com o Pix incluso até ${formatCents(promoPixIncludedUpToCents())}. A corrida já chega paga.`;
 
 const options = [
   {
@@ -16,7 +20,7 @@ const options = [
   {
     key: 'driver',
     title: 'Quero dirigir',
-    description: 'Taxa de R$ 0,79 a R$ 1,49 por corrida até R$ 50. A corrida já chega paga.',
+    description: DRIVER_ROLE_DESCRIPTION,
     icon: 'car-outline'
   }
 ];
