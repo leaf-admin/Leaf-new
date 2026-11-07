@@ -22,6 +22,10 @@ import {
 import { LeafButton, LeafEmptyState, leafRideColors } from '../../components/prototype/LeafRideUI';
 import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
 import { usePrototypeRideRuntime } from './prototypeRideRuntime';
+import {
+  resolveCanonicalDriverActivationGates,
+  resolveCanonicalLivenessGate,
+} from './driverActivationCanonicalContract';
 
 const SURFACE_TOP_PADDING = 20;
 const SURFACE_BOTTOM_PADDING = 18;
@@ -46,6 +50,26 @@ function formatStatus(status) {
 
 export function resolveDocStatus(documents, analysisByType, docId) {
   return formatStatus(documents?.[docId]?.status || analysisByType?.[docId]?.status);
+}
+
+// Etapas que o backend exige para liberar o modo online, na ordem em que o motorista as faz.
+export function resolveDriverActivationSteps(remoteSnapshot = null, canGoOnline = false) {
+  const gates = resolveCanonicalDriverActivationGates(remoteSnapshot);
+  const liveness = resolveCanonicalLivenessGate(remoteSnapshot);
+  const steps = [
+    { id: 'cnh', label: 'CNH aprovada', done: gates.cnhApproved },
+    { id: 'vehicle', label: 'Veículo aprovado', done: gates.canonicalVehicleApproved || gates.crlvDocumentApproved },
+    { id: 'consent', label: 'Aceites enviados', done: gates.consentApproved },
+    { id: 'face', label: 'Verificação de rosto', done: liveness.completed || canGoOnline === true },
+  ];
+  const remaining = canGoOnline === true ? 0 : steps.filter(step => !step.done).length;
+  return {
+    steps,
+    remaining,
+    summary: remaining === 0
+      ? 'Tudo pronto para ficar online'
+      : `Falta${remaining === 1 ? '' : 'm'} ${remaining} etapa${remaining === 1 ? '' : 's'} para ficar online`,
+  };
 }
 
 export default function RobotaxiDriverDocumentsScreen({ navigation, route }) {
@@ -74,6 +98,10 @@ export default function RobotaxiDriverDocumentsScreen({ navigation, route }) {
     [analysisByType, documents],
   );
   const documentsComplete = approvedCount === DRIVER_DOCS.length;
+  const activationSteps = useMemo(
+    () => resolveDriverActivationSteps(driverActivationRemote, driverCanGoOnline),
+    [driverActivationRemote, driverCanGoOnline],
+  );
   const operationallyReleasedBeforeDocumentSync = driverCanGoOnline && !documentsComplete;
 
   const handleDismiss = useCallback(() => {
@@ -114,7 +142,7 @@ export default function RobotaxiDriverDocumentsScreen({ navigation, route }) {
             onLayout={handlePanelLayout}
             eyebrow="Motorista"
             title="Documentos"
-            subtitle="Acompanhe a análise que libera o modo online."
+            subtitle={activationSteps.summary}
             badgeLabel={documentsComplete ? 'aprovados' : `${approvedCount}/${DRIVER_DOCS.length}`}
             fullScreen
             style={{
@@ -153,6 +181,17 @@ export default function RobotaxiDriverDocumentsScreen({ navigation, route }) {
                     />
                   );
                 })}
+              </PrototypeMenuSection>
+
+              <PrototypeMenuSection title="Para ficar online">
+                {activationSteps.steps.map((step, index) => (
+                  <PrototypeMenuInfoRow
+                    key={step.id}
+                    label={step.label}
+                    value={step.done ? 'Feito' : 'Falta'}
+                    last={index === activationSteps.steps.length - 1}
+                  />
+                ))}
               </PrototypeMenuSection>
 
               <PrototypeMenuSection title="Resumo">
