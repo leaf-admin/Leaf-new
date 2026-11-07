@@ -8,6 +8,7 @@ const cityActivationStateService = require('../services/city-activation-state-se
 const waitlistNotificationService = require('../services/waitlist-notification-service');
 const { WAITLIST_EVENTS } = require('../services/waitlist-notification-service');
 const { authenticateSupport, requireSupportRoles } = require('../middleware/support-auth');
+const { isEntryReady } = require('../services/driver-entry-waitlist-service');
 const {
   isLaunchFeatureEnabled,
   buildLaunchFeatureDisabledPayload
@@ -719,8 +720,9 @@ router.get('/api/waitlist/status', requireFirebase, async (req, res) => {
 
     const response = {
       waitListStatus: userData.waitListStatus || 'none',
-      isApproved: userData.isApproved || false,
+      isApproved: userData.isApproved === true || userData.approved === true,
       isActiveDriver: userData.isActiveDriver || false,
+      entryReady: isEntryReady(userData),
       position: waitListData?.position || null,
       estimatedWaitTime: estimatedWaitTime,
       maxActiveDrivers: Number(resolvedCity.maxActiveDrivers || config.maxActiveDrivers || WAITLIST_DEFAULT_MAX_ACTIVE_DRIVERS),
@@ -1102,6 +1104,23 @@ router.post('/api/waitlist/approve', authenticateSupport, requireSupportRoles(WA
       });
     }
 
+    // Cadastro completo retido pela entrada controlada: a liberação da fila também aprova a
+    // conta, com a mesma checagem de identidade da aprovação automática.
+    const driverSnapshot = await admin.firestore().collection('users').doc(driverId).get();
+    const driverData = driverSnapshot.exists ? (driverSnapshot.data() || {}) : {};
+    const grantsAccountApproval = isEntryReady(driverData) && driverData.approved !== true;
+    if (grantsAccountApproval) {
+      try {
+        const { assertDriverIdentityNotPermanentlyBlocked } = require('../services/dashboard-user-management-service');
+        await assertDriverIdentityNotPermanentlyBlocked(driverId);
+      } catch (error) {
+        return res.status(409).json({
+          error: 'Identidade do motorista bloqueada; revise antes de liberar',
+          code: error?.code || 'DRIVER_IDENTITY_BLOCKED'
+        });
+      }
+    }
+
     // Aprovar motorista
     await waitListDoc.ref.update({
       status: 'approved',
@@ -1111,6 +1130,26 @@ router.post('/api/waitlist/approve', authenticateSupport, requireSupportRoles(WA
     });
 
     // Atualizar status do usuário
+    const approvedAtIso = new Date().toISOString();
+    const accountApproval = grantsAccountApproval
+      ? {
+        approved: true,
+        approvedAt: approvedAtIso,
+        approvedBy: adminId,
+        status: 'approved',
+        autoApproval: { ...(driverData.autoApproval || {}), status: 'approved_from_waitlist', approvedAt: approvedAtIso },
+        approvalAuditTrail: {
+          action: 'driver.waitlist_entry_approval',
+          driverId,
+          actorId: adminId,
+          provenance: 'waitlist_admin_release',
+          previousState: { approved: driverData.approved ?? null, status: driverData.status || null },
+          createdAt: approvedAtIso
+        },
+        approvalAuditUpdatedAt: approvedAtIso,
+        updatedAt: approvedAtIso
+      }
+      : {};
     await admin.firestore().collection('users').doc(driverId).update({
       waitListStatus: 'approved',
       isActiveDriver: true,
@@ -1118,7 +1157,8 @@ router.post('/api/waitlist/approve', authenticateSupport, requireSupportRoles(WA
       waitListReason: notes,
       waitListCityKey: resolvedCity.cityKey,
       waitListCityLabel: waitListData.cityLabel || resolvedCity.cityLabel,
-      waitListStateCode: resolvedCity.stateCode
+      waitListStateCode: resolvedCity.stateCode,
+      ...accountApproval
     });
 
     scheduleWaitlistNotification(driverId, WAITLIST_EVENTS.APPROVED, {
@@ -1176,7 +1216,8 @@ router.post('/api/waitlist/approve', authenticateSupport, requireSupportRoles(WA
       id: driverId
     }, {
       cityKey: resolvedCity.cityKey,
-      waitListEntryId: waitListDoc.id
+      waitListEntryId: waitListDoc.id,
+      accountApproved: grantsAccountApproval
     });
 
     res.json({

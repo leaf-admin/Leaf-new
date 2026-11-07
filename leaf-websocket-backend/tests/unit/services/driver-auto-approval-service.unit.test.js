@@ -80,6 +80,43 @@ describe('driver auto approval', () => {
     expect((await noCpf.service.maybeAutoApprove({ db: fakeDb({ status: 'pending' }), driverId: 'd1', canonicalState: ACTIVE })).reason).toBe('cpf_missing');
   });
 
+  it('holds a complete driver in the entry waitlist when the gate is on', async () => {
+    const db = fakeDb(driver);
+    const entryWaitlist = { enqueueReadyDriver: jest.fn().mockResolvedValue({ queued: true, created: true, position: 3, cityKey: 'rio-de-janeiro' }) };
+    const { service, deps } = build({ entryWaitlist, isEntryGateEnabled: () => true });
+    const result = await service.maybeAutoApprove({ db, driverId: 'd1', canonicalState: ACTIVE });
+
+    expect(result).toEqual({ approved: false, status: 'waitlisted', position: 3 });
+    expect(deps.claimCpf).toHaveBeenCalled();
+    expect(entryWaitlist.enqueueReadyDriver).toHaveBeenCalledWith(expect.objectContaining({ driverId: 'd1' }));
+    expect(db.state.users.d1.approved).toBeUndefined();
+    expect(db.state.users.d1.autoApproval).toEqual(expect.objectContaining({ status: 'waitlisted', position: 3 }));
+    expect(deps.auditService.logEvent).toHaveBeenCalledWith(expect.objectContaining({ action: 'driver.entry_waitlisted' }));
+  });
+
+  it('does not rewrite or re-audit a driver already waiting in the queue', async () => {
+    const db = fakeDb({ ...driver, autoApproval: { status: 'waitlisted', readyAt: 'x', position: 2 } });
+    const entryWaitlist = { enqueueReadyDriver: jest.fn().mockResolvedValue({ queued: true, created: false, position: 2 }) };
+    const { service, deps } = build({ entryWaitlist, isEntryGateEnabled: () => true });
+    expect(await service.maybeAutoApprove({ db, driverId: 'd1', canonicalState: ACTIVE })).toEqual({ approved: false, status: 'waitlisted', position: 2 });
+    expect(db.writes).toHaveLength(0);
+    expect(deps.auditService.logEvent).not.toHaveBeenCalled();
+  });
+
+  it('never approves a driver rejected from the waitlist', async () => {
+    const { service } = build();
+    const result = await service.maybeAutoApprove({ db: fakeDb({ ...driver, waitListStatus: 'rejected' }), driverId: 'd1', canonicalState: ACTIVE });
+    expect(result.status).toBe('manual_decision');
+  });
+
+  it('still approves right away when the gate is off', async () => {
+    const db = fakeDb(driver);
+    const entryWaitlist = { enqueueReadyDriver: jest.fn() };
+    const { service } = build({ entryWaitlist, isEntryGateEnabled: () => false });
+    expect((await service.maybeAutoApprove({ db, driverId: 'd1', canonicalState: ACTIVE })).status).toBe('approved');
+    expect(entryWaitlist.enqueueReadyDriver).not.toHaveBeenCalled();
+  });
+
   it('prefers the CPF read from the CNH', () => {
     expect(resolveDriverCpf({ cpf: '111', documents: { cnh: { extractedData: { cpf: '222' } } } })).toBe('222');
     expect(resolveDriverCpf({ cpf: '111' })).toBe('111');

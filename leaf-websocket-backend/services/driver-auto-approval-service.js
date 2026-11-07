@@ -1,5 +1,10 @@
 const { logStructured } = require('../utils/logger');
 const userStore = require('./user-store');
+const {
+  ENTRY_READY_STATUS,
+  isDriverEntryWaitlistGateEnabled,
+  isEntryReady
+} = require('./driver-entry-waitlist-service');
 
 // Aprovação automática do motorista: quando o estado canônico de ativação fica ACTIVE (CNH e
 // CRLV aprovados pela análise, veículo ativo, KYC, validação facial e consentimentos), a conta
@@ -28,6 +33,8 @@ function createDriverAutoApprovalService({
   assertNotPermanentlyBlocked,
   auditService,
   getFirestore,
+  entryWaitlist = null,
+  isEntryGateEnabled = () => false,
   now = () => new Date().toISOString()
 } = {}) {
   async function recordNeedsReview(driverId, reason, details = {}) {
@@ -39,12 +46,40 @@ function createDriverAutoApprovalService({
     return { approved: false, status: 'needs_review', reason };
   }
 
+  // Entrada controlada: cadastro completo e checagens de identidade ok, mas a liberação fica
+  // com um admin. O motorista entra na fila e a conta continua sem `approved`.
+  async function holdInWaitlist({ driverId, user, canonicalState }) {
+    const queued = await entryWaitlist.enqueueReadyDriver({ driverId, user });
+    if (!isEntryReady(user) || queued.created) {
+      const at = now();
+      await userStore.setUserField(getFirestore(), driverId, ['autoApproval'], {
+        status: ENTRY_READY_STATUS,
+        readyAt: user?.autoApproval?.readyAt || at,
+        position: queued.position || null,
+        activationState: canonicalState?.state || null,
+        updatedAt: at
+      });
+      await auditService.logEvent({
+        userId: AUTO_APPROVAL_ACTOR,
+        action: 'driver.entry_waitlisted',
+        resource: 'driver',
+        severity: 'INFO',
+        details: { driverId, position: queued.position || null, cityKey: queued.cityKey || null, createdAt: at },
+        success: true
+      });
+    }
+    return { approved: false, status: ENTRY_READY_STATUS, position: queued.position || null };
+  }
+
   async function maybeAutoApprove({ driverId, canonicalState }) {
     if (!isAutoApprovalEnabled(env)) return { approved: false, status: 'disabled' };
     if (!driverId || canonicalState?.canGoOnline !== true) return { approved: false, status: 'not_eligible' };
 
     const user = await userStore.readUser(getFirestore(), driverId) || {};
     if (isAlreadyApproved(user)) return { approved: false, status: 'already_approved' };
+    if (String(user?.waitListStatus || '').toLowerCase() === 'rejected') {
+      return { approved: false, status: 'manual_decision' };
+    }
     if (BLOCKING_MANUAL_STATUSES.has(String(user.manualReviewStatus || user.status || '').toLowerCase())) {
       return { approved: false, status: 'manual_decision' };
     }
@@ -61,6 +96,10 @@ function createDriverAutoApprovalService({
       await claimCpf({ firestore: getFirestore(), userId: driverId, cpf });
     } catch (error) {
       return recordNeedsReview(driverId, 'cpf_uniqueness', { code: error?.code || null });
+    }
+
+    if (isEntryGateEnabled() && entryWaitlist) {
+      return holdInWaitlist({ driverId, user, canonicalState });
     }
 
     const at = now();
@@ -114,7 +153,9 @@ function getDefaultDriverAutoApprovalService() {
       claimCpf,
       assertNotPermanentlyBlocked: assertDriverIdentityNotPermanentlyBlocked,
       auditService: require('./audit-service'),
-      getFirestore: () => firebaseConfig.getFirestore()
+      getFirestore: () => firebaseConfig.getFirestore(),
+      entryWaitlist: require('./driver-entry-waitlist-service').getDefaultDriverEntryWaitlistService(),
+      isEntryGateEnabled: () => isDriverEntryWaitlistGateEnabled(process.env)
     });
   }
   return defaultService;

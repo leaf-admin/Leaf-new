@@ -16,15 +16,18 @@ const WAITLIST_EVENTS = {
 
 const WAITLIST_TEMPLATES = {
   [WAITLIST_EVENTS.JOINED]: {
-    title: 'Voce entrou na lista da Leaf',
-    body: ({ cityLabel, position }) => {
+    title: 'Você entrou na lista da Leaf',
+    body: ({ cityLabel, position, registrationComplete }) => {
       const cityText = cityLabel ? ` em ${cityLabel}` : '';
-      const positionText = position ? ` Sua posicao atual e #${position}.` : '';
+      const positionText = position ? ` Sua posição atual é ${position}.` : '';
+      if (registrationComplete) {
+        return `Seu cadastro está completo e você está na fila para dirigir${cityText}.${positionText} Avisamos quando liberar.`;
+      }
       return `Recebemos seu interesse para dirigir${cityText}.${positionText}`;
     },
   },
   [WAITLIST_EVENTS.APPROVED]: {
-    title: 'Voce foi liberado para dirigir',
+    title: 'Você foi liberado para dirigir',
     body: ({ cityLabel }) => {
       const cityText = cityLabel ? ` em ${cityLabel}` : '';
       return `Seu cadastro foi aprovado para operar${cityText}. Abra o app para ficar online quando quiser.`;
@@ -34,14 +37,14 @@ const WAITLIST_TEMPLATES = {
     title: 'Precisamos revisar sua entrada',
     body: ({ reason }) => (
       reason
-        ? `Sua solicitacao precisa de revisao: ${reason}`
-        : 'Sua solicitacao precisa de revisao. Abra o app para acompanhar os proximos passos.'
+        ? `Sua solicitação precisa de revisão: ${reason}`
+        : 'Sua solicitação precisa de revisão. Abra o app para acompanhar os próximos passos.'
     ),
   },
   [WAITLIST_EVENTS.POSITION_UPDATED]: {
-    title: 'Sua posicao na lista mudou',
+    title: 'Sua posição na lista mudou',
     body: ({ position, cityLabel }) => {
-      const positionText = position ? `Agora voce esta na posicao #${position}.` : 'Sua posicao foi atualizada.';
+      const positionText = position ? `Agora você está na posição ${position}.` : 'Sua posição foi atualizada.';
       const cityText = cityLabel ? ` Cidade: ${cityLabel}.` : '';
       return `${positionText}${cityText}`;
     },
