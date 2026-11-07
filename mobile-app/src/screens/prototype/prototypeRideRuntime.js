@@ -187,11 +187,16 @@ const DRIVER_LOCATION_STALE_WATCHDOG_MS = Math.max(
 );
 const DRIVER_ROUTE_PLAN_SHARE_REFRESH_MS = 15000;
 const PASSENGER_LOCATION_HEARTBEAT_MS = 2000;
-const PASSENGER_LOCATION_STATIONARY_HEARTBEAT_MS = 4500;
-const PASSENGER_LOCATION_STARTED_HEARTBEAT_MS = 3000;
-const PASSENGER_LOCATION_MIN_SEND_GAP_MS = 900;
-const PASSENGER_LOCATION_MIN_MOVEMENT_METERS = 6;
-const PASSENGER_LOCATION_MIN_HEADING_DELTA_DEG = 8;
+// The server treats a passenger position as stale after 45 s and checks the
+// passenger-driver distance against 220 m (trip integrity). A still phone
+// used to send every 4.5 s, and GPS jitter over 6 m sent even more often.
+const PASSENGER_LOCATION_STATIONARY_HEARTBEAT_MS = 15000;
+const PASSENGER_LOCATION_STARTED_HEARTBEAT_MS = 10000;
+const PASSENGER_LOCATION_MIN_SEND_GAP_MS = 3000;
+const PASSENGER_LOCATION_MIN_MOVEMENT_METERS = 40;
+const PASSENGER_LOCATION_MIN_HEADING_DELTA_DEG = 30;
+// A still phone's compass drifts: heading only counts once the passenger moves.
+const PASSENGER_LOCATION_HEADING_MIN_MOVEMENT_METERS = 10;
 const MAX_DIRECTIONS_REQUESTS_PER_BOOKING = Math.max(
   1,
   Number.parseInt(
@@ -18266,26 +18271,27 @@ function calculateHeadingDeltaDegrees(previousHeading, nextHeading) {
   return Math.min(rawDelta, 360 - rawDelta);
 }
 
-function shouldThrottlePassengerLocationPush({
+export function shouldHoldPassengerLocationPush({
+  last = null,
   bookingId,
   bookingStatus,
   location,
+  nowMs = Date.now(),
   force = false,
-}) {
-  if (force || !runtimeLastPassengerHeartbeatSentAt) {
+} = {}) {
+  if (force || !last?.sentAt) {
     return false;
   }
 
   const normalizedStatus = String(bookingStatus || "").trim().toLowerCase();
   if (
-    String(runtimeLastPassengerHeartbeatBookingId || "") !==
-      String(bookingId || "") ||
-    runtimeLastPassengerHeartbeatStatus !== normalizedStatus
+    String(last.bookingId || "") !== String(bookingId || "") ||
+    last.status !== normalizedStatus
   ) {
     return false;
   }
 
-  const elapsedMs = Date.now() - runtimeLastPassengerHeartbeatSentAt;
+  const elapsedMs = nowMs - last.sentAt;
   const minIntervalMs =
     normalizedStatus === "started"
       ? PASSENGER_LOCATION_STARTED_HEARTBEAT_MS
@@ -18295,10 +18301,7 @@ function shouldThrottlePassengerLocationPush({
     return false;
   }
 
-  const movedMeters = calculateDistanceMeters(
-    runtimeLastPassengerHeartbeatLocation,
-    location,
-  );
+  const movedMeters = calculateDistanceMeters(last.location, location);
   if (
     Number.isFinite(movedMeters) &&
     movedMeters >= PASSENGER_LOCATION_MIN_MOVEMENT_METERS
@@ -18306,15 +18309,37 @@ function shouldThrottlePassengerLocationPush({
     return false;
   }
 
-  const headingDelta = calculateHeadingDeltaDegrees(
-    runtimeLastPassengerHeartbeatHeading,
-    location?.heading,
-  );
-  if (headingDelta >= PASSENGER_LOCATION_MIN_HEADING_DELTA_DEG) {
+  const headingDelta = calculateHeadingDeltaDegrees(last.heading, location?.heading);
+  if (
+    Number.isFinite(movedMeters) &&
+    movedMeters >= PASSENGER_LOCATION_HEADING_MIN_MOVEMENT_METERS &&
+    headingDelta >= PASSENGER_LOCATION_MIN_HEADING_DELTA_DEG
+  ) {
     return false;
   }
 
   return true;
+}
+
+function shouldThrottlePassengerLocationPush({
+  bookingId,
+  bookingStatus,
+  location,
+  force = false,
+}) {
+  return shouldHoldPassengerLocationPush({
+    last: {
+      sentAt: runtimeLastPassengerHeartbeatSentAt,
+      bookingId: runtimeLastPassengerHeartbeatBookingId,
+      status: runtimeLastPassengerHeartbeatStatus,
+      location: runtimeLastPassengerHeartbeatLocation,
+      heading: runtimeLastPassengerHeartbeatHeading,
+    },
+    bookingId,
+    bookingStatus,
+    location,
+    force,
+  });
 }
 
 async function pushPassengerLocationNow(

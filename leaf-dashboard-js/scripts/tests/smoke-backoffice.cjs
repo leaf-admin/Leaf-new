@@ -556,7 +556,7 @@ function fixtureForApiPath(apiPath, method) {
   if (apiPath === "/promotions/driver-intro-fee") {
     return json({
       success: true,
-      policy: { enabled: true, rideLimit: 25, feeCents: 99, paymentFeeIncluded: true },
+      policy: { enabled: true, rideLimit: 25, feeCents: 99, paymentFeeIncluded: true, pixExcessChargedToDriver: true },
       summary: { drivers: 2, active: 1, finished: 0, needsReview: 1, ridesUsed: 7 },
       drivers: [
         { driverId: "driver-review", name: "Motorista Revisao", ridesUsed: 4, ridesRemaining: 21, inRide: false, status: "review" },

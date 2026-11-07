@@ -34,8 +34,11 @@ const formatCents = (cents) =>
 
 const introFeeSubtitle = (report) => {
   if (!report) return "";
-  const { enabled, rideLimit, feeCents, paymentFeeIncluded } = report.policy;
-  const terms = `${rideLimit} corridas a ${formatCents(feeCents)}${paymentFeeIncluded ? ", Pix incluído" : ""}`;
+  const { enabled, rideLimit, feeCents, paymentFeeIncluded, pixExcessChargedToDriver } = report.policy;
+  const pixTerms = paymentFeeIncluded
+    ? (pixExcessChargedToDriver ? ", Pix incluído até R$ 62,50 (acima, o motorista paga a diferença)" : ", Pix incluído")
+    : "";
+  const terms = `${rideLimit} corridas a ${formatCents(feeCents)}${pixTerms}`;
   const notes = [
     enabled ? terms : `Desligada. Condição: ${terms}`,
     "Lista só quem já recebeu oferta de corrida.",

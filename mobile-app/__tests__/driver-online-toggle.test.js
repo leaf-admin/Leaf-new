@@ -103,9 +103,10 @@ jest.mock('../src/components/prototype/PrototypeScaffold', () => {
 jest.mock('../src/screens/prototype/home/LeafPassengerLanding', () => {
   const React = require('react');
   const { Text, TouchableOpacity, View } = require('react-native');
-  return ({ pickupLabel, onDestinationPress }) => <View>
+  return ({ pickupLabel, onDestinationPress, onPickupPress }) => <View>
     <Text>{pickupLabel}</Text>
     <TouchableOpacity testID="mock-passenger-destination-open" onPress={onDestinationPress}><Text>Abrir destino</Text></TouchableOpacity>
+    <TouchableOpacity testID="mock-passenger-pickup-open" onPress={onPickupPress}><Text>Abrir partida</Text></TouchableOpacity>
   </View>;
 });
 
@@ -126,7 +127,12 @@ jest.mock('../src/screens/prototype/home/PassengerHomeOverlay', () => {
     onCategoryConfirm,
     categoryConfirmDisabled,
     categoryConfirmLabel,
+    onPickupPress,
+    pickupSearchActive,
+    pickupSearchQuery,
+    onPickupSearchChange,
   }) => {
+    const { TextInput } = require('react-native');
     const selectedCategory =
       categoryOptions.find((item) => item?.id === selectedCategoryId) ||
       categoryOptions[0] ||
@@ -147,6 +153,16 @@ jest.mock('../src/screens/prototype/home/PassengerHomeOverlay', () => {
         >
           <Text>Abrir destino</Text>
         </TouchableOpacity>
+        <TouchableOpacity testID="mock-passenger-pickup-open" onPress={onPickupPress}>
+          <Text>Abrir partida</Text>
+        </TouchableOpacity>
+        {pickupSearchActive ? (
+          <TextInput
+            testID="mock-passenger-pickup-search-input"
+            value={pickupSearchQuery}
+            onChangeText={onPickupSearchChange}
+          />
+        ) : null}
         {destinationSearchActive
           ? destinationSearchResults.map((item, index) => (
               <TouchableOpacity
@@ -3384,5 +3400,176 @@ describe('driver online toggle', () => {
     await waitFor(() => {
       expect(respondOperationalContinuationFlow).toHaveBeenCalledWith(false);
     });
+  });
+  describe('current pickup reverse geocode (paid Google lookup)', () => {
+    const waitPastDebounce = () =>
+      act(() => new Promise((resolve) => setTimeout(resolve, 1000)));
+    const navigation = {
+      navigate: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+    let originalFetch;
+
+    const reverseGeocodeCalls = () =>
+      global.fetch.mock.calls.filter(([url]) => String(url).includes('/api/places/reverse-geocode'));
+
+    beforeEach(() => {
+      // An earlier test leaves a setItem implementation that returns undefined.
+      const AsyncStorage = require('@react-native-async-storage/async-storage');
+      AsyncStorage.setItem.mockImplementation?.(() => Promise.resolve());
+      originalFetch = global.fetch;
+      global.fetch = jest.fn(async (url, init = {}) => {
+        if (String(url).includes('/api/places/reverse-geocode')) {
+          const { location } = JSON.parse(init.body || '{}');
+          return {
+            ok: true,
+            status: 200,
+            json: jest.fn().mockResolvedValue({
+              data: {
+                address: `Rua Teste ${location.lat.toFixed(4)}, Rio de Janeiro`,
+                lat: location.lat,
+                lng: location.lng,
+              },
+            }),
+          };
+        }
+        return { ok: false, status: 404, json: jest.fn().mockResolvedValue({}) };
+      });
+    });
+
+    afterEach(() => {
+      global.fetch = originalFetch;
+    });
+
+    it('never resolves the passenger pickup address while the driver moves', async () => {
+      const step = (index) => ({ latitude: -22.97 - index * 0.001, longitude: -43.18 });
+      usePrototypeRideRuntime.mockReturnValue(
+        buildDriverRuntime({ currentCoordinate: step(0), driverCoordinate: step(0) })
+      );
+      const { rerender } = render(
+        <RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />
+      );
+      await waitPastDebounce();
+
+      for (let index = 1; index <= 3; index += 1) {
+        usePrototypeRideRuntime.mockReturnValue(
+          buildDriverRuntime({ currentCoordinate: step(index), driverCoordinate: step(index) })
+        );
+        rerender(<RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />);
+        await waitPastDebounce();
+      }
+
+      expect(reverseGeocodeCalls()).toHaveLength(0);
+    }, 15000);
+
+    it('resolves the passenger pickup address once per home session, however far the GPS moves', async () => {
+      // ~110 m per 0.001 degree of latitude.
+      const at = (latitudeOffset) => ({ latitude: -22.9700 - latitudeOffset, longitude: -43.1800 });
+      const renderAt = (coordinate, overrides = {}) =>
+        usePrototypeRideRuntime.mockReturnValue(
+          buildPassengerRuntime({ currentCoordinate: coordinate, ...overrides })
+        );
+
+      renderAt(at(0));
+      const { rerender } = render(
+        <RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />
+      );
+      await waitPastDebounce();
+      expect(reverseGeocodeCalls()).toHaveLength(1);
+
+      for (const offset of [0.0001, 0.001, 0.01]) {
+        renderAt(at(offset));
+        rerender(<RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />);
+        await waitPastDebounce();
+      }
+      expect(reverseGeocodeCalls()).toHaveLength(1);
+
+      // A ride starts and ends: the next idle home resolves once again.
+      renderAt(at(0.02), { bookingStatus: 'started', activeBookingId: 'booking_1' });
+      rerender(<RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />);
+      await waitPastDebounce();
+      renderAt(at(0.02));
+      rerender(<RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />);
+      await waitPastDebounce();
+      renderAt(at(0.021));
+      rerender(<RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />);
+      await waitPastDebounce();
+      expect(reverseGeocodeCalls()).toHaveLength(2);
+    }, 20000);
+
+    it('does not resolve the pickup address while the passenger has a ride in progress', async () => {
+      usePrototypeRideRuntime.mockReturnValue(
+        buildPassengerRuntime({
+          currentCoordinate: { latitude: -22.97, longitude: -43.18 },
+          bookingStatus: 'started',
+          activeBookingId: 'booking_1',
+        })
+      );
+      render(<RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />);
+      await waitPastDebounce();
+
+      expect(reverseGeocodeCalls()).toHaveLength(0);
+    });
+  });
+  describe('pickup search (paid Places autocomplete)', () => {
+    const navigation = {
+      navigate: jest.fn(),
+      canGoBack: jest.fn(() => false),
+      goBack: jest.fn(),
+    };
+    let originalFetch;
+    const autocompleteCalls = () =>
+      global.fetch.mock.calls.filter(([url]) => String(url).includes('/api/places/autocomplete'));
+
+    beforeEach(() => {
+      const AsyncStorage = require('@react-native-async-storage/async-storage');
+      AsyncStorage.setItem.mockImplementation?.(() => Promise.resolve());
+      originalFetch = global.fetch;
+      global.fetch = jest.fn(async (url) => {
+        if (String(url).includes('/api/places/autocomplete')) {
+          return {
+            ok: true,
+            status: 200,
+            json: jest.fn().mockResolvedValue({
+              status: 'success',
+              predictions: [{
+                place_id: 'copa-1',
+                description: 'Copacabana Palace, Rio de Janeiro',
+                structured_formatting: { main_text: 'Copacabana Palace', secondary_text: 'Rio de Janeiro' },
+                types: ['lodging'],
+              }],
+            }),
+          };
+        }
+        return { ok: false, status: 404, json: jest.fn().mockResolvedValue({}) };
+      });
+    });
+
+    afterEach(() => {
+      global.fetch = originalFetch;
+    });
+
+    it('does not repeat the same pickup search when the GPS moves', async () => {
+      const at = (offset) => ({ latitude: -22.97 - offset, longitude: -43.18 });
+      usePrototypeRideRuntime.mockReturnValue(buildPassengerRuntime({ currentCoordinate: at(0) }));
+      const { getByTestId, getAllByTestId, rerender } = render(
+        <RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />
+      );
+      await act(async () => {});
+      fireEvent.press(getAllByTestId('mock-passenger-pickup-open')[0]);
+      await act(async () => {});
+      fireEvent.changeText(getByTestId('mock-passenger-pickup-search-input'), 'Cop');
+      await act(() => new Promise((resolve) => setTimeout(resolve, 600)));
+      expect(autocompleteCalls()).toHaveLength(1);
+
+      for (const offset of [0.0005, 0.001, 0.002]) {
+        usePrototypeRideRuntime.mockReturnValue(buildPassengerRuntime({ currentCoordinate: at(offset) }));
+        rerender(<RobotaxiHomeScreen navigation={navigation} route={{ params: {} }} />);
+        await act(() => new Promise((resolve) => setTimeout(resolve, 600)));
+      }
+
+      expect(autocompleteCalls()).toHaveLength(1);
+    }, 15000);
   });
 });

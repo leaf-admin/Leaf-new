@@ -1041,7 +1041,7 @@ describe('PaymentService financial rules', () => {
     });
     const cents = service.calculateNetAmount(10000, 2000, 300, { driverIntroFee });
     const reais = service.calculateFareBreakdownFromReais(100, 20, { subscriptionRetainedFeeCents: 300, driverIntroFee });
-    expect(cents.operationalFee).toBe(count < 25 ? 19 : 240);
+    expect(cents.operationalFee).toBe(count < 25 ? 49 : 240);
     expect(reais.operationalFee * 100).toBe(cents.operationalFee);
     expect(reais.driverNetAmount * 100).toBeCloseTo(cents.netAmount, 6);
     expect(reais.paymentIntermediationFee).toBe(0.8);

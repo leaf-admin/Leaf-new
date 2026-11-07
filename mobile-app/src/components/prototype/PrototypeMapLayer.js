@@ -129,7 +129,13 @@ const DRIVER_MARKER_MIN_HEADING_DISTANCE_METERS = 0.85;
 const DRIVER_ROUTE_SNAP_MAX_METERS = 42;
 const DRIVER_DEAD_RECKONING_MAX_MS = 4200;
 const DRIVER_DEAD_RECKONING_MAX_SPEED_MPS = 18;
-const DRIVER_DEAD_RECKONING_FRAME_MS = 42;
+// Cada posição suavizada é um setState que re-renderiza este componente inteiro. A ~60 Hz o
+// JS do motorista ficava saturado (92-104% numa corrida, QA 2026-11-05). A 15 Hz o carro
+// anda menos de 1 m por quadro na velocidade de cidade, o que não aparece no mapa.
+const DRIVER_MARKER_FRAME_MS = 66;
+const DRIVER_DEAD_RECKONING_FRAME_MS = DRIVER_MARKER_FRAME_MS;
+const DRIVER_MARKER_MIN_STEP_METERS = 0.25;
+const DRIVER_MARKER_MIN_STEP_DEGREES = 0.5;
 const EARTH_RADIUS_METERS = 6371000;
 const USER_RADAR_DURATION_MS = 2200;
 const NEARBY_VEHICLE_REVEAL_DELAY_MS = 15000;
@@ -1684,8 +1690,21 @@ function PrototypeMapLayer({
   );
   // A letra do passageiro no centro da busca não dizia nada; a esfera marca o lugar.
   const shouldShowUserAvatarMarker = false;
-  const userMarkerTracksViewChanges =
-    Platform.OS === 'android' || shouldShowCurrentLocationMarker;
+  // Android: com tracksViewChanges sempre ligado o react-native-maps recaptura o ponto a cada
+  // 40 ms e o mapa redesenha sem parar (41 quadros/s e 133% de CPU numa tela parada, QA
+  // 2026-11-05). O desenho do ponto não muda: captura por um instante quando ele aparece.
+  const [userMarkerTracking, setUserMarkerTracking] = useState(true);
+  useEffect(() => {
+    if (Platform.OS !== 'android' || !shouldShowCurrentLocationMarker) {
+      return undefined;
+    }
+    setUserMarkerTracking(true);
+    const timer = setTimeout(() => setUserMarkerTracking(false), 700);
+    return () => clearTimeout(timer);
+  }, [currentLocationMarkerMode, shouldShowCurrentLocationMarker]);
+  const userMarkerTracksViewChanges = Platform.OS === 'android'
+    ? userMarkerTracking
+    : shouldShowCurrentLocationMarker;
   const shouldAnimateRoute = resolveRouteAnimationEnabled({
     animateRoute,
     isTestEnv: IS_TEST_ENV,
@@ -1878,14 +1897,35 @@ function PrototypeMapLayer({
     setUserAvatarFailed(true);
   }, []);
 
+  // Compara com o último valor desenhado (não com o último calculado): passos pequenos se
+  // acumulam até passar do limite, então o carro não congela em trânsito lento.
+  const renderedDriverCoordinateRef = useRef(targetDriverCoordinate);
+  const renderedDriverHeadingRef = useRef(targetDriverHeading ?? normalizedUserHeading);
   const commitSmoothedDriverCoordinate = useCallback((nextCoordinate) => {
     smoothedDriverCoordinateRef.current = nextCoordinate;
+    const renderedCoordinate = renderedDriverCoordinateRef.current;
+    if (
+      renderedCoordinate &&
+      nextCoordinate &&
+      calculateCoordinateDistanceMeters(renderedCoordinate, nextCoordinate) < DRIVER_MARKER_MIN_STEP_METERS
+    ) {
+      return;
+    }
+    renderedDriverCoordinateRef.current = nextCoordinate;
     setSmoothedDriverCoordinate(nextCoordinate);
   }, []);
 
   const commitSmoothedDriverHeading = useCallback((nextHeading) => {
     const normalizedHeading = normalizeHeadingDegrees(nextHeading) ?? 0;
     smoothedDriverHeadingRef.current = normalizedHeading;
+    const renderedHeading = renderedDriverHeadingRef.current;
+    if (
+      Number.isFinite(renderedHeading) &&
+      Math.abs(resolveShortestHeadingDeltaDegrees(renderedHeading, normalizedHeading)) < DRIVER_MARKER_MIN_STEP_DEGREES
+    ) {
+      return;
+    }
+    renderedDriverHeadingRef.current = normalizedHeading;
     setSmoothedDriverHeading(normalizedHeading);
   }, []);
 
@@ -2026,11 +2066,18 @@ function PrototypeMapLayer({
     }
 
     const startedAt = Date.now();
+    let lastCommitAt = 0;
     const animationDuration = shouldAnimateCoordinate
       ? DRIVER_MARKER_SMOOTH_MS
       : DRIVER_MARKER_HEADING_SMOOTH_MS;
     const animateDriverMarker = () => {
-      const progress = Math.min(1, (Date.now() - startedAt) / animationDuration);
+      const frameNow = Date.now();
+      const progress = Math.min(1, (frameNow - startedAt) / animationDuration);
+      if (progress < 1 && frameNow - lastCommitAt < DRIVER_MARKER_FRAME_MS) {
+        driverSmoothFrameRef.current = requestAnimationFrame(animateDriverMarker);
+        return;
+      }
+      lastCommitAt = frameNow;
       const eased = 1 - Math.pow(1 - progress, 3);
       const routeFrame = followsReceivedRoute && shouldAnimateCoordinate
         ? resolveVehicleRouteFrame({

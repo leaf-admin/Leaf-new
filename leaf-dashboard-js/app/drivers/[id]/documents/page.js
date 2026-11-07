@@ -186,6 +186,10 @@ export default function DriverDocumentsPage({ params }) {
   const [orphanRecoveryDialogOpen, setOrphanRecoveryDialogOpen] = useState(false);
   const [orphanRecoveryBusy, setOrphanRecoveryBusy] = useState(false);
   const [orphanRecoveryError, setOrphanRecoveryError] = useState("");
+  const [retryBindingCandidate, setRetryBindingCandidate] = useState(null);
+  const [retryBindingReason, setRetryBindingReason] = useState("");
+  const [retryBindingBusy, setRetryBindingBusy] = useState(false);
+  const [retryBindingError, setRetryBindingError] = useState("");
   const [vehicleForm, setVehicleForm] = useState({
     userVehicleId: "",
     category: "plus",
@@ -211,6 +215,11 @@ export default function DriverDocumentsPage({ params }) {
     setOrphanRecoveryCandidate(
       payload?.orphanRecoveryCandidate?.available === true
         ? payload.orphanRecoveryCandidate
+        : null,
+    );
+    setRetryBindingCandidate(
+      payload?.retryBindingRestoreCandidate?.available === true
+        ? payload.retryBindingRestoreCandidate
         : null,
     );
     setIdentityReviewError("");
@@ -280,6 +289,11 @@ export default function DriverDocumentsPage({ params }) {
           setOrphanRecoveryCandidate(
             reviewPayload?.orphanRecoveryCandidate?.available === true
               ? reviewPayload.orphanRecoveryCandidate
+              : null,
+          );
+          setRetryBindingCandidate(
+            reviewPayload?.retryBindingRestoreCandidate?.available === true
+              ? reviewPayload.retryBindingRestoreCandidate
               : null,
           );
         } else {
@@ -560,6 +574,31 @@ export default function DriverDocumentsPage({ params }) {
       setOrphanRecoveryError(err?.message || "Não foi possível autorizar a nova validação");
     } finally {
       setOrphanRecoveryBusy(false);
+    }
+  };
+
+  const restoreRetryBinding = async () => {
+    const reason = retryBindingReason.trim();
+    const caseId = retryBindingCandidate?.caseId;
+    if (!caseId || reason.length < MIN_ORPHAN_RECOVERY_REASON_LENGTH) return;
+    try {
+      setRetryBindingBusy(true);
+      setRetryBindingError("");
+      await leafAPI.restoreDriverKycRetryBinding(id, caseId, { reason }, kycRequestContext);
+      setRetryBindingCandidate(null);
+      setRetryBindingReason("");
+      setActionMessage("Nova tentativa restaurada. O motorista recebe o aviso e já pode validar a identidade.");
+      try {
+        await loadIdentityReviews();
+      } catch {
+        setRetryBindingError(
+          "A restauração foi concluída, mas o painel não conseguiu atualizar o estado. Recarregue a página.",
+        );
+      }
+    } catch (err) {
+      setRetryBindingError(err?.message || "Não foi possível restaurar a nova tentativa");
+    } finally {
+      setRetryBindingBusy(false);
     }
   };
 
@@ -961,6 +1000,64 @@ export default function DriverDocumentsPage({ params }) {
                   }}
                 >
                   {orphanRecoveryBusy ? "Autorizando..." : "Revisar e autorizar tentativa"}
+                </button>
+              </div>
+            </div>
+          </section>
+        ) : null}
+
+        {retryBindingCandidate ? (
+          <section className="card" aria-labelledby="retry-binding-restore-title">
+            <div className="section-stack">
+              <div>
+                <span className="status-warn">Ação de suporte necessária</span>
+                <h2 id="retry-binding-restore-title" style={{ marginBottom: 4 }}>
+                  Nova tentativa autorizada sem vínculo
+                </h2>
+                <p className="text-muted" style={{ margin: 0 }}>
+                  O suporte já autorizou uma nova validação (falso positivo), mas o registro que liga essa tentativa
+                  ao motorista se perdeu. Sem ele, o motorista não consegue validar a identidade. Restaurar recria
+                  o mesmo registro da decisão original; não aprova a identidade nem remove proteções KYC.
+                </p>
+              </div>
+
+              <p style={{ margin: 0 }}>
+                <strong>Caso:</strong> {retryBindingCandidate.caseId} · <strong>Registro atual:</strong>{" "}
+                {retryBindingCandidate.reverificationRecord === "missing" ? "ausente" : retryBindingCandidate.reverificationRecord}
+              </p>
+
+              <label className="form-field">
+                Justificativa obrigatória
+                <textarea
+                  name="retryBindingRestoreReason"
+                  value={retryBindingReason}
+                  onChange={(event) => setRetryBindingReason(event.target.value)}
+                  minLength={MIN_ORPHAN_RECOVERY_REASON_LENGTH}
+                  maxLength={1000}
+                  placeholder="Explique por que a tentativa autorizada precisa ser restaurada."
+                  disabled={retryBindingBusy}
+                  required
+                />
+                <span className="text-muted" style={{ margin: 0 }}>
+                  Mínimo de {MIN_ORPHAN_RECOVERY_REASON_LENGTH} caracteres · {retryBindingReason.trim().length} informados
+                </span>
+              </label>
+
+              {retryBindingError ? (
+                <p className="error-banner" role="alert">{retryBindingError}</p>
+              ) : null}
+
+              <div>
+                <button
+                  type="button"
+                  className="primary-action"
+                  disabled={
+                    retryBindingBusy ||
+                    retryBindingReason.trim().length < MIN_ORPHAN_RECOVERY_REASON_LENGTH
+                  }
+                  onClick={restoreRetryBinding}
+                >
+                  {retryBindingBusy ? "Restaurando..." : "Restaurar nova tentativa"}
                 </button>
               </div>
             </div>

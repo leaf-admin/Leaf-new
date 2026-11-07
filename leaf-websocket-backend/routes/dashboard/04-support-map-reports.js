@@ -232,7 +232,7 @@ router.put(
 );
 
 // 📊 Advanced Reports - SISTEMA DE RELATÓRIOS AVANÇADOS
-router.get('/api/reports/comprehensive', authenticateJWT, requireRole(DASHBOARD_FINANCIAL_ROLES), async (req, res) => {
+router.get('/api/reports/comprehensive', authenticateJWT, requireRole(DASHBOARD_FINANCIAL_ROLES, { allowReadOnlyFinancial: true }), async (req, res) => {
   try {
     const {
       reportType = 'financial', // 'financial', 'operational', 'users', 'trips'
@@ -457,7 +457,7 @@ router.get('/api/reports/comprehensive', authenticateJWT, requireRole(DASHBOARD_
 });
 
 // 📊 Export Report Data
-router.get('/api/reports/export/:reportId', authenticateJWT, requireRole(DASHBOARD_FINANCIAL_ROLES), async (req, res) => {
+router.get('/api/reports/export/:reportId', authenticateJWT, requireRole(DASHBOARD_FINANCIAL_ROLES, { allowReadOnlyFinancial: true }), async (req, res) => {
   try {
     const { reportId } = req.params;
     const { format = 'pdf' } = req.query; // 'pdf', 'excel', 'csv'

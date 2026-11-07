@@ -52,12 +52,15 @@ const SESSION_SETUP_CODES = new Set([
   'AWS_LIVENESS_CREDENTIALS_SESSION_BINDING_REQUIRED',
   'AWS_LIVENESS_SESSION_BINDING_INVALID',
   'AWS_LIVENESS_SESSION_METADATA_REQUIRED',
-  'KYC_IDENTITY_RETRY_BINDING_REQUIRED',
   'KYC_IDENTITY_RETRY_AUTHORIZATION_REQUIRED',
   'KYC_IDENTITY_RETRY_SESSION_BINDING_REQUIRED',
   'KYC_CHALLENGE_NOT_FOUND',
   'KYC_LIVENESS_REQUIRED',
 ]);
+
+// The authorized retry lost its reverification record: waiting never fixes it,
+// only support can release a new attempt.
+const RETRY_SUPPORT_CODES = new Set(['KYC_IDENTITY_RETRY_BINDING_REQUIRED']);
 
 const CAMERA_PERMISSION_CODES = new Set(['KYC_CAMERA_PERMISSION_REQUIRED']);
 const RESULT_TIMEOUT_CODES = new Set(['KYC_AWS_LIVENESS_RESULT_TIMEOUT']);
@@ -229,6 +232,14 @@ export function resolveKycLivenessErrorPresentation(errorOrResult) {
       };
     }
 
+    return {
+      title: 'Nova tentativa necessária',
+      message: 'Precisamos liberar uma nova tentativa. Fale com o suporte.',
+      allowLocalFallback: false,
+    };
+  }
+
+  if (RETRY_SUPPORT_CODES.has(code)) {
     return {
       title: 'Nova tentativa necessária',
       message: 'Precisamos liberar uma nova tentativa. Fale com o suporte.',

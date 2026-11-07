@@ -56,7 +56,7 @@ describe('driver intro fee report', () => {
     const report = await getDriverIntroFeeReport({ firestore, redis, env: { DRIVER_INTRO_FEE_ENABLED: 'true' } });
 
     expect(firestore.collection).not.toHaveBeenCalledWith('sandbox_driver_intro_fee_states');
-    expect(report.policy).toEqual({ enabled: true, rideLimit: 25, feeCents: 99, paymentFeeIncluded: true });
+    expect(report.policy).toEqual({ enabled: true, rideLimit: 25, feeCents: 99, paymentFeeIncluded: true, pixExcessChargedToDriver: true });
     expect(report.summary).toEqual({ drivers: 2, active: 1, finished: 1, needsReview: 0, ridesUsed: 28 });
     expect(report.drivers[0]).toEqual({
       driverId: 'driver-2', name: 'Ana Lima', ridesUsed: 3, ridesRemaining: 22, inRide: false, status: 'active'
