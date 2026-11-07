@@ -1,13 +1,22 @@
 import React, { useEffect, useRef } from 'react';
-import { Animated, Easing, Image, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import Reanimated, { FadeInDown, ZoomIn } from 'react-native-reanimated';
+import { Animated, Easing, Image, Pressable, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import Reanimated, {
+  Easing as ReanimatedEasing,
+  FadeInDown,
+  useAnimatedProps,
+  useReducedMotion,
+  useSharedValue,
+  withDelay,
+  withTiming,
+  ZoomIn,
+} from 'react-native-reanimated';
 import Svg, { Path } from 'react-native-svg';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import leafTypography from '../prototype/LeafTypography';
 import { LeafAnimatedPressable } from '../prototype/LeafRideUI';
 import { useHapticFeedback } from '../../hooks/useHapticFeedback';
+import { LEAF_MOTION_BEZIER } from '../design-system/leafMotion';
 import { ONB, OnboardingField, OnboardingShell, PrimaryButton, TextLink } from './onboardingKit';
 
 // Telas do onboarding (apresentação). Recebem estado e callbacks por props: o laboratório usa
@@ -22,22 +31,57 @@ export function formatBrazilPhone(digits) {
 }
 
 // ── Boas-vindas ─────────────────────────────────────────────────────────────────────────────
-// Foto da cidade com degradê verde, o logo da Leaf e um título só (aprovado no canvas de
-// UI/UX, variação 1B). Os links de termos e privacidade continuam embaixo.
-const CITY_BACKGROUND = require('../../../assets/images/onboarding-city-bg.jpg');
+// Verde da marca, o logo, o perfil do Morro da Urca e do Pão de Açúcar e um título só. O traço se desenha uma vez ao
+// abrir: nada fica animando enquanto a pessoa está nesta tela.
 const WORDMARK_WHITE = require('../../../assets/images/leaf-wordmark-white.png');
+const HORIZON_PATH = 'M0 150 C 30 150, 62 150, 88 146 C 104 143, 116 116, 146 112 C 168 109, 182 122, 200 122 C 214 122, 222 90, 234 66 C 244 46, 258 34, 272 38 C 290 43, 300 78, 304 108 C 307 130, 318 146, 340 149 C 356 151, 374 150, 390 150';
+const HORIZON_PATH_LENGTH = 521;
+const AnimatedPath = Reanimated.createAnimatedComponent(Path);
+
+function WelcomeHorizon() {
+  const { width } = useWindowDimensions();
+  const reduceMotion = useReducedMotion();
+  const drawn = useSharedValue(reduceMotion ? 1 : 0);
+  useEffect(() => {
+    if (reduceMotion) {
+      drawn.value = 1;
+      return;
+    }
+    drawn.value = withDelay(350, withTiming(1, {
+      duration: 1800,
+      easing: ReanimatedEasing.bezier(...LEAF_MOTION_BEZIER),
+    }));
+  }, [drawn, reduceMotion]);
+  const animatedProps = useAnimatedProps(() => ({
+    strokeDashoffset: HORIZON_PATH_LENGTH * (1 - drawn.value),
+  }));
+  return (
+    <Svg
+      width={width}
+      height={width * (130 / 390)}
+      viewBox="0 28 390 130"
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+      testID="onboarding-welcome-horizon"
+    >
+      <AnimatedPath
+        d={HORIZON_PATH}
+        fill="none"
+        stroke="#D4E84A"
+        strokeOpacity={0.55}
+        strokeWidth={1.5}
+        strokeLinecap="round"
+        strokeDasharray={[HORIZON_PATH_LENGTH, HORIZON_PATH_LENGTH]}
+        animatedProps={animatedProps}
+      />
+    </Svg>
+  );
+}
 
 export function WelcomeScreen({ onStart, onStartDriver, onOpenTerms, onOpenPrivacy }) {
   const insets = useSafeAreaInsets();
   return (
     <View style={welcome.root} testID="onboarding-welcome">
-      <Image source={CITY_BACKGROUND} style={StyleSheet.absoluteFill} resizeMode="cover" accessibilityIgnoresInvertColors />
-      <LinearGradient
-        colors={['rgba(0,48,2,0.10)', 'rgba(0,48,2,0.35)', 'rgba(0,32,1,0.94)']}
-        locations={[0, 0.4, 0.78]}
-        style={StyleSheet.absoluteFill}
-        pointerEvents="none"
-      />
       <Image
         source={WORDMARK_WHITE}
         style={[welcome.logo, { top: insets.top + 20 }]}
@@ -46,6 +90,7 @@ export function WelcomeScreen({ onStart, onStartDriver, onOpenTerms, onOpenPriva
         accessibilityLabel="Leaf"
       />
       <Reanimated.View entering={FadeInDown.delay(250).duration(500)} style={[welcome.bottom, { paddingBottom: Math.max(20, insets.bottom + 8) }]}>
+        <WelcomeHorizon />
         <Text style={welcome.headline} accessibilityRole="header">Feito no Rio.</Text>
         <PrimaryButton label="Começar" tone="lime" onPress={onStart} testID="onboarding-welcome-start" />
         {onStartDriver ? (
@@ -476,7 +521,7 @@ const welcome = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#003002', overflow: 'hidden' },
   logo: { position: 'absolute', left: 24, width: 104, height: 27 },
   bottom: { position: 'absolute', left: 24, right: 24, bottom: 0, gap: 16, alignItems: 'center' },
-  headline: { ...leafTypography.bold, alignSelf: 'stretch', fontSize: 48, lineHeight: 52, letterSpacing: -1.4, color: '#FFFFFF', marginBottom: 6 },
+  headline: { ...leafTypography.bold, alignSelf: 'stretch', fontSize: 56, lineHeight: 60, letterSpacing: -1.5, color: '#FFFFFF', marginBottom: 6 },
   driverLink: { ...leafTypography.semiBold, fontSize: 15, color: '#FFFFFF', textDecorationLine: 'underline' },
   legal: { ...leafTypography.regular, fontSize: 12.5, lineHeight: 18, color: 'rgba(255,255,255,0.66)', textAlign: 'center' },
   legalLink: { ...leafTypography.medium, color: 'rgba(255,255,255,0.9)', textDecorationLine: 'underline' },
