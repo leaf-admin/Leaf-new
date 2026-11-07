@@ -22,6 +22,7 @@ const {
   os,
   parseAuditDate,
   redisPool,
+  requireFinancialReadRole,
   requireRole,
   resolveRideDriverNetAmount,
   resolveRideOperationalFee,
@@ -30,7 +31,7 @@ const {
 } = require('./shared');
 
 // Ledger financeiro: relatorios e reconciliacao de corridas
-router.get('/api/financial/reconciliation/reports', authenticateJWT, requireRole(DASHBOARD_FINANCIAL_ROLES), async (req, res) => {
+router.get('/api/financial/reconciliation/reports', authenticateJWT, requireFinancialReadRole, async (req, res) => {
   const result = await financialReconciliationDashboardService.listReports({
     status: req.query.status,
     severity: req.query.severity,
@@ -57,7 +58,7 @@ router.get('/api/financial/reconciliation/reports', authenticateJWT, requireRole
   return res.json(payload);
 });
 
-router.get('/api/financial/reconciliation/rides/:rideId', authenticateJWT, requireRole(DASHBOARD_FINANCIAL_ROLES), async (req, res) => {
+router.get('/api/financial/reconciliation/rides/:rideId', authenticateJWT, requireFinancialReadRole, async (req, res) => {
   const result = await financialReconciliationDashboardService.getRideDetail(req.params.rideId, {
     financialContext: req.query.financialContext || null,
     providerEnvironment: req.query.providerEnvironment || null

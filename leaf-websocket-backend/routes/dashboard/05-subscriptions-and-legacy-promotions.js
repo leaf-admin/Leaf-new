@@ -16,6 +16,7 @@ const {
   logError,
   logStructured,
   requireAdminMutationsEnabled,
+  requireFinancialReadRole,
   requireRole,
   router,
   subscriptionStateService,
@@ -24,7 +25,7 @@ const {
 } = require('./shared');
 
 // 💳 Subscription Management - MODELO DIÁRIO (cobrança no saque)
-router.get('/api/subscriptions/drivers', authenticateJWT, requireRole(DASHBOARD_FINANCIAL_ROLES), async (req, res) => {
+router.get('/api/subscriptions/drivers', authenticateJWT, requireFinancialReadRole, async (req, res) => {
   try {
     const {
       status, // 'active', 'pending', 'blocked', ...
