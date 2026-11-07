@@ -5,10 +5,10 @@ import { saveStepData } from '../../../utils/secureOnboardingStorage';
 import ContinueButton from '../common/ContinueButton';
 import EditorialOnboardingScreen from '../common/EditorialOnboardingLayout';
 import { RoleCard } from '../../onboarding/onboardingSteps';
-import { DRIVER_FEE_POLICY, formatCents, promoPixIncludedUpToCents } from '../../../config/driverFeePolicy';
+import { DRIVER_FEE_POLICY, formatCents } from '../../../config/driverFeePolicy';
 
 // A promoção de lançamento é o principal argumento para o motorista: o cartão segue a política de taxas.
-const DRIVER_ROLE_DESCRIPTION = `${formatCents(DRIVER_FEE_POLICY.promoTotalFeeCents)} por corrida nas ${DRIVER_FEE_POLICY.promoQualifyingRides} primeiras, com o Pix incluso até ${formatCents(promoPixIncludedUpToCents())}. A corrida já chega paga.`;
+const DRIVER_ROLE_DESCRIPTION = `${formatCents(DRIVER_FEE_POLICY.promoTotalFeeCents)} de taxa operacional por corrida nas ${DRIVER_FEE_POLICY.promoQualifyingRides} primeiras. A corrida já chega paga.`;
 
 const options = [
   {
