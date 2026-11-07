@@ -3,7 +3,6 @@ import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  KeyboardAvoidingView,
   Platform,
   ScrollView,
   StatusBar,
@@ -297,11 +296,9 @@ export default function RobotaxiSupportTicketScreen({ navigation, route }) {
           dragEnabled={false}
           sheetStyle={styles.sheetWrap}
         >
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            keyboardVerticalOffset={Math.max(0, insets.top - 4)}
-            style={styles.keyboardAvoiding}
-          >
+          {/* Sem padding de teclado aqui: ele encolhia o painel e mostrava a tela de trás. Quem
+              abre espaço para o teclado é o ScrollView (automaticallyAdjustKeyboardInsets). */}
+          <View style={styles.keyboardAvoiding}>
             <PrototypeMenuSurface
               onLayout={handlePanelLayout}
               eyebrow="Suporte"
@@ -422,7 +419,7 @@ export default function RobotaxiSupportTicketScreen({ navigation, route }) {
                 ) : null}
               </ScrollView>
             </PrototypeMenuSurface>
-          </KeyboardAvoidingView>
+          </View>
         </PrototypeDismissibleSheet>
       </View>
     </PrototypeScreenTransition>
