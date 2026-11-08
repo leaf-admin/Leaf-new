@@ -343,6 +343,132 @@ function RideCostAnomalyBanner({ anomaly }) {
   );
 }
 
+const RIDE_ANOMALY_LABELS = {
+  acima_critico: "acima do crítico",
+  acima_alerta: "acima do aviso",
+  acima_mediana: "muito acima da mediana",
+  rotas_demais: "rotas demais",
+  autocomplete_demais: "autocomplete demais",
+};
+
+function shortBookingId(bookingId) {
+  const text = String(bookingId || "");
+  return text.length > 22 ? `${text.slice(0, 22)}…` : text || "-";
+}
+
+function formatRideMoment(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
+// Custo medido de cada corrida concluída, com a quebra por SKU. Clique na linha para abrir o detalhe.
+function RideCostRidesTable({ anomaly }) {
+  const [openId, setOpenId] = useState(null);
+  const rides = Array.isArray(anomaly?.rides) ? anomaly.rides : [];
+  const today = anomaly?.today || null;
+
+  return (
+    <div className="table-shell sku-table-shell">
+      <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap", alignItems: "baseline", margin: "0.5rem 0" }}>
+        <strong>Custo por corrida</strong>
+        <small>
+          Mediana R$ {toNumber(anomaly?.medianBrl).toFixed(4)} · {toNumber(anomaly?.anomalousRides)} fora do padrão
+          {today ? ` · hoje: ${toNumber(today.rides)} corrida(s), R$ ${toNumber(today.totalBrl).toFixed(4)} somados` : ""}
+        </small>
+      </div>
+      <table className="table table-compact">
+        <thead>
+          <tr>
+            <th>Corrida</th>
+            <th>Custo</th>
+            <th>Google</th>
+            <th>Rotas</th>
+            <th>SKU que mais pesou</th>
+            <th>Situação</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rides.length ? rides.map((ride) => {
+            const isOpen = openId === ride.bookingId;
+            const top = Array.isArray(ride.skus) ? ride.skus[0] : null;
+            const anomalies = Array.isArray(ride.anomalies) ? ride.anomalies : [];
+            const tone = anomalies.includes("acima_critico") ? "status-bad" : anomalies.length ? "status-warn" : "status-ok";
+            return [
+              <tr
+                key={ride.bookingId}
+                onClick={() => setOpenId(isOpen ? null : ride.bookingId)}
+                style={{ cursor: "pointer" }}
+                aria-expanded={isOpen}
+              >
+                <td>
+                  <strong title={ride.bookingId}>{shortBookingId(ride.bookingId)}</strong>
+                  <span className="table-muted">{formatRideMoment(ride.completedAt)}</span>
+                </td>
+                <td>{brlFromValue(ride.totalBrl, 4)}</td>
+                <td>{brlFromValue(ride.googleBrl, 4)}</td>
+                <td>{formatCompact(ride.directionsRequests)}</td>
+                <td>
+                  {top ? (
+                    <>
+                      {top.label}
+                      <span className="table-muted">{formatCompact(top.requests)} chamada(s) · {brlFromValue(top.costBrl, 4)}</span>
+                    </>
+                  ) : "-"}
+                </td>
+                <td>
+                  <span className={tone}>
+                    {anomalies.length ? anomalies.map((reason) => RIDE_ANOMALY_LABELS[reason] || reason).join(", ") : "normal"}
+                  </span>
+                </td>
+              </tr>,
+              isOpen ? (
+                <tr key={`${ride.bookingId}-detail`}>
+                  <td colSpan={6}>
+                    <div className="table-muted" style={{ marginBottom: "0.25rem" }}>{ride.bookingId}</div>
+                    {(ride.skus || []).length ? (
+                      <table className="table table-compact">
+                        <thead>
+                          <tr>
+                            <th>SKU</th>
+                            <th>Chamadas</th>
+                            <th>Custo</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {ride.skus.map((sku) => (
+                            <tr key={sku.key}>
+                              <td>{sku.label}</td>
+                              <td>{formatCompact(sku.requests)}</td>
+                              <td>{brlFromValue(sku.costBrl, 4)}</td>
+                            </tr>
+                          ))}
+                          <tr>
+                            <td>Backend, Redis, Firebase e infra</td>
+                            <td>-</td>
+                            <td>{brlFromValue(ride.otherBrl, 4)}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    ) : (
+                      <small>Sem chamadas Google registradas nesta corrida.</small>
+                    )}
+                  </td>
+                </tr>
+              ) : null,
+            ];
+          }) : (
+            <tr>
+              <td colSpan={6}>Nenhuma corrida concluída com telemetria de custo na janela recente.</td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function SkuCostMonitorPanel({ skuMonitor, rideCostAnomaly }) {
   const finance = skuMonitor?.finance || {};
   const rows = Array.isArray(skuMonitor?.rows) ? skuMonitor.rows : [];
@@ -378,16 +504,24 @@ function SkuCostMonitorPanel({ skuMonitor, rideCostAnomaly }) {
       </div>
 
       <div className="sku-explainer">
-        <strong>Como ler:</strong> o painel usa a telemetria recente já gravada no Redis, projeta o custo médio
-        para as {formatCompact(completedRidesToday)} corrida(s) finalizadas hoje e separa Woovi da infraestrutura.
+        <strong>Como ler:</strong> cada corrida concluída tem o custo medido dela (chamadas de cada SKU vezes o preço de
+        tabela). O total de hoje soma essas corridas
+        {toNumber(finance.unmeasuredRidesToday) > 0
+          ? ` (${formatCompact(finance.measuredRidesToday)} medidas; ${formatCompact(finance.unmeasuredRidesToday)} sem relatório entram pela média)`
+          : ` (${formatCompact(finance.measuredRidesToday ?? completedRidesToday)} de ${formatCompact(completedRidesToday)} corrida(s) de hoje)`}
+        e separa Woovi da infraestrutura. O Google fatura só o total por SKU; confira o mês contra a fatura.
         O dashboard não chama Google, Firebase, Redis externo ou Woovi para montar esta visão.
       </div>
 
       <div className="metric-list">
         <div className="row">
           <div className="label">
-            <span>Infra projetada hoje</span>
-            <small>Google, Redis, Firebase, backend e infra fixa configurada</small>
+            <span>{finance.costTodaySource === "soma_real" ? "Infra medida hoje" : "Infra de hoje"}</span>
+            <small>
+              Google, Redis, Firebase, backend e infra fixa configurada
+              {finance.costTodaySource === "soma_real_mais_projecao" ? " · parte pela média" : ""}
+              {finance.costTodaySource === "projecao_media" ? " · projeção pela média" : ""}
+            </small>
           </div>
           <div className="value">{brlFromCents(finance.projectedCostWithoutWooviTodayCents)}</div>
         </div>
@@ -406,6 +540,8 @@ function SkuCostMonitorPanel({ skuMonitor, rideCostAnomaly }) {
           <div className="value">{brlFromCents(finance.netAfterAllCents)}</div>
         </div>
       </div>
+
+      <RideCostRidesTable anomaly={rideCostAnomaly} />
 
       <div className="table-shell sku-table-shell">
         <table className="table table-compact">

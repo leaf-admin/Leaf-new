@@ -320,9 +320,9 @@ function buildActionItems({
       id: 'ride-cost-anomaly',
       priority: isCritical ? 'alta' : 'media',
       title: isCritical
-        ? 'Custo medio por corrida acima do critico'
-        : 'Custo medio por corrida acima do limite de aviso',
-      description: `R$ ${toNumber(rideCostAnomaly.averageBrl).toFixed(4)} medio / R$ ${toNumber(rideCostAnomaly.warningThreshold).toFixed(2)} aviso / R$ ${toNumber(rideCostAnomaly.criticalThreshold).toFixed(2)} critico; ${rideCostAnomaly.aboveWarningCount}/${rideCostAnomaly.completedRides} acima do aviso.`,
+        ? 'Corrida com custo acima do critico'
+        : 'Custo por corrida fora do padrao',
+      description: `R$ ${toNumber(rideCostAnomaly.averageBrl).toFixed(4)} medio / R$ ${toNumber(rideCostAnomaly.warningThreshold).toFixed(2)} aviso / R$ ${toNumber(rideCostAnomaly.criticalThreshold).toFixed(2)} critico; ${rideCostAnomaly.aboveWarningCount}/${rideCostAnomaly.completedRides} acima do aviso; ${toNumber(rideCostAnomaly.anomalousRides, 0)} fora do padrão (veja a lista por corrida).`,
       href: '/dashboard'
     });
   }
@@ -678,7 +678,6 @@ class BackofficeCommandCenterService {
     const workerHealth = this.sourceValue(sources, 'workerHealth', null);
     const workerLag = this.sourceValue(sources, 'workerLag', null);
     const workerDLQ = this.sourceValue(sources, 'workerDLQ', null);
-    const rideCostAlertSummary = this.sourceValue(sources, 'rideCostAlertSummary', null);
 
     const gmvCents = toCents(financialToday.totalValue);
     const grossRevenueCents = toCents(operationalRevenue.totalOperationalFee);
@@ -702,10 +701,12 @@ class BackofficeCommandCenterService {
       workerDLQ,
       opsOverview
     });
+    const rideCostAlertSummary = this.sourceValue(sources, 'rideCostAlertSummary', null);
     const skuMonitor = this.skuCostMonitor.attachFinancials(skuCostUsage, {
       financialToday,
       operationalRevenue,
-      ridesToday
+      ridesToday,
+      rideCostToday: rideCostAlertSummary?.today || null
     });
     const domainHealth = buildDomainHealth({
       sources,
@@ -724,7 +725,9 @@ class BackofficeCommandCenterService {
             ? 'no_data'
             : rideCostAlertSummary.aboveCriticalCount > 0
               ? 'danger'
-              : rideCostAlertSummary.aboveWarningCount > 0 || rideCostAlertSummary.averageBrl >= rideCostAlertSummary.warningBrl
+              : rideCostAlertSummary.aboveWarningCount > 0 ||
+                toNumber(rideCostAlertSummary.anomalousRides, 0) > 0 ||
+                rideCostAlertSummary.averageBrl >= rideCostAlertSummary.warningBrl
                 ? 'warning'
                 : 'healthy',
           averageBrl: rideCostAlertSummary.averageBrl || 0,
@@ -738,6 +741,10 @@ class BackofficeCommandCenterService {
           criticalThreshold: rideCostAlertSummary.criticalBrl || 0,
           directionsWarningPerRide: rideCostAlertSummary.directionsWarningPerRide || 0,
           directionsCriticalPerRide: rideCostAlertSummary.directionsCriticalPerRide || 0,
+          medianBrl: rideCostAlertSummary.medianBrl || 0,
+          anomalousRides: rideCostAlertSummary.anomalousRides || 0,
+          rides: Array.isArray(rideCostAlertSummary.rides) ? rideCostAlertSummary.rides : [],
+          today: rideCostAlertSummary.today || null,
           generatedAt: rideCostAlertSummary.generatedAt || null
         }
       : null;
@@ -763,7 +770,7 @@ class BackofficeCommandCenterService {
       notes: [
         'Snapshot agregado no backend com cache Redis.',
         'Monitor SKU usa somente telemetria recente ja persistida no Redis.',
-        'Alerta de custo por corrida avalia media contra limites configurados no backend (RIDE_COST_WARNING_BRL, RIDE_COST_CRITICAL_BRL).',
+        'Custo por corrida: cada corrida concluida aparece com o custo medido e a quebra por SKU; anomalia = acima dos limites (RIDE_COST_WARNING_BRL, RIDE_COST_CRITICAL_BRL), acima de N vezes a mediana, rotas ou autocomplete demais.',
         'Nao chama Google Places, Google Routes, Directions, Woovi ou provedores pagos.',
         'Pagina /maps segue separada porque carregar Google Maps JS pode gerar custo de mapa.'
       ]

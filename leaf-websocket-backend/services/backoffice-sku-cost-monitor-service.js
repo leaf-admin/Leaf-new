@@ -274,7 +274,8 @@ class BackofficeSkuCostMonitorService {
   attachFinancials(usageSnapshot = {}, {
     financialToday = {},
     operationalRevenue = {},
-    ridesToday = {}
+    ridesToday = {},
+    rideCostToday = null
   } = {}) {
     const sampledRides = toNumber(usageSnapshot.sampledRides, 0);
     const completedRidesToday = toNumber(
@@ -327,9 +328,21 @@ class BackofficeSkuCostMonitorService {
       });
     }
 
-    const projectedVariableCostTodayBrl = variableCostPerRideBrl * completedRidesToday;
+    // Custo do dia = soma do custo medido de cada corrida concluída hoje. A média da janela só
+    // cobre as corridas de hoje que não têm relatório (fora do índice recente ou sem telemetria).
+    const measuredRidesToday = Math.min(
+      completedRidesToday > 0 ? completedRidesToday : Number.MAX_SAFE_INTEGER,
+      Math.max(0, Math.round(toNumber(rideCostToday?.rides, 0))),
+    );
+    const measuredCostTodayBrl = measuredRidesToday > 0 ? toNumber(rideCostToday?.totalBrl, 0) : 0;
+    const unmeasuredRidesToday = Math.max(0, completedRidesToday - measuredRidesToday);
+    const costTodaySource = measuredRidesToday === 0
+      ? (completedRidesToday > 0 ? 'projecao_media' : 'sem_corridas')
+      : unmeasuredRidesToday > 0 ? 'soma_real_mais_projecao' : 'soma_real';
     const projectedVariableCostWithoutWooviTodayBrl =
-      variableCostWithoutWooviPerRideBrl * completedRidesToday;
+      measuredCostTodayBrl + variableCostWithoutWooviPerRideBrl * unmeasuredRidesToday;
+    const projectedVariableCostTodayBrl =
+      projectedVariableCostWithoutWooviTodayBrl + wooviCostPerRideBrl * completedRidesToday;
     const projectedWooviTodayBrl = wooviCostPerRideBrl * completedRidesToday;
     const projectedCostTodayBrl = projectedVariableCostTodayBrl + fixedInfraDailyBrl;
     const projectedCostWithoutWooviTodayBrl =
@@ -358,6 +371,10 @@ class BackofficeSkuCostMonitorService {
         projectedCostWithoutWooviTodayCents: brlToCents(projectedCostWithoutWooviTodayBrl),
         projectedWooviTodayCents: brlToCents(projectedWooviTodayBrl),
         fixedInfraDailyCents: brlToCents(fixedInfraDailyBrl),
+        costTodaySource,
+        measuredRidesToday,
+        unmeasuredRidesToday,
+        measuredCostTodayCents: brlToCents(measuredCostTodayBrl),
         netAfterInfraCents: brlToCents(netAfterInfraBrl),
         netAfterAllCents: brlToCents(netAfterAllBrl),
         marginAfterInfraPercent: operationalFeeTotalBrl > 0
@@ -367,7 +384,7 @@ class BackofficeSkuCostMonitorService {
       },
       notes: [
         ...(usageSnapshot.notes || []),
-        'O total de hoje usa custo medio da janela recente projetado sobre as corridas finalizadas do dia.',
+        'O total de hoje soma o custo medido de cada corrida concluida hoje; a media da janela so cobre corridas sem relatorio.',
         'Configure BACKOFFICE_INFRA_DAILY_COST_BRL para incluir o rateio fixo da VPS/infra no liquido.'
       ]
     };

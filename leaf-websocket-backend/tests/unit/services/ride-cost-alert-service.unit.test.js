@@ -89,6 +89,20 @@ function addReportWithAllowedComponents(bookingId, {
   redisHashes.set(`booking:${bookingId}`, { status });
 }
 
+function addRideWithSkus(bookingId, { skus, completedAt = new Date().toISOString(), directionsRequests = 1, status = 'COMPLETED' }) {
+  recentScores.set(bookingId, Date.now() + recentScores.size);
+  const googleUsd = Object.values(skus).reduce((sum, sku) => sum + sku.estimatedCostUsd, 0);
+  redisData.set(`ride_cost_telemetry:${bookingId}`, JSON.stringify({
+    bookingId,
+    updatedAt: completedAt,
+    totals: {
+      cost: { totalBrl: googleUsd * 5, googleUsd, backendUsd: 0, infrastructureUsd: 0, exchangeRateUsdBrl: 5 },
+      google: { skus, directions: { requestCount: directionsRequests } },
+    },
+  }));
+  redisHashes.set(`booking:${bookingId}`, { status, completedAt });
+}
+
 describe('ride-cost-alert-service', () => {
   const originalEnv = process.env;
 
@@ -158,6 +172,47 @@ describe('ride-cost-alert-service', () => {
     expect(summary.completedRides).toBe(2);
     expect(summary.averageBrl).toBeCloseTo(0.156, 6);
     expect(summary.maxBrl).toBeCloseTo(0.156, 6);
+  });
+
+  it('lista cada corrida com a quebra por SKU e marca a que foge do padrão', async () => {
+    const route = (n) => ({ routesPreferredTrafficAwarePolyline: { label: 'Routes', requestCount: n, estimatedCostUsd: 0.01 * n } });
+    addRideWithSkus('ride-a', { skus: route(2), directionsRequests: 2 });
+    addRideWithSkus('ride-b', { skus: route(2), directionsRequests: 2 });
+    addRideWithSkus('ride-c', {
+      skus: {
+        autocompleteLegacyPerRequest: { label: 'Autocomplete', requestCount: 33, estimatedCostUsd: 0.09339 },
+        placeDetailsLegacy: { label: 'Places Details', requestCount: 2, estimatedCostUsd: 0.034 },
+        ...route(1),
+      },
+    });
+
+    const summary = await service.collectRecentCostSummary();
+
+    expect(summary.rides).toHaveLength(3);
+    expect(summary.medianBrl).toBeCloseTo(0.1, 4);
+    const normal = summary.rides.find((ride) => ride.bookingId === 'ride-a');
+    expect(normal.anomalies).toEqual([]);
+    expect(normal.skus).toEqual([expect.objectContaining({ key: 'routesPreferredTrafficAwarePolyline', requests: 2, costBrl: 0.1 })]);
+
+    const outlier = summary.rides.find((ride) => ride.bookingId === 'ride-c');
+    expect(outlier.totalBrl).toBeCloseTo(0.687, 3);
+    expect(outlier.anomalies).toEqual(['acima_critico', 'acima_mediana', 'autocomplete_demais']);
+    expect(outlier.skus[0]).toEqual(expect.objectContaining({ key: 'autocompleteLegacyPerRequest', requests: 33 }));
+    expect(summary.anomalousRides).toBe(1);
+    expect(service.describeAnomalousRides(summary)).toContain('ride-c R$ 0.6869 (acima_critico+acima_mediana+autocomplete_demais Autocomplete x33)');
+  });
+
+  it('soma o custo real das corridas de hoje sem projetar pela média', async () => {
+    const sku = { routesPreferredTrafficAwarePolyline: { label: 'Routes', requestCount: 2, estimatedCostUsd: 0.02 } };
+    addRideWithSkus('ride-old', { skus: sku, completedAt: '2020-01-01T12:00:00.000Z' });
+    addRideWithSkus('ride-today-1', { skus: sku });
+    addRideWithSkus('ride-today-2', { skus: sku });
+
+    const summary = await service.collectRecentCostSummary();
+
+    expect(summary.today.rides).toBe(2);
+    expect(summary.today.totalBrl).toBeCloseTo(0.2, 4);
+    expect(summary.rides.find((ride) => ride.bookingId === 'ride-old').dateKey).toBe('2020-01-01');
   });
 
   it('envia alerta quando media de custo passa do limite', async () => {

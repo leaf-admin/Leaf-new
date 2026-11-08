@@ -53,6 +53,10 @@ function buildConfig() {
     directionsWarningPerRide: readNumberFromEnv('RIDE_COST_DIRECTIONS_WARNING_PER_RIDE', 2.2),
     directionsCriticalPerRide: readNumberFromEnv('RIDE_COST_DIRECTIONS_CRITICAL_PER_RIDE', 3),
     checkIntervalMs: readIntegerFromEnv('RIDE_COST_ALERT_CHECK_INTERVAL_MS', 60_000),
+    // Uma corrida é anômala quando custa N vezes a mediana da janela (com 3+ corridas).
+    outlierMedianMultiplier: Math.max(1, readNumberFromEnv('RIDE_COST_OUTLIER_MEDIAN_MULTIPLIER', 2)),
+    autocompleteWarningPerRide: Math.max(1, readIntegerFromEnv('RIDE_COST_AUTOCOMPLETE_WARNING_PER_RIDE', 15)),
+    timeZone: process.env.RIDE_COST_TIME_ZONE || 'America/Sao_Paulo',
   };
 }
 
@@ -89,6 +93,85 @@ function reportAllowedCostBrl(report = {}) {
   return round(safeNumber(cost.totalBrl, 0), 6);
 }
 
+function median(values = []) {
+  const sorted = values.filter((value) => Number.isFinite(value)).sort((a, b) => a - b);
+  if (sorted.length === 0) return 0;
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+function toIso(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const numeric = Number(value);
+  const date = Number.isFinite(numeric) && String(value).trim() !== '' && /^\d+$/.test(String(value).trim())
+    ? new Date(numeric < 1e12 ? numeric * 1000 : numeric)
+    : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function dateKeyIn(timeZone, isoOrDate) {
+  const date = isoOrDate instanceof Date ? isoOrDate : new Date(isoOrDate);
+  if (Number.isNaN(date.getTime())) return null;
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
+}
+
+// Quebra da corrida por SKU, em BRL, do mais caro para o mais barato. Só lê o relatório gravado.
+function rideSkuBreakdown(report = {}, exchangeRate = 0) {
+  const skus = report.totals?.google?.skus || {};
+  return Object.entries(skus)
+    .map(([key, entry]) => {
+      const costUsd = safeNumber(entry?.estimatedCostUsd, 0);
+      return {
+        key,
+        label: String(entry?.label || key),
+        requests: Math.max(0, Math.round(safeNumber(entry?.requestCount, 0))),
+        costUsd: round(costUsd, 6),
+        costBrl: round(costUsd * exchangeRate, 4),
+      };
+    })
+    .filter((entry) => entry.requests > 0 || entry.costUsd > 0)
+    .sort((a, b) => b.costUsd - a.costUsd || b.requests - a.requests);
+}
+
+function skuRequests(skus = [], key) {
+  return skus.filter((entry) => entry.key === key).reduce((sum, entry) => sum + entry.requests, 0);
+}
+
+// Motivos que tornam a corrida fora do padrão. A mediana vem da própria janela.
+function rideAnomalies(entry, { medianBrl, count }, config) {
+  const reasons = [];
+  if (entry.totalBrl >= config.criticalBrl) reasons.push('acima_critico');
+  else if (entry.totalBrl >= config.warningBrl) reasons.push('acima_alerta');
+  if (count >= 3 && medianBrl > 0 && entry.totalBrl >= medianBrl * config.outlierMedianMultiplier) {
+    reasons.push('acima_mediana');
+  }
+  if (entry.directionsRequests >= config.directionsCriticalPerRide) reasons.push('rotas_demais');
+  if (skuRequests(entry.skus, 'autocompleteLegacyPerRequest') >= config.autocompleteWarningPerRide) {
+    reasons.push('autocomplete_demais');
+  }
+  return reasons;
+}
+
+function publicRide(entry, anomalies, exchangeRate) {
+  return {
+    bookingId: entry.bookingId,
+    completedAt: entry.completedAt,
+    dateKey: entry.dateKey,
+    totalBrl: round(entry.totalBrl, 4),
+    googleBrl: round(entry.googleBrl, 4),
+    otherBrl: round(Math.max(0, entry.totalBrl - entry.googleBrl), 4),
+    directionsRequests: entry.directionsRequests,
+    skus: entry.skus,
+    anomalies,
+    exchangeRateUsdBrl: exchangeRate,
+  };
+}
+
 function summarizeReports(entries, config) {
   const selected = entries.slice(0, config.windowSize);
   const count = selected.length;
@@ -113,6 +196,15 @@ function summarizeReports(entries, config) {
     aboveCritical: 0,
   });
 
+  const medianBrl = median(selected.map((entry) => entry.totalBrl));
+  const rides = selected.map((entry) => publicRide(
+    entry,
+    rideAnomalies(entry, { medianBrl, count }, config),
+    entry.exchangeRate,
+  ));
+  const todayKey = dateKeyIn(config.timeZone, new Date());
+  const todayEntries = entries.filter((entry) => entry.dateKey && entry.dateKey === todayKey);
+
   return {
     windowSize: config.windowSize,
     scannedCompletedRides: entries.length,
@@ -131,8 +223,33 @@ function summarizeReports(entries, config) {
     aboveWarningCount: totals.aboveWarning,
     aboveCriticalCount: totals.aboveCritical,
     bookingIds: selected.map((entry) => entry.bookingId),
+    medianBrl: round(medianBrl, 4),
+    outlierMedianMultiplier: config.outlierMedianMultiplier,
+    autocompleteWarningPerRide: config.autocompleteWarningPerRide,
+    // Cada corrida da janela com o custo medido dela; anomalies vazio = dentro do padrão.
+    rides,
+    anomalousRides: rides.filter((ride) => ride.anomalies.length > 0).length,
+    // Soma real das corridas concluídas hoje que estão no índice recente (não é projeção).
+    today: {
+      dateKey: todayKey,
+      timeZone: config.timeZone,
+      rides: todayEntries.length,
+      totalBrl: round(todayEntries.reduce((sum, entry) => sum + entry.totalBrl, 0), 4),
+      googleBrl: round(todayEntries.reduce((sum, entry) => sum + entry.googleBrl, 0), 4),
+    },
     generatedAt: new Date().toISOString(),
   };
+}
+
+// Até 3 corridas fora do padrão, com o SKU que mais pesou, para o alerta apontar a corrida.
+function describeAnomalousRides(summary = {}) {
+  const rides = (summary.rides || []).filter((ride) => ride.anomalies?.length > 0).slice(0, 3);
+  if (rides.length === 0) return 'nenhuma';
+  return rides.map((ride) => {
+    const top = ride.skus?.[0];
+    const skuText = top ? ` ${top.label} x${top.requests}` : '';
+    return `${ride.bookingId} R$ ${ride.totalBrl.toFixed(4)} (${ride.anomalies.join('+')}${skuText})`;
+  }).join('; ');
 }
 
 class RideCostAlertService {
@@ -168,6 +285,7 @@ class RideCostAlertService {
       const exchangeRate = reportExchangeRate(report);
       const googleUsd = safeNumber(report.totals?.cost?.googleUsd, safeNumber(report.totals?.google?.estimatedCostUsd, 0));
       const totalUsd = exchangeRate > 0 ? totalBrl / exchangeRate : safeNumber(report.totals?.cost?.totalUsd, 0);
+      const completedAt = toIso(bookingHash?.completedAt) || toIso(report.updatedAt) || null;
       entries.push({
         bookingId,
         totalBrl,
@@ -175,6 +293,10 @@ class RideCostAlertService {
         googleUsd,
         googleBrl: round(googleUsd * exchangeRate, 6),
         directionsRequests: safeNumber(report.totals?.google?.directions?.requestCount, 0),
+        exchangeRate,
+        completedAt,
+        dateKey: completedAt ? dateKeyIn(config.timeZone, completedAt) : null,
+        skus: rideSkuBreakdown(report, exchangeRate),
       });
     }
 
@@ -243,6 +365,7 @@ class RideCostAlertService {
         directions_por_corrida: summary.directionsPerRide,
         acima_warning: summary.aboveWarningCount,
         acima_critical: summary.aboveCriticalCount,
+        corridas_fora_do_padrao: describeAnomalousRides(summary),
         booking_ids: summary.bookingIds.slice(0, 5).join(', '),
       },
     });
@@ -282,3 +405,4 @@ class RideCostAlertService {
 }
 
 module.exports = new RideCostAlertService();
+module.exports.describeAnomalousRides = describeAnomalousRides;

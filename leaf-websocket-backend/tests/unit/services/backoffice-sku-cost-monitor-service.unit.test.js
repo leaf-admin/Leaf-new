@@ -75,6 +75,43 @@ describe('backoffice-sku-cost-monitor-service', () => {
     expect(snapshot.status).toBe('warning');
   });
 
+  it('soma o custo medido das corridas de hoje e só projeta as que ficaram sem relatório', () => {
+    const service = new BackofficeSkuCostMonitorService({
+      telemetry: { getRecentReports: jest.fn() },
+      usdBrlRate: 5
+    });
+    const usage = {
+      sampledRides: 4,
+      rows: [],
+      totals: { totalCostBrl: 0.4, totalCostWithoutWooviBrl: 0.4, wooviCostBrl: 0 }
+    };
+
+    const fullyMeasured = service.attachFinancials(usage, {
+      financialToday: { totalRides: 2 },
+      operationalRevenue: { totalOperationalFee: 2, averageFee: 1 },
+      rideCostToday: { rides: 2, totalBrl: 0.9 }
+    });
+    expect(fullyMeasured.finance.costTodaySource).toBe('soma_real');
+    expect(fullyMeasured.finance.measuredCostTodayCents).toBe(90);
+    expect(fullyMeasured.finance.projectedCostWithoutWooviTodayCents).toBe(90);
+
+    const partial = service.attachFinancials(usage, {
+      financialToday: { totalRides: 3 },
+      operationalRevenue: { totalOperationalFee: 3, averageFee: 1 },
+      rideCostToday: { rides: 2, totalBrl: 0.9 }
+    });
+    expect(partial.finance.costTodaySource).toBe('soma_real_mais_projecao');
+    expect(partial.finance.unmeasuredRidesToday).toBe(1);
+    expect(partial.finance.projectedCostWithoutWooviTodayCents).toBe(100);
+
+    const legacy = service.attachFinancials(usage, {
+      financialToday: { totalRides: 3 },
+      operationalRevenue: { totalOperationalFee: 3, averageFee: 1 }
+    });
+    expect(legacy.finance.costTodaySource).toBe('projecao_media');
+    expect(legacy.finance.projectedCostWithoutWooviTodayCents).toBe(30);
+  });
+
   it('returns no_data when there are no recent rides', async () => {
     const service = new BackofficeSkuCostMonitorService({
       telemetry: { getRecentReports: jest.fn().mockResolvedValue([]) },

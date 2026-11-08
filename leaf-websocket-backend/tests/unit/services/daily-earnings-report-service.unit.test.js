@@ -12,6 +12,7 @@ const mockRedis = {
   zadd: jest.fn(),
   sadd: jest.fn(),
   srem: jest.fn(),
+  smembers: jest.fn(),
   del: jest.fn(),
 };
 
@@ -111,6 +112,7 @@ describe('daily-earnings-report-service', () => {
       redisSets.set(key, set);
       return 1;
     });
+    mockRedis.smembers.mockImplementation(async (key) => Array.from(redisSets.get(key) || []));
     mockRedis.srem.mockImplementation(async (key, member) => {
       const set = redisSets.get(key) || new Set();
       set.delete(member);
@@ -256,6 +258,26 @@ describe('daily-earnings-report-service', () => {
         headers: { 'Content-Type': 'application/json' },
       }),
     );
+  });
+
+  it('lista as corridas do dia que fogem do padrão no resumo e no Discord', async () => {
+    const dateKey = '2026-05-13';
+    const rides = [['b1', 0.1, 2], ['b2', 0.11, 2], ['b3', 0.1, 2], ['b4', 0.71, 1]];
+    redisSets.set(`daily_earnings_report:${dateKey}:bookings`, new Set(rides.map(([id]) => id)));
+    rides.forEach(([id, cost, directions]) => {
+      redisData.set(`daily_earnings_report:ride:${id}`, JSON.stringify({
+        bookingId: id, dateKey, rideCostTotalBrl: cost, googleCostTotalBrl: cost, directionsRequestsTotal: directions,
+      }));
+    });
+    redisHashes.set(`daily_earnings_report:${dateKey}`, { dateKey, completedRides: '4', rideCostTotalBrl: '1.02' });
+
+    const summary = await service.getDailySummary(dateKey);
+
+    expect(summary.rideCosts).toMatchObject({ measuredRides: 4, medianRideCostBrl: 0.11, maxRideCostBrl: 0.71, outlierRidesCount: 1 });
+    expect(summary.rideCosts.outlierRides).toEqual([
+      expect.objectContaining({ bookingId: 'b4', rideCostBrl: 0.71, anomalies: ['acima_critico', 'acima_mediana'] }),
+    ]);
+    expect(service._private.formatOutlierRides(summary.rideCosts)).toContain('b4: R$ 0,71 (acima_critico+acima_mediana)');
   });
 
   it('envia o custo KYC mesmo quando nao houve corrida e relatorios vazios estao desativados', async () => {
