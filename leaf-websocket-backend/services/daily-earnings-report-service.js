@@ -249,6 +249,60 @@ async function incrementRollup(redis, dateKey, delta) {
   await redis.zadd(`${ROLLUP_PREFIX}:index`, Date.now(), dateKey);
 }
 
+function medianOf(values = []) {
+  const sorted = values.filter((value) => Number.isFinite(value)).sort((a, b) => a - b);
+  if (sorted.length === 0) return 0;
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+// Lê o registro de cada corrida do dia (gravado em recordCompletedRideFromReport) e aponta as que
+// fogem do padrão. Só leitura de Redis; uma falha aqui não derruba o resumo do dia.
+async function collectRideOutliers(redis, dateKey) {
+  const empty = { measuredRides: 0, medianRideCostBrl: 0, maxRideCostBrl: 0, outlierRides: [] };
+  if (typeof redis?.smembers !== 'function') return empty;
+  const limit = Math.max(1, Number.parseInt(process.env.DAILY_EARNINGS_OUTLIER_SCAN_LIMIT || '500', 10) || 500);
+  const bookingIds = (await redis.smembers(`${rollupKey(dateKey)}:bookings`) || []).slice(0, limit);
+  const rides = [];
+  for (const bookingId of bookingIds) {
+    const snapshot = parseJson(await redis.get(bookingSnapshotKey(bookingId)), null);
+    if (!snapshot || snapshot.dateKey !== dateKey) continue;
+    rides.push({
+      bookingId,
+      completedAt: snapshot.completedAt || null,
+      rideCostBrl: roundMoney(snapshot.rideCostTotalBrl),
+      googleCostBrl: roundMoney(snapshot.googleCostTotalBrl),
+      directionsRequests: safeNumber(snapshot.directionsRequestsTotal, 0),
+    });
+  }
+  if (rides.length === 0) return empty;
+
+  const warningBrl = safeNumber(process.env.RIDE_COST_WARNING_BRL, 0.2);
+  const criticalBrl = safeNumber(process.env.RIDE_COST_CRITICAL_BRL, 0.3);
+  const multiplier = Math.max(1, safeNumber(process.env.RIDE_COST_OUTLIER_MEDIAN_MULTIPLIER, 2));
+  const directionsCritical = safeNumber(process.env.RIDE_COST_DIRECTIONS_CRITICAL_PER_RIDE, 3);
+  const median = medianOf(rides.map((ride) => ride.rideCostBrl));
+  const outlierRides = rides
+    .map((ride) => {
+      const anomalies = [];
+      if (ride.rideCostBrl >= criticalBrl) anomalies.push('acima_critico');
+      else if (ride.rideCostBrl >= warningBrl) anomalies.push('acima_alerta');
+      if (rides.length >= 3 && median > 0 && ride.rideCostBrl >= median * multiplier) anomalies.push('acima_mediana');
+      if (ride.directionsRequests >= directionsCritical) anomalies.push('rotas_demais');
+      return { ...ride, anomalies };
+    })
+    .filter((ride) => ride.anomalies.length > 0)
+    .sort((a, b) => b.rideCostBrl - a.rideCostBrl);
+
+  return {
+    measuredRides: rides.length,
+    medianRideCostBrl: roundMoney(median),
+    maxRideCostBrl: roundMoney(Math.max(...rides.map((ride) => ride.rideCostBrl))),
+    outlierRides: outlierRides.slice(0, 10),
+    outlierRidesCount: outlierRides.length,
+  };
+}
+
 function normalizeSummary(dateKey, hash = {}, kycUsageHash = {}) {
   const completedRides = Math.max(0, Math.round(safeNumber(hash.completedRides, 0)));
   const grossFareTotalBrl = roundMoney(hash.grossFareTotalBrl);
@@ -315,6 +369,15 @@ function formatUsd(value) {
   })}`;
 }
 
+function formatOutlierRides(rideCosts = {}) {
+  const rides = Array.isArray(rideCosts?.outlierRides) ? rideCosts.outlierRides : [];
+  const header = `Mediana ${formatBrl(rideCosts?.medianRideCostBrl)} · max ${formatBrl(rideCosts?.maxRideCostBrl)}`;
+  if (rides.length === 0) return `${header}. Nenhuma corrida fora do padrao.`;
+  const lines = rides.slice(0, 3).map((ride) => `${ride.bookingId}: ${formatBrl(ride.rideCostBrl)} (${ride.anomalies.join('+')})`);
+  const extra = safeNumber(rideCosts.outlierRidesCount, rides.length) - lines.length;
+  return [header, ...lines, ...(extra > 0 ? [`+${extra} no painel`] : [])].join('\n').slice(0, 1000);
+}
+
 function buildDiscordPayload(summary) {
   const healthy = summary.averageRideCostBrl <= safeNumber(process.env.RIDE_COST_WARNING_BRL, 0.2);
   const color = healthy ? 0x12b76a : 0xf79009;
@@ -335,6 +398,11 @@ function buildDiscordPayload(summary) {
           { name: 'Google', value: formatBrl(summary.googleCostTotalBrl), inline: true },
           { name: 'Firebase/infra variavel', value: formatBrl(summary.firebaseCostTotalBrl + summary.infrastructureCostTotalBrl), inline: true },
           { name: 'Directions/corrida', value: String(summary.directionsPerRide), inline: true },
+          {
+            name: 'Corridas fora do padrao',
+            value: formatOutlierRides(summary.rideCosts),
+            inline: false,
+          },
           {
             name: 'AWS KYC estimado',
             value: `${summary.kycAwsSessionsTotal} sessoes · ${formatUsd(summary.kycAwsEstimatedCostUsd)} (≈ ${formatBrl(summary.kycAwsEstimatedCostBrl)})`,
@@ -410,7 +478,17 @@ class DailyEarningsReportService {
       redis.hgetall(rollupKey(dateKey)),
       redis.hgetall(awsKycUsageDayKey(dateKey)),
     ]);
-    return normalizeSummary(dateKey, hash || {}, kycUsageHash || {});
+    const summary = normalizeSummary(dateKey, hash || {}, kycUsageHash || {});
+    let rideCosts = { measuredRides: 0, medianRideCostBrl: 0, maxRideCostBrl: 0, outlierRides: [] };
+    try {
+      rideCosts = await collectRideOutliers(redis, dateKey);
+    } catch (error) {
+      logError(error, 'Falha ao listar corridas fora do padrao no relatorio diario', {
+        service: 'daily-earnings-report',
+        dateKey,
+      });
+    }
+    return { ...summary, rideCosts };
   }
 
   async sendDailyReport(dateKey = previousDateKey(this.getTimeZone()), options = {}) {
@@ -500,6 +578,8 @@ module.exports._private = {
   normalizeSummary,
   buildDiscordPayload,
   formatBrl,
+  collectRideOutliers,
+  formatOutlierRides,
   formatUsd,
   allowedRideCostTotalBrl,
   resolveBackendFinalFinancialSnapshot,

@@ -229,7 +229,8 @@ describe('backoffice-command-center-service', () => {
     expect(attachFinancials).toHaveBeenCalledWith(expect.objectContaining({ sampledRides: 2 }), {
       financialToday: expect.objectContaining({ totalValue: 450.25 }),
       operationalRevenue: expect.objectContaining({ totalOperationalFee: 38.7 }),
-      ridesToday: expect.objectContaining({ totalRides: 12 })
+      ridesToday: expect.objectContaining({ totalRides: 12 }),
+      rideCostToday: null
     });
   });
 
