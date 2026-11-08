@@ -95,6 +95,7 @@
         "EXPO_PUBLIC_LEGAL_BASE_URL": "https://leaf.app.br",
         "EXPO_PUBLIC_LEAF_LAUNCH_PROFILE": "pilot_controlled",
         "EXPO_PUBLIC_ENABLE_DRIVER_WITHDRAWALS": "true",
+        "EXPO_PUBLIC_ENABLE_REFERRAL_PROGRAMS": "true",
         "EXPO_PUBLIC_ENABLE_TRAFFIC_ROUTE": "true",
         "APP_REVIEW": "false",
         "EXPO_PUBLIC_APP_REVIEW": "false",
