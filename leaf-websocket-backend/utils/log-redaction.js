@@ -25,8 +25,18 @@ function isSensitiveKey(key) {
 // the text is returned as is.
 const SENSITIVE_TEXT_HINT = /authorization|bearer|token|key|password|secret|credential|cookie/i;
 
+// Discord webhook URLs carry the credential in the path
+// (/api[/vN]/webhooks/<id>/<token>), with no key name for the rules below to
+// match. Sentry HTTP breadcrumbs record the full URL, so the token leaked there.
+const DISCORD_WEBHOOK_TOKEN_PATTERN = /(\/api(?:\/v\d+)?\/webhooks\/\d+\/)[A-Za-z0-9._-]+/gi;
+
+function redactWebhookUrls(text) {
+  if (!text.includes('/webhooks/')) return text;
+  return text.replace(DISCORD_WEBHOOK_TOKEN_PATTERN, `$1${REDACTED_VALUE}`);
+}
+
 function redactSensitiveText(value) {
-  const text = String(value || '');
+  const text = redactWebhookUrls(String(value || ''));
   if (!SENSITIVE_TEXT_HINT.test(text)) return text;
   return text
     .replace(/(Authorization\s*:\s*)(?:Bearer\s+)?[^\s,;]+/gi, `$1${REDACTED_VALUE}`)
