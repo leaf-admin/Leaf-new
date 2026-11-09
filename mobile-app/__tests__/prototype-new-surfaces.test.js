@@ -74,6 +74,15 @@ jest.mock('../src/services/runtime/referralProgramService', () => ({
     usage: null,
   }),
   loadMyReferralInvites: jest.fn().mockResolvedValue({ sent: [], received: [] }),
+  loadMyPersonalInvite: jest.fn().mockResolvedValue({
+    code: 'K7M2QX',
+    link: 'https://leaf.app.br/motorista/convite/K7M2QX',
+    kind: 'driver',
+    campaignActive: true,
+    shared: 2,
+    accepted: 1,
+  }),
+  recordPersonalInviteShare: jest.fn().mockResolvedValue({ shared: 3, accepted: 1 }),
 }));
 
 jest.mock('../src/services/runtime/driverWaitlistService', () => ({
@@ -338,6 +347,36 @@ describe('prototype new surfaces', () => {
       );
       expect(screen.getByText('DRV-123')).toBeTruthy();
     });
+  });
+
+  it('shows the reusable personal driver invite and counts a share', async () => {
+    const { Share } = require('react-native');
+    const shareSpy = jest.spyOn(Share, 'share').mockResolvedValue({ action: Share.sharedAction });
+    const { recordPersonalInviteShare } = require('../src/services/runtime/referralProgramService');
+
+    const screen = render(
+      <RobotaxiDriverWaitlistScreen
+        navigation={buildNavigation()}
+        route={{ key: 'driver-waitlist-personal', params: {} }}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('K7M2QX')).toBeTruthy();
+      expect(screen.getByText('2 vezes')).toBeTruthy();
+      expect(screen.getByText('1 motorista')).toBeTruthy();
+    });
+
+    fireEvent.press(screen.getByTestId('robotaxi-driver-personal-invite-share-button'));
+
+    await waitFor(() => {
+      expect(shareSpy).toHaveBeenCalledWith({
+        message: expect.stringContaining('https://leaf.app.br/motorista/convite/K7M2QX'),
+      });
+      expect(recordPersonalInviteShare).toHaveBeenCalled();
+      expect(screen.getByText('3 vezes')).toBeTruthy();
+    });
+    shareSpy.mockRestore();
   });
 
   it('blocks waitlist entry when city criteria cannot be confirmed', async () => {

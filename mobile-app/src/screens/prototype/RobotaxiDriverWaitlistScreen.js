@@ -28,7 +28,9 @@ import { isPilotFeatureEnabled } from '../../config/pilotLaunchProfile';
 import {
   acceptReferralInvite,
   createReferralInvite,
+  loadMyPersonalInvite,
   loadMyReferralInvites,
+  recordPersonalInviteShare,
 } from '../../services/runtime/referralProgramService';
 import { joinDriverWaitlist, loadDriverWaitlistStatus } from '../../services/runtime/driverWaitlistService';
 
@@ -135,6 +137,8 @@ export default function RobotaxiDriverWaitlistScreen({ navigation, route }) {
   const [createdInvite, setCreatedInvite] = useState(null);
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [personalInvite, setPersonalInvite] = useState(null);
+  const [personalCopied, setPersonalCopied] = useState(false);
   const referralProgramsEnabled = isPilotFeatureEnabled('referralProgramsEnabled', true);
 
   usePrototypeMapOcclusion({
@@ -164,6 +168,13 @@ export default function RobotaxiDriverWaitlistScreen({ navigation, route }) {
       `Dirija comigo na Leaf. Use o convite ${latestCode || ''} para entrar na lista: ${latestLink}`,
     [latestCode, latestLink],
   );
+  const personalCode = personalInvite?.code || '';
+  const personalLink = personalInvite?.link || (personalCode ? buildDriverInviteLink(personalCode) : '');
+  const personalShareMessage = useMemo(
+    () =>
+      `Dirija comigo na Leaf. Baixe o app, cadastre-se como motorista e use meu código ${personalCode}: ${personalLink}`,
+    [personalCode, personalLink],
+  );
   const canJoinWaitlist = Boolean(
     waitlistStatus &&
       waitlistStatus?.criteria?.cityActive === true &&
@@ -182,12 +193,16 @@ export default function RobotaxiDriverWaitlistScreen({ navigation, route }) {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [statusResult, invitesResult] = await Promise.all([
+      const [statusResult, invitesResult, personalResult] = await Promise.all([
         loadDriverWaitlistStatus().catch(() => null),
         referralProgramsEnabled
           ? loadMyReferralInvites().catch(() => ({ sent: [] }))
           : Promise.resolve({ sent: [] }),
+        referralProgramsEnabled
+          ? loadMyPersonalInvite().catch(() => null)
+          : Promise.resolve(null),
       ]);
+      setPersonalInvite(personalResult?.code ? personalResult : null);
       if (statusResult) {
         setWaitlistStatus(statusResult);
         setCity(statusResult?.city?.cityLabel || statusResult?.city?.cityKey || 'Rio de Janeiro');
@@ -293,6 +308,27 @@ export default function RobotaxiDriverWaitlistScreen({ navigation, route }) {
       setBusy(false);
     }
   }, [acceptCode, loadData, referralProgramsEnabled]);
+
+  const handleCopyPersonal = useCallback(async () => {
+    if (!personalLink) return;
+    await Clipboard.setStringAsync(personalShareMessage);
+    setPersonalCopied(true);
+  }, [personalLink, personalShareMessage]);
+
+  const handleSharePersonal = useCallback(async () => {
+    if (!personalLink) return;
+    try {
+      const result = await Share.share({ message: personalShareMessage });
+      // iOS avisa quando a pessoa cancela; só conta o envio de verdade.
+      if (result?.action === Share.dismissedAction) return;
+      const stats = await recordPersonalInviteShare('share_sheet').catch(() => null);
+      if (stats) {
+        setPersonalInvite((current) => (current ? { ...current, ...stats } : current));
+      }
+    } catch (error) {
+      Alert.alert('Convites', error?.message || 'Não foi possível compartilhar agora.');
+    }
+  }, [personalLink, personalShareMessage]);
 
   const handleCopy = useCallback(async () => {
     await Clipboard.setStringAsync(latestLink);
@@ -421,6 +457,42 @@ export default function RobotaxiDriverWaitlistScreen({ navigation, route }) {
                 />
               </PrototypeMenuSection>
 
+              {referralProgramsEnabled && personalInvite ? (
+                <PrototypeMenuSection title="Seu link de convite">
+                  <PrototypeMenuInfoRow label="Código" value={personalCode} />
+                  <PrototypeMenuInfoRow label="Link" value={personalLink} />
+                  <PrototypeMenuInfoRow
+                    label="Enviados"
+                    value={`${personalInvite.shared} ${personalInvite.shared === 1 ? 'vez' : 'vezes'}`}
+                  />
+                  <PrototypeMenuInfoRow
+                    label="Entraram"
+                    value={`${personalInvite.accepted} motorista${personalInvite.accepted === 1 ? '' : 's'}`}
+                    last
+                  />
+                  <View style={styles.actionGrid}>
+                    <LeafButton
+                      label={personalCopied ? 'Copiado' : 'Copiar'}
+                      icon={personalCopied ? 'checkmark-outline' : 'copy-outline'}
+                      tone="ghost"
+                      onPress={handleCopyPersonal}
+                      style={styles.actionButton}
+                      testID="robotaxi-driver-personal-invite-copy-button"
+                      accessibilityLabel={personalCopied ? 'Seu convite foi copiado' : 'Copiar seu convite'}
+                    />
+                    <LeafButton
+                      label="Compartilhar"
+                      icon="share-outline"
+                      tone="leaf"
+                      onPress={handleSharePersonal}
+                      style={styles.actionButton}
+                      testID="robotaxi-driver-personal-invite-share-button"
+                      accessibilityLabel="Compartilhar seu convite"
+                    />
+                  </View>
+                </PrototypeMenuSection>
+              ) : null}
+
               {referralProgramsEnabled ? (
                 <View style={styles.inputBlock}>
                   <Text style={styles.inputLabel}>Convidar motorista</Text>
@@ -453,7 +525,7 @@ export default function RobotaxiDriverWaitlistScreen({ navigation, route }) {
                   <TextInput
                     value={acceptCode}
                     onChangeText={setAcceptCode}
-                    placeholder="DRV-..."
+                    placeholder="Código do convite"
                     placeholderTextColor="rgba(93,106,99,0.55)"
                     style={styles.input}
                     autoCapitalize="characters"

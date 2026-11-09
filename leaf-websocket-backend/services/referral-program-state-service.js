@@ -7,6 +7,9 @@ const CAMPAIGNS_COLLECTION = 'referral_campaigns';
 const INVITES_COLLECTION = 'referral_invites';
 const INVITE_CODES_COLLECTION = 'referral_invite_codes';
 const PASSENGER_BENEFITS_COLLECTION = 'passenger_discount_benefits';
+// Código pessoal reutilizável: um por usuário, o mesmo link vale para vários convidados.
+const PERSONAL_CODES_COLLECTION = 'referral_personal_codes';
+const PERSONAL_CODE_OWNERS_COLLECTION = 'referral_personal_code_owners';
 
 function nowIso() {
   return new Date().toISOString();
@@ -81,6 +84,23 @@ function normalizeInvite(raw = {}, fallbackId = '') {
     qualification: raw.qualification && typeof raw.qualification === 'object' ? raw.qualification : null,
     rewardStatus: raw.rewardStatus || null,
     reward: raw.reward && typeof raw.reward === 'object' ? raw.reward : null,
+    personalCode: raw.personalCode ? String(raw.personalCode).trim().toUpperCase() : null,
+    createdAt: toIso(raw.createdAt, nowIso()),
+    updatedAt: toIso(raw.updatedAt, toIso(raw.createdAt, nowIso())),
+    source: String(raw.source || '').trim() || 'firestore'
+  };
+}
+
+function normalizePersonalCode(raw = {}, fallbackCode = '') {
+  return {
+    code: String(raw.code || fallbackCode || '').trim().toUpperCase(),
+    ownerId: normalizeId(raw.ownerId),
+    type: String(raw.type || '').trim() || 'driver_referral',
+    status: String(raw.status || '').trim() || 'active',
+    shareCount: Number.isFinite(Number(raw.shareCount)) ? Number(raw.shareCount) : 0,
+    acceptedCount: Number.isFinite(Number(raw.acceptedCount)) ? Number(raw.acceptedCount) : 0,
+    lastSharedAt: toIso(raw.lastSharedAt, null),
+    lastAcceptedAt: toIso(raw.lastAcceptedAt, null),
     createdAt: toIso(raw.createdAt, nowIso()),
     updatedAt: toIso(raw.updatedAt, toIso(raw.createdAt, nowIso())),
     source: String(raw.source || '').trim() || 'firestore'
@@ -158,6 +178,18 @@ class ReferralProgramStateService {
     const firestore = this.getFirestore();
     if (!firestore) throw new Error('Firestore indisponível para referral programs');
     return firestore.collection(PASSENGER_BENEFITS_COLLECTION);
+  }
+
+  personalCodesCollection() {
+    const firestore = this.getFirestore();
+    if (!firestore) throw new Error('Firestore indisponível para referral programs');
+    return firestore.collection(PERSONAL_CODES_COLLECTION);
+  }
+
+  personalCodeOwnersCollection() {
+    const firestore = this.getFirestore();
+    if (!firestore) throw new Error('Firestore indisponível para referral programs');
+    return firestore.collection(PERSONAL_CODE_OWNERS_COLLECTION);
   }
 
   async getUserProfile(userId) {
@@ -486,6 +518,174 @@ class ReferralProgramStateService {
     });
 
     return acceptedInvite;
+  }
+
+  async findPersonalCode(code) {
+    const safeCode = String(code || '').trim().toUpperCase();
+    if (!safeCode) return null;
+    const doc = await this.personalCodesCollection().doc(safeCode).get();
+    return doc.exists ? normalizePersonalCode(doc.data(), doc.id) : null;
+  }
+
+  async getPersonalCodeForOwner(ownerId) {
+    const safeOwnerId = normalizeId(ownerId);
+    if (!safeOwnerId) return null;
+    const ownerDoc = await this.personalCodeOwnersCollection().doc(safeOwnerId).get();
+    const code = ownerDoc.exists ? ownerDoc.data()?.code : null;
+    return code ? this.findPersonalCode(code) : null;
+  }
+
+  // Cria (ou devolve) o código pessoal do usuário. O índice por dono garante um
+  // código por usuário; o código não pode colidir com convites individuais.
+  async ensurePersonalCode(ownerId, generateCode, options = {}) {
+    const safeOwnerId = normalizeId(ownerId);
+    if (!safeOwnerId) {
+      throw serviceError('ownerId inválido', 'PERSONAL_CODE_OWNER_REQUIRED', 400);
+    }
+    const attempts = Math.max(1, Number(options.attempts) || 8);
+    const firestore = this.getFirestore();
+    const ownerRef = this.personalCodeOwnersCollection().doc(safeOwnerId);
+
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      const candidate = String(generateCode() || '').trim().toUpperCase();
+      if (!candidate) continue;
+      const codeRef = this.personalCodesCollection().doc(candidate);
+      const inviteCodeRef = this.inviteCodesCollection().doc(candidate);
+      let result = null;
+      let collided = false;
+
+      await firestore.runTransaction(async (transaction) => {
+        const ownerDoc = await transaction.get(ownerRef);
+        const existingCode = ownerDoc.exists ? String(ownerDoc.data()?.code || '').trim().toUpperCase() : '';
+        if (existingCode) {
+          const existingDoc = await transaction.get(this.personalCodesCollection().doc(existingCode));
+          if (existingDoc.exists) {
+            result = normalizePersonalCode(existingDoc.data(), existingCode);
+            return;
+          }
+        }
+
+        const [codeDoc, inviteCodeDoc] = await Promise.all([
+          transaction.get(codeRef),
+          transaction.get(inviteCodeRef)
+        ]);
+        if (codeDoc.exists || inviteCodeDoc.exists) {
+          collided = true;
+          return;
+        }
+
+        const createdAt = nowIso();
+        result = normalizePersonalCode({
+          code: candidate,
+          ownerId: safeOwnerId,
+          type: options.type || 'driver_referral',
+          status: 'active',
+          shareCount: 0,
+          acceptedCount: 0,
+          createdAt,
+          updatedAt: createdAt
+        }, candidate);
+        transaction.set(codeRef, result, { merge: false });
+        transaction.set(ownerRef, { code: candidate, ownerId: safeOwnerId, createdAt }, { merge: false });
+      });
+
+      if (result) return result;
+      if (!collided) break;
+    }
+
+    throw serviceError('Não foi possível gerar o código pessoal', 'PERSONAL_CODE_GENERATION_FAILED', 500);
+  }
+
+  async recordPersonalCodeShare(code, ownerId) {
+    const safeCode = String(code || '').trim().toUpperCase();
+    const safeOwnerId = normalizeId(ownerId);
+    const firestore = this.getFirestore();
+    const codeRef = this.personalCodesCollection().doc(safeCode);
+    let updated = null;
+
+    await firestore.runTransaction(async (transaction) => {
+      const codeDoc = await transaction.get(codeRef);
+      if (!codeDoc.exists) {
+        throw serviceError('Código pessoal não encontrado', 'PERSONAL_CODE_NOT_FOUND', 404);
+      }
+      const current = normalizePersonalCode(codeDoc.data(), safeCode);
+      if (current.ownerId !== safeOwnerId) {
+        throw serviceError('Este código pertence a outra conta', 'PERSONAL_CODE_FORBIDDEN', 403);
+      }
+      const at = nowIso();
+      updated = { ...current, shareCount: current.shareCount + 1, lastSharedAt: at, updatedAt: at };
+      transaction.set(codeRef, updated, { merge: true });
+    });
+
+    return updated;
+  }
+
+  // Registra quem entrou pelo código pessoal: um convite aceito por convidado,
+  // criado na mesma transação que soma o contador do código.
+  async acceptPersonalCode(code, inviteeId, invitePayload = {}) {
+    const safeCode = String(code || '').trim().toUpperCase();
+    const safeInviteeId = normalizeId(inviteeId);
+    if (!safeCode || !safeInviteeId) {
+      throw serviceError('Código e convidado são obrigatórios', 'PERSONAL_CODE_ACCEPT_INVALID', 400);
+    }
+
+    const firestore = this.getFirestore();
+    const codeRef = this.personalCodesCollection().doc(safeCode);
+    const inviteId = `personal_${safeCode}_${safeInviteeId}`;
+    const inviteRef = this.invitesCollection().doc(inviteId);
+    let acceptedInvite = null;
+
+    await firestore.runTransaction(async (transaction) => {
+      const [codeDoc, inviteDoc] = await Promise.all([
+        transaction.get(codeRef),
+        transaction.get(inviteRef)
+      ]);
+      if (!codeDoc.exists) {
+        throw serviceError('Convite não encontrado', 'PERSONAL_CODE_NOT_FOUND', 404);
+      }
+      if (inviteDoc.exists) {
+        throw serviceError('Você já aceitou este convite', 'PERSONAL_CODE_ALREADY_ACCEPTED', 409);
+      }
+
+      const current = normalizePersonalCode(codeDoc.data(), safeCode);
+      if (current.status !== 'active') {
+        throw serviceError('Este código não está mais ativo', 'PERSONAL_CODE_INACTIVE', 409);
+      }
+      if (current.ownerId === safeInviteeId) {
+        throw serviceError('Não é permitido aceitar convite próprio', 'PERSONAL_CODE_SELF', 400);
+      }
+
+      const at = nowIso();
+      acceptedInvite = normalizeInvite({
+        ...invitePayload,
+        id: inviteId,
+        code: `${safeCode}-${safeInviteeId.slice(0, 6).toUpperCase()}`,
+        personalCode: safeCode,
+        type: current.type,
+        status: 'accepted',
+        inviterId: current.ownerId,
+        inviteeId: safeInviteeId,
+        acceptedBy: safeInviteeId,
+        acceptedAt: at,
+        createdAt: at,
+        updatedAt: at,
+        source: 'firestore'
+      }, inviteId);
+
+      transaction.set(inviteRef, acceptedInvite, { merge: false });
+      transaction.set(codeRef, {
+        acceptedCount: current.acceptedCount + 1,
+        lastAcceptedAt: at,
+        updatedAt: at
+      }, { merge: true });
+    });
+
+    return acceptedInvite;
+  }
+
+  async listPersonalCodes() {
+    const snapshot = await this.personalCodesCollection().get();
+    return sortByCreatedAtDesc(snapshot.docs.map((doc) => normalizePersonalCode(doc.data(), doc.id)));
   }
 }
 

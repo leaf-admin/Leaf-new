@@ -22,6 +22,11 @@ const mockListCampaigns = jest.fn();
 const mockGetCampaign = jest.fn();
 const mockListInvites = jest.fn();
 const mockVerifyIdToken = jest.fn();
+const mockFindPersonalCode = jest.fn();
+const mockEnsurePersonalCode = jest.fn();
+const mockGetPersonalCodeForOwner = jest.fn();
+const mockRecordPersonalCodeShare = jest.fn();
+const mockAcceptPersonalCode = jest.fn();
 
 jest.mock('../../../middleware/jwt-auth', () => ({
   authenticateJWT: mockAuthenticateJWT,
@@ -60,7 +65,13 @@ jest.mock('../../../services/referral-program-state-service', () => ({
   getUserProfile: mockGetUserProfile,
   extendFreeMonthsForUser: mockExtendFreeMonthsForUser,
   savePassengerBenefit: mockSavePassengerBenefit,
-  updateUserProfile: mockUpdateUserProfile
+  updateUserProfile: mockUpdateUserProfile,
+  findPersonalCode: mockFindPersonalCode,
+  ensurePersonalCode: mockEnsurePersonalCode,
+  getPersonalCodeForOwner: mockGetPersonalCodeForOwner,
+  recordPersonalCodeShare: mockRecordPersonalCodeShare,
+  acceptPersonalCode: mockAcceptPersonalCode,
+  listPersonalCodes: jest.fn(async () => [])
 }));
 
 jest.mock('firebase-admin', () => ({
@@ -98,6 +109,18 @@ describe('referral-programs admin mutation guards', () => {
     mockListCampaigns.mockResolvedValue([]);
     mockGetCampaign.mockResolvedValue(null);
     mockListInvites.mockResolvedValue([]);
+    mockFindPersonalCode.mockResolvedValue(null);
+    mockAcceptPersonalCode.mockImplementation(async (code, inviteeId, payload) => ({
+      id: `personal_${code}_${inviteeId}`,
+      code: `${code}-X`,
+      personalCode: code,
+      type: 'driver_referral',
+      status: 'accepted',
+      inviterId: 'owner_1',
+      acceptedBy: inviteeId,
+      acceptedAt: '2026-11-09T00:00:00.000Z',
+      ...payload
+    }));
     mockVerifyIdToken.mockResolvedValue({
       uid: 'user_2',
       phone_number: '+5521999999999',
@@ -475,5 +498,150 @@ describe('referral-programs admin mutation guards', () => {
         waveTag: 'founder-wave-2'
       })
     );
+  });
+
+  describe('personal reusable driver code', () => {
+    const activeDriverCampaign = {
+      id: 'camp_driver',
+      name: 'Convite de motorista',
+      type: 'driver_referral',
+      status: 'active',
+      startAt: '2026-01-01T00:00:00.000Z',
+      params: { requiredCompletedTrips: 20, qualificationWindowDays: 30 }
+    };
+    const personalCode = {
+      code: 'K7M2QX',
+      ownerId: 'owner_1',
+      type: 'driver_referral',
+      status: 'active',
+      shareCount: 4,
+      acceptedCount: 1
+    };
+
+    it('returns the owner code, link and counters', async () => {
+      mockVerifyIdToken.mockResolvedValue({ uid: 'owner_1' });
+      mockEnsurePersonalCode.mockResolvedValue({ ...personalCode, createdAt: '2026-11-09T00:00:00.000Z' });
+      mockListCampaigns.mockResolvedValue([activeDriverCampaign]);
+
+      const response = await request(createApp())
+        .get('/api/referral-programs/invites/personal')
+        .set('Authorization', 'Bearer firebase-token');
+
+      expect(response.status).toBe(200);
+      expect(response.body.personal).toEqual({
+        code: 'K7M2QX',
+        kind: 'driver',
+        link: 'https://leaf.app.br/motorista/convite/K7M2QX',
+        campaignActive: true,
+        stats: { shared: 4, accepted: 1 },
+        createdAt: '2026-11-09T00:00:00.000Z'
+      });
+      expect(mockEnsurePersonalCode).toHaveBeenCalledWith('owner_1', expect.any(Function), expect.objectContaining({ type: 'driver_referral' }));
+      const generator = mockEnsurePersonalCode.mock.calls[0][1];
+      expect(generator()).toMatch(/^[A-HJ-NP-Z2-9]{6}$/);
+    });
+
+    it('counts a share only for the code owner', async () => {
+      mockVerifyIdToken.mockResolvedValue({ uid: 'owner_1' });
+      mockGetPersonalCodeForOwner.mockResolvedValue(personalCode);
+      mockRecordPersonalCodeShare.mockResolvedValue({ ...personalCode, shareCount: 5 });
+
+      const response = await request(createApp())
+        .post('/api/referral-programs/invites/personal/share')
+        .set('Authorization', 'Bearer firebase-token')
+        .send({ channel: 'whatsapp' });
+
+      expect(response.status).toBe(200);
+      expect(response.body.stats).toEqual({ shared: 5, accepted: 1 });
+      expect(mockRecordPersonalCodeShare).toHaveBeenCalledWith('K7M2QX', 'owner_1');
+    });
+
+    it('shows a public preview of a personal code without the owner', async () => {
+      mockFindPersonalCode.mockResolvedValue(personalCode);
+      mockListCampaigns.mockResolvedValue([activeDriverCampaign]);
+
+      const response = await request(createApp())
+        .get('/api/referral-programs/invites/public/k7m2qx');
+
+      expect(response.status).toBe(200);
+      expect(response.body.invite).toMatchObject({
+        code: 'K7M2QX',
+        kind: 'driver',
+        reusable: true,
+        canAccept: true,
+        driverReward: { rewardMonths: 0 }
+      });
+      expect(JSON.stringify(response.body)).not.toContain('owner_1');
+      expect(mockFindInviteByCode).not.toHaveBeenCalled();
+    });
+
+    it('accepts the same personal code for different people and links the inviter', async () => {
+      mockFindPersonalCode.mockResolvedValue(personalCode);
+      mockListCampaigns.mockResolvedValue([activeDriverCampaign]);
+
+      const response = await request(createApp())
+        .post('/api/referral-programs/invites/accept')
+        .set('Authorization', 'Bearer firebase-token')
+        .send({ code: 'K7M2QX' });
+
+      expect(response.status).toBe(200);
+      expect(response.body.invite).toMatchObject({ personalCode: 'K7M2QX', acceptedBy: 'user_2', rewardMonths: 0 });
+      expect(mockAcceptPersonalCode).toHaveBeenCalledWith('K7M2QX', 'user_2', expect.objectContaining({
+        campaignId: 'camp_driver',
+        qualification: expect.objectContaining({ status: 'tracking' })
+      }));
+      expect(mockUpdateUserProfile).toHaveBeenCalledWith('user_2', expect.objectContaining({
+        invitedBy: 'owner_1',
+        invitedByCode: 'K7M2QX'
+      }));
+      expect(mockFindInviteByCode).not.toHaveBeenCalled();
+    });
+
+    it('blocks the owner from accepting their own code', async () => {
+      mockVerifyIdToken.mockResolvedValue({ uid: 'owner_1' });
+      mockFindPersonalCode.mockResolvedValue(personalCode);
+
+      const response = await request(createApp())
+        .post('/api/referral-programs/invites/accept')
+        .set('Authorization', 'Bearer firebase-token')
+        .send({ code: 'K7M2QX' });
+
+      expect(response.status).toBe(400);
+      expect(mockAcceptPersonalCode).not.toHaveBeenCalled();
+    });
+
+    it('blocks a driver who already entered through another driver invite', async () => {
+      mockFindPersonalCode.mockResolvedValue(personalCode);
+      mockListCampaigns.mockResolvedValue([activeDriverCampaign]);
+      mockListInvites.mockResolvedValue([{
+        id: 'invite_old',
+        type: 'driver_referral',
+        status: 'accepted',
+        inviterId: 'someone_else',
+        acceptedBy: 'user_2'
+      }]);
+
+      const response = await request(createApp())
+        .post('/api/referral-programs/invites/accept')
+        .set('Authorization', 'Bearer firebase-token')
+        .send({ code: 'K7M2QX' });
+
+      expect(response.status).toBe(409);
+      expect(mockAcceptPersonalCode).not.toHaveBeenCalled();
+    });
+
+    it('blocks acceptance while the driver campaign is paused', async () => {
+      mockFindPersonalCode.mockResolvedValue(personalCode);
+      mockListCampaigns.mockResolvedValue([{ ...activeDriverCampaign, status: 'paused' }]);
+
+      const response = await request(createApp())
+        .post('/api/referral-programs/invites/accept')
+        .set('Authorization', 'Bearer firebase-token')
+        .send({ code: 'K7M2QX' });
+
+      expect(response.status).toBe(409);
+      expect(response.body.code).toBe('REFERRAL_CAMPAIGN_INACTIVE');
+      expect(mockAcceptPersonalCode).not.toHaveBeenCalled();
+    });
   });
 });
