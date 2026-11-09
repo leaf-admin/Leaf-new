@@ -9,6 +9,8 @@ set -euo pipefail
 #
 # Required: CONFIRM_PRODUCTION_DEPLOY=true PRODUCTION_RELEASE_SHA=<origin/main SHA>
 # Everything else is passed through (DEPLOY_TRACKED_PATHS, UPDATE_WORKERS, ...).
+# Rollback: CONFIRM_PRODUCTION_DEPLOY=true ROLLBACK_TO_BACKUP=latest (or a
+# modular-rollout-* name) restores that backup exactly like the automatic rollback.
 # After a successful rollout it keeps the Contabo fallback current: rebuilds
 # the cold-standby images and copies the api/socket certificate. Failures there
 # only warn. Set REFRESH_CONTABO_FALLBACK=false to skip.
@@ -23,6 +25,12 @@ export GATEWAY_SERVICES="websocket-gateway-2"
 export NGINX_UPSTREAM_FILE="nginx.d/upstream-leaf-backend.conf"
 
 bash "$SCRIPT_DIR/deploy-contabo-docker.sh" "$@"
+
+# ROLLBACK_TO_BACKUP restores an older release: keep its images (no prune) and
+# leave the Contabo standby as it is until the next real deploy.
+if [ -n "${ROLLBACK_TO_BACKUP:-}" ]; then
+  exit 0
+fi
 
 # Each rollout leaves a ~700 MB image; drop old ones so the disk never fills.
 ssh -o StrictHostKeyChecking=yes "${SANTIAGO_SSH:-leaf-scl-test}" "PRUNE_BUILD_CACHE=true bash /opt/leaf-app/scripts/ops/prune-leaf-images.sh" \
