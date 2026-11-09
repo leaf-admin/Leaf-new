@@ -83,7 +83,37 @@ export async function acceptReferralInvite(code) {
   };
 }
 
+function normalizePersonalInvite(raw = {}) {
+  const stats = raw.stats && typeof raw.stats === 'object' ? raw.stats : {};
+  return {
+    code: String(raw.code || '').trim().toUpperCase(),
+    link: String(raw.link || '').trim(),
+    kind: raw.kind === 'passenger' ? 'passenger' : 'driver',
+    campaignActive: raw.campaignActive === true,
+    shared: Number(stats.shared || 0) || 0,
+    accepted: Number(stats.accepted || 0) || 0,
+  };
+}
+
+// Código pessoal reutilizável: o mesmo link serve para todos os amigos.
+export async function loadMyPersonalInvite() {
+  const response = await apiClient.get('/api/programs/referrals/invites/personal');
+  return normalizePersonalInvite(response?.data?.personal || {});
+}
+
+export async function recordPersonalInviteShare(channel = 'share_sheet') {
+  const response = await apiClient.post('/api/programs/referrals/invites/personal/share', {
+    channel: String(channel || '').trim(),
+  });
+  const stats = response?.data?.stats || {};
+  return {
+    shared: Number(stats.shared || 0) || 0,
+    accepted: Number(stats.accepted || 0) || 0,
+  };
+}
+
 export const referralProgramUtils = {
+  normalizePersonalInvite,
   normalizeInvite,
   normalizeInviteList,
   normalizeReferralType,

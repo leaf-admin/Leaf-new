@@ -200,4 +200,51 @@ describe('referral-program-state-service production guards', () => {
       statusCode: 410
     });
   });
+
+  it('keeps one personal code per owner and skips codes already in use', async () => {
+    const firestore = createInMemoryFirestore();
+    resetServiceWithFirestore(firestore);
+    firestore.docs.set('referral_invite_codes/TAKEN2', { code: 'TAKEN2' });
+
+    const candidates = ['TAKEN2', 'FRESH3', 'OTHER4'];
+    const generator = jest.fn(() => candidates.shift());
+
+    const first = await referralProgramStateService.ensurePersonalCode('owner_1', generator);
+    expect(first).toMatchObject({ code: 'FRESH3', ownerId: 'owner_1', shareCount: 0, acceptedCount: 0 });
+
+    const again = await referralProgramStateService.ensurePersonalCode('owner_1', () => 'NEWONE');
+    expect(again.code).toBe('FRESH3');
+    expect(firestore.docs.has('referral_personal_codes/NEWONE')).toBe(false);
+  });
+
+  it('counts shares and accepts each invitee once through a personal code', async () => {
+    const firestore = createInMemoryFirestore();
+    resetServiceWithFirestore(firestore);
+    await referralProgramStateService.ensurePersonalCode('owner_1', () => 'K7M2QX');
+
+    await referralProgramStateService.recordPersonalCodeShare('K7M2QX', 'owner_1');
+    await expect(referralProgramStateService.recordPersonalCodeShare('K7M2QX', 'intruder'))
+      .rejects.toMatchObject({ code: 'PERSONAL_CODE_FORBIDDEN' });
+
+    const invite = await referralProgramStateService.acceptPersonalCode('K7M2QX', 'friend_1', { campaignId: 'camp_1' });
+    expect(invite).toMatchObject({
+      id: 'personal_K7M2QX_friend_1',
+      personalCode: 'K7M2QX',
+      inviterId: 'owner_1',
+      acceptedBy: 'friend_1',
+      status: 'accepted',
+      campaignId: 'camp_1'
+    });
+    await referralProgramStateService.acceptPersonalCode('K7M2QX', 'friend_2');
+
+    await expect(referralProgramStateService.acceptPersonalCode('K7M2QX', 'friend_1'))
+      .rejects.toMatchObject({ code: 'PERSONAL_CODE_ALREADY_ACCEPTED', statusCode: 409 });
+    await expect(referralProgramStateService.acceptPersonalCode('K7M2QX', 'owner_1'))
+      .rejects.toMatchObject({ code: 'PERSONAL_CODE_SELF' });
+
+    expect(await referralProgramStateService.findPersonalCode('k7m2qx')).toMatchObject({
+      shareCount: 1,
+      acceptedCount: 2
+    });
+  });
 });

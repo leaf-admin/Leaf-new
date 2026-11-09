@@ -735,6 +735,45 @@ export default function ProgramsPage() {
 
           <Panel
             className="panel-span-full"
+            title="Links pessoais de convite"
+            subtitle="Cada pessoa tem um código fixo. Enviados conta os compartilhamentos feitos pelo app; entraram conta quem aceitou o código."
+          >
+            <div className="table-shell">
+              <table className="table table-compact">
+                <thead>
+                  <tr>
+                    <th>Código</th>
+                    <th>Dono</th>
+                    <th>Enviados</th>
+                    <th>Entraram</th>
+                    <th>Último envio</th>
+                    <th>Última entrada</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(summary?.personalCodes || []).length === 0 ? (
+                    <tr>
+                      <td colSpan={6}>Ninguém gerou link pessoal ainda.</td>
+                    </tr>
+                  ) : (
+                    (summary?.personalCodes || []).map((item) => (
+                      <tr key={item.code}>
+                        <td><strong>{item.code}</strong></td>
+                        <td>{item.ownerId || "-"}</td>
+                        <td>{item.shareCount ?? 0}</td>
+                        <td>{item.acceptedCount ?? 0}</td>
+                        <td>{item.lastSharedAt ? formatInviteDate(item.lastSharedAt) : "-"}</td>
+                        <td>{item.lastAcceptedAt ? formatInviteDate(item.lastAcceptedAt) : "-"}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </Panel>
+
+          <Panel
+            className="panel-span-full"
             title="Quem convidou quem"
             subtitle="Os 50 convites mais recentes, do mais novo para o mais antigo."
           >
@@ -760,7 +799,10 @@ export default function ProgramsPage() {
                     (summary?.invites?.recent || []).map((invite) => (
                       <tr key={invite.id || invite.code}>
                         <td>{formatInviteDate(invite.createdAt)}</td>
-                        <td><strong>{invite.code || "-"}</strong></td>
+                        <td>
+                          <strong>{invite.personalCode || invite.code || "-"}</strong>
+                          {invite.personalCode ? <span className="table-muted">link pessoal</span> : null}
+                        </td>
                         <td>{INVITE_TYPE_LABELS[invite.type] || invite.type || "-"}</td>
                         <td>{INVITE_STATUS_LABELS[String(invite.status || "").toLowerCase()] || invite.status || "-"}</td>
                         <td>{invite.inviterId || "-"}</td>

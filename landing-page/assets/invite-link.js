@@ -105,10 +105,16 @@
     }
 
     if (invite.kind === 'driver') {
+      // Sem recompensa ativa (rewardMonths = 0) a pagina nao promete premio.
+      const rewardMonths = Number(invite.driverReward?.rewardMonths || 0);
+      if (rewardMonths <= 0) {
+        if (details) details.classList.add('hidden');
+        return;
+      }
       setText('[data-detail-one-label]', 'Qualificacao');
       setText('[data-detail-one-value]', `${invite.driverReward?.requiredCompletedTrips || 20} corridas`);
       setText('[data-detail-two-label]', 'Recompensa');
-      setText('[data-detail-two-value]', `${invite.driverReward?.rewardMonths || 1} mes`);
+      setText('[data-detail-two-value]', `${rewardMonths} ${rewardMonths === 1 ? 'mes' : 'meses'}`);
       return;
     }
 

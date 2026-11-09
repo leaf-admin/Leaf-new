@@ -164,6 +164,29 @@ function generateInviteCode(type) {
   return `${prefix}-${stamp}-${random}`;
 }
 
+// Código pessoal: 6 caracteres sem 0/O/1/I, fácil de ditar e digitar.
+// Não tem hífen, então não se confunde com os convites individuais (DRV-/PSG-).
+const PERSONAL_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const PERSONAL_CODE_LENGTH = 6;
+const PERSONAL_CODE_PATTERN = /^[A-HJ-NP-Z2-9]{6}$/;
+
+function generatePersonalCode() {
+  const bytes = crypto.randomBytes(PERSONAL_CODE_LENGTH);
+  let code = '';
+  for (let index = 0; index < PERSONAL_CODE_LENGTH; index += 1) {
+    code += PERSONAL_CODE_ALPHABET[bytes[index] % PERSONAL_CODE_ALPHABET.length];
+  }
+  return code;
+}
+
+function looksLikePersonalCode(code) {
+  return PERSONAL_CODE_PATTERN.test(String(code || '').trim().toUpperCase());
+}
+
+function buildPersonalInviteLink(code) {
+  return `https://leaf.app.br/motorista/convite/${encodeURIComponent(code)}`;
+}
+
 function inviteIsExpired(invite, nowTs = Date.now()) {
   const expiresTs = parseTimestamp(invite?.expiresAt);
   return Boolean(expiresTs && expiresTs <= nowTs);
@@ -247,6 +270,28 @@ function buildPublicInvitePayload(invite = {}, campaign = null) {
     nonCumulative: invite.nonCumulative !== false
   };
   return payload;
+}
+
+function buildPublicPersonalCodePayload(personalCode, activeCampaign, matchingCampaigns = []) {
+  const campaignStatus = activeCampaign
+    ? 'active'
+    : (matchingCampaigns.length > 0 ? resolveCampaignAvailability(matchingCampaigns[0]) : 'untracked');
+  const codeActive = personalCode.status === 'active';
+  const canAccept = codeActive && (campaignStatus === 'active' || campaignStatus === 'untracked');
+  return {
+    code: personalCode.code,
+    kind: 'driver',
+    reusable: true,
+    status: codeActive ? 'pending' : 'inactive',
+    campaignStatus,
+    canAccept,
+    message: canAccept ? 'Convite ativo' : 'Convite indisponivel',
+    driverReward: {
+      requiredCompletedTrips: toPositiveInt(activeCampaign?.params?.requiredCompletedTrips, DEFAULT_DRIVER_REQUIRED_TRIPS),
+      rewardMonths: 0,
+      qualificationWindowDays: toPositiveInt(activeCampaign?.params?.qualificationWindowDays, DEFAULT_DRIVER_QUALIFICATION_DAYS)
+    }
+  };
 }
 
 function resolveInviteExpiresAt(campaign = null, createdAtTs = Date.now()) {
@@ -594,6 +639,17 @@ router.get('/invites/public/:code', publicInviteLookupLimiter, async (req, res) 
     const code = normalizeIdentifier(req.params.code).toUpperCase();
     if (!code) {
       return res.status(400).json({ error: 'Codigo do convite e obrigatorio' });
+    }
+
+    if (looksLikePersonalCode(code) && typeof referralProgramStateService.findPersonalCode === 'function') {
+      const personalCode = await referralProgramStateService.findPersonalCode(code);
+      if (personalCode) {
+        const { activeCampaign, matchingCampaigns } = await resolveCampaignSelectionForType(personalCode.type);
+        return res.json({
+          success: true,
+          invite: buildPublicPersonalCodePayload(personalCode, activeCampaign, matchingCampaigns)
+        });
+      }
     }
 
     const invite = await referralProgramStateService.findInviteByCode(code);
@@ -1001,6 +1057,159 @@ router.post('/invites/passenger', ensureUserFromFirebaseToken, async (req, res) 
   }
 });
 
+router.get('/invites/personal', ensureUserFromFirebaseToken, async (req, res) => {
+  try {
+    const ownerId = normalizeIdentifier(req.firebaseUser?.uid);
+    if (!ownerId) {
+      return res.status(400).json({ error: 'Usuário inválido' });
+    }
+    const config = await loadProgramConfig();
+    if (config.driver.enabled === false) {
+      return res.status(400).json({ error: 'Programa de convites para motoristas está desativado' });
+    }
+
+    const personalCode = await referralProgramStateService.ensurePersonalCode(
+      ownerId,
+      generatePersonalCode,
+      { type: 'driver_referral', attempts: MAX_INVITE_CODE_ATTEMPTS }
+    );
+    const { activeCampaign } = await resolveCampaignSelectionForType('driver_referral');
+
+    return res.json({
+      success: true,
+      personal: {
+        code: personalCode.code,
+        kind: 'driver',
+        link: buildPersonalInviteLink(personalCode.code),
+        campaignActive: Boolean(activeCampaign),
+        stats: {
+          shared: personalCode.shareCount,
+          accepted: personalCode.acceptedCount
+        },
+        createdAt: personalCode.createdAt
+      }
+    });
+  } catch (error) {
+    logError(error, 'Erro ao carregar código pessoal de convite', { service: 'referral-programs' });
+    return res.status(error.statusCode || 500).json({
+      error: error.statusCode ? error.message : 'Erro ao carregar seu convite',
+      code: error.code || undefined
+    });
+  }
+});
+
+router.post('/invites/personal/share', ensureUserFromFirebaseToken, async (req, res) => {
+  try {
+    const ownerId = normalizeIdentifier(req.firebaseUser?.uid);
+    const personalCode = await referralProgramStateService.getPersonalCodeForOwner(ownerId);
+    if (!personalCode) {
+      return res.status(404).json({ error: 'Código pessoal não encontrado' });
+    }
+    const updated = await referralProgramStateService.recordPersonalCodeShare(personalCode.code, ownerId);
+
+    logStructured('info', 'Auditoria referral invite', {
+      service: 'referral-programs',
+      action: 'referral_programs.personal_code.share',
+      entity: { type: 'referral_personal_code', id: personalCode.code },
+      operator: { id: ownerId },
+      channel: normalizeIdentifier(req.body?.channel) || null
+    });
+
+    return res.json({
+      success: true,
+      stats: {
+        shared: updated?.shareCount ?? personalCode.shareCount + 1,
+        accepted: updated?.acceptedCount ?? personalCode.acceptedCount
+      }
+    });
+  } catch (error) {
+    logError(error, 'Erro ao registrar compartilhamento de convite', { service: 'referral-programs' });
+    return res.status(error.statusCode || 500).json({
+      error: error.statusCode ? error.message : 'Erro ao registrar compartilhamento',
+      code: error.code || undefined
+    });
+  }
+});
+
+async function acceptPersonalCodeInvite(req, res, personalCode, inviteeId) {
+  if (personalCode.ownerId === inviteeId) {
+    return res.status(400).json({ error: 'Não é permitido aceitar convite próprio' });
+  }
+  if (personalCode.status !== 'active') {
+    return res.status(409).json({ error: 'Este convite não está mais ativo' });
+  }
+
+  const config = await loadProgramConfig();
+  if (config.driver.enabled === false) {
+    return res.status(400).json({ error: 'Programa de convites para motoristas está desativado' });
+  }
+
+  const { activeCampaign, matchingCampaigns } = await resolveCampaignSelectionForType(personalCode.type);
+  if (!activeCampaign && matchingCampaigns.length > 0) {
+    return res.status(409).json(buildCampaignUnavailablePayload(personalCode.type, matchingCampaigns));
+  }
+
+  const allInvites = await loadInvites();
+  const campaignQuotaError = enforceCampaignInviteQuota(activeCampaign, allInvites);
+  if (campaignQuotaError) {
+    return res.status(400).json(campaignQuotaError);
+  }
+
+  const alreadyInvited = allInvites.find((invite) =>
+    normalizeCampaignType(invite.type) === 'driver_referral' &&
+    normalizeIdentifier(invite.acceptedBy) === inviteeId &&
+    ['accepted', 'qualified', 'rewarded'].includes(String(invite.status || '').toLowerCase())
+  );
+  if (alreadyInvited) {
+    return res.status(409).json({ error: 'Você já entrou por um convite de motorista' });
+  }
+
+  const requiredCompletedTrips = toPositiveInt(
+    activeCampaign?.params?.requiredCompletedTrips ?? config.driver.requiredCompletedTrips,
+    DEFAULT_DRIVER_REQUIRED_TRIPS
+  );
+  const rewardMonths = referralRewardsEnabled(config)
+    ? toPositiveInt(activeCampaign?.params?.rewardMonths ?? config.driver.rewardMonths, DEFAULT_DRIVER_REWARD_MONTHS)
+    : 0;
+  const qualificationWindowDays = toPositiveInt(
+    activeCampaign?.params?.qualificationWindowDays ?? config.driver.qualificationWindowDays,
+    DEFAULT_DRIVER_QUALIFICATION_DAYS
+  );
+  const startedAt = nowIso();
+
+  const invite = await referralProgramStateService.acceptPersonalCode(personalCode.code, inviteeId, {
+    campaignId: activeCampaign?.id || null,
+    requiredCompletedTrips,
+    rewardMonths,
+    qualificationWindowDays,
+    qualification: {
+      status: 'tracking',
+      startedAt,
+      dueAt: new Date(Date.now() + qualificationWindowDays * 24 * 60 * 60 * 1000).toISOString(),
+      requiredCompletedTrips,
+      currentCompletedTrips: 0
+    }
+  });
+
+  await referralProgramStateService.updateUserProfile(inviteeId, {
+    invitedBy: personalCode.ownerId,
+    invitedByCode: personalCode.code,
+    inviteAcceptedAt: invite?.acceptedAt || startedAt
+  });
+
+  logStructured('info', 'Auditoria referral invite', {
+    service: 'referral-programs',
+    action: 'referral_programs.personal_code.accept',
+    entity: { type: 'referral_invite', id: invite?.id || null },
+    operator: { id: inviteeId },
+    inviteType: personalCode.type,
+    personalCode: personalCode.code,
+    campaignId: activeCampaign?.id || null
+  });
+
+  return res.json({ success: true, invite, passengerBenefit: null });
+}
+
 router.post('/invites/accept', ensureUserFromFirebaseToken, async (req, res) => {
   try {
     const code = normalizeIdentifier(req.body?.code).toUpperCase();
@@ -1010,6 +1219,13 @@ router.post('/invites/accept', ensureUserFromFirebaseToken, async (req, res) => 
     }
     if (!inviteeId) {
       return res.status(400).json({ error: 'inviteeId é obrigatório' });
+    }
+
+    if (looksLikePersonalCode(code) && typeof referralProgramStateService.findPersonalCode === 'function') {
+      const personalCode = await referralProgramStateService.findPersonalCode(code);
+      if (personalCode) {
+        return acceptPersonalCodeInvite(req, res, personalCode, inviteeId);
+      }
     }
 
     const invite = await referralProgramStateService.findInviteByCode(code);
@@ -1281,11 +1497,14 @@ router.get('/invites/me', ensureUserFromFirebaseToken, async (req, res) => {
 
 router.get('/summary', authenticateJWT, requireRole(ADMIN_ROLES), async (_req, res) => {
   try {
-    const [config, campaigns, invites, passengerBenefits] = await Promise.all([
+    const [config, campaigns, invites, passengerBenefits, personalCodes] = await Promise.all([
       loadProgramConfig(),
       loadCampaigns(),
       loadInvites(),
-      referralProgramStateService.listPassengerBenefits().catch(() => [])
+      referralProgramStateService.listPassengerBenefits().catch(() => []),
+      typeof referralProgramStateService.listPersonalCodes === 'function'
+        ? referralProgramStateService.listPersonalCodes().catch(() => [])
+        : Promise.resolve([])
     ]);
     const passengerBenefitsActive = passengerBenefits.filter((benefit) =>
       String(benefit.status || '').toLowerCase() === 'active' &&
@@ -1348,8 +1567,24 @@ router.get('/summary', authenticateJWT, requireRole(ADMIN_ROLES), async (_req, r
           createdAt: invite.createdAt || null,
           acceptedAt: invite.acceptedAt || null,
           inviteePhoneLast4: String(invite.inviteePhone || '').replace(/\D/g, '').slice(-4) || null,
+          personalCode: invite.personalCode || null,
         }))
       },
+      // Códigos pessoais: quantas vezes cada um compartilhou e quantos entraram.
+      personalCodes: [...personalCodes]
+        .sort((a, b) => (b.acceptedCount - a.acceptedCount) || (b.shareCount - a.shareCount))
+        .slice(0, 100)
+        .map((item) => ({
+          code: item.code,
+          ownerId: item.ownerId,
+          type: item.type,
+          status: item.status,
+          shareCount: item.shareCount,
+          acceptedCount: item.acceptedCount,
+          lastSharedAt: item.lastSharedAt,
+          lastAcceptedAt: item.lastAcceptedAt,
+          createdAt: item.createdAt
+        })),
       rewardsEnabled: referralRewardsEnabled(config),
       funnel: {
         driver: {
