@@ -106,7 +106,7 @@ if reservation.driverIntroFee then
   if introState.driverId ~= driverId or introContext.driverId ~= driverId or
     introState.historySnapshotId ~= introContext.historySnapshotId or
     introState.qualifiedCompletedRides ~= introContext.qualifiedCompletedRides or
-    introState.reviewRequiredBookingId or
+    (introState.reviewRequiredBookingId and not introContext.offeredAt) or
     (introState.inflightBookingId and introState.inflightBookingId ~= bookingId) then
     return 'ERR_INTRO_FEE_STALE_OFFER'
   end

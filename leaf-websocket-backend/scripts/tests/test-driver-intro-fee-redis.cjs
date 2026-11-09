@@ -51,7 +51,10 @@ const firestore = {
     return task;
   }
 };
-const service = new DriverIntroFeeService({ getFirestore: () => firestore, env: () => runtime });
+// Clock inside the promotion window (it runs until 30/11/2026 in Brasília); checks may move it.
+const DURING_PROMO = Date.parse('2026-11-20T12:00:00.000Z');
+let clock = DURING_PROMO;
+const service = new DriverIntroFeeService({ getFirestore: () => firestore, env: () => runtime, now: () => clock });
 const child = spawn(process.env.LEAF_TEST_REDIS_SERVER || 'redis-server', [
   '--port', '0', '--unixsocket', socket, '--unixsocketperm', '700',
   '--save', '', '--appendonly', 'no', '--dir', directory
@@ -113,6 +116,7 @@ async function check(name, callback) {
   documents.clear();
   Object.assign(io, { reads: 0, writes: 0, fail: false, afterRead: null });
   runtime.DRIVER_INTRO_FEE_ENABLED = 'true';
+  clock = DURING_PROMO;
   service.checkpointCursors = { operational: '0', sandbox: '0' };
   service.getAuth = () => ({ getUser: async () => { throw new Error('auth not stubbed'); } });
   await callback();
@@ -128,14 +132,14 @@ async function main() {
   await redis.connect();
   if (startupError) throw startupError;
   assert.equal(fs.realpathSync((await redis.config('GET', 'dir'))[1]), fs.realpathSync(directory));
-  await check('24 -> 25, 100 concurrent replays consume one slot; next offer uses current table', async () => {
+  await check('24 -> 25, 100 concurrent replays count once; the date rule keeps the promotion after 25', async () => {
     const offer = await seed();
     assert.equal(await accept('last-slot', { context: offer }), 'OK');
     await redis.hset('booking:last-slot', 'status', 'COMPLETED', 'state', 'COMPLETED', 'driverIntroFeeCompletion', JSON.stringify({ qualified: true }));
     const values = await Promise.all(Array.from({ length: 100 }, () => service.recordCompletion(redis, 'driver-1', 'last-slot')));
     assert(values.every(value => value.qualifiedCompletedRides === 25));
     assert.equal(values[0].completedBookingIds.length, 1);
-    assert.equal((await service.resolveOfferContext(redis, 'driver-1', {})).eligible, false);
+    assert.equal((await service.resolveOfferContext(redis, 'driver-1', {})).eligible, true);
     assert.equal(io.reads, 1);
     assert.equal(io.writes, 0);
     assert.equal(await redis.hlen(CHECKPOINTS_KEY), 1);
@@ -239,17 +243,35 @@ async function main() {
     await accept('crashed');
     await assert.rejects(service.resolveOfferContext(redis, 'driver-1', {}), { code: 'DRIVER_INTRO_FEE_ERR_RIDE_ACTIVE' });
     await redis.hset('booking:crashed', 'status', 'COMPLETED', 'driverIntroFeeCompletion', JSON.stringify({ qualified: true }));
-    assert.equal((await service.resolveOfferContext(redis, 'driver-1', {})).eligible, false);
+    const repaired = await service.resolveOfferContext(redis, 'driver-1', {});
+    assert.equal(repaired.qualifiedCompletedRides, 25);
+    assert.equal(repaired.eligible, true);
     assert.equal(await redis.hget('booking:crashed', 'driverIntroFeeCompletionRecorded'), 'true');
   });
-  await check('unavailable destination proof holds financial eligibility for review', async () => {
+  await check('unavailable destination proof is kept for review but no longer holds the offers', async () => {
     await seed();
     await accept('unverified');
     const state = await terminal('unverified', { qualified: false, reviewRequired: true });
     assert.equal(state.qualifiedCompletedRides, 24);
-    await assert.rejects(service.resolveOfferContext(redis, 'driver-1', {}), { code: 'DRIVER_INTRO_FEE_HISTORY_REVIEW_REQUIRED' });
+    const next = await service.resolveOfferContext(redis, 'driver-1', {});
+    assert.equal(next.eligible, true);
+    assert.equal(await accept('after-review', { context: next }), 'OK');
+    // A context from before the date rule (no offeredAt) is still held by the review.
+    const { offeredAt, eligibleUntil, ...legacy } = next;
+    assert.equal(await accept('legacy-after-review', { context: legacy }), 'ERR_INTRO_FEE_STALE_OFFER');
     await service.flushPendingCheckpoints(redis);
     assert.equal(storedDoc('driver-1').reviewRequiredBookingId, 'unverified');
+  });
+  await check('an offer made on 30/11 keeps the promotion when accepted after midnight; new offers stop', async () => {
+    clock = Date.parse('2026-12-01T02:59:59.000Z');
+    const lastOffer = await seed(3);
+    assert.equal(lastOffer.eligible, true);
+    clock = Date.parse('2026-12-01T03:00:01.000Z');
+    assert.equal(service.enabled(), false);
+    assert.equal(await service.resolveOfferContext(redis, 'driver-1', {}), null);
+    assert.equal(await accept('midnight', { context: lastOffer }), 'OK');
+    assert.equal(JSON.parse(await redis.hget('booking:midnight', 'driverIntroFee')).eligible, true);
+    assert.equal((await terminal('midnight')).qualifiedCompletedRides, 4);
   });
   await check('Firestore outage keeps a retryable checkpoint; a retry cannot decrement the count', async () => {
     await seed();

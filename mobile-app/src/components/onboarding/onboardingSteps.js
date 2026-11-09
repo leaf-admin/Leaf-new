@@ -234,7 +234,7 @@ export function RoleStep({ step, total, onBack, role, onSelectRole, onSubmit }) 
       footer={<PrimaryButton label="Continuar" onPress={onSubmit} disabled={!role} testID="onboarding-role-submit" />}
     >
       <RoleCard title="Quero viajar" description="Preço fechado, pago por Pix antes da corrida. Sem motorista, o valor volta para você." icon="navigate-outline" selected={role === 'customer'} onPress={() => onSelectRole?.('customer')} testID="onboarding-role-customer" />
-      <RoleCard title="Quero dirigir" description="R$ 0,99 de taxa operacional por corrida nas 25 primeiras. A corrida já chega paga." icon="car-outline" selected={role === 'driver'} onPress={() => onSelectRole?.('driver')} testID="onboarding-role-driver" />
+      <RoleCard title="Quero dirigir" description="R$ 0,99 de taxa operacional por corrida até 30/11/2026. A corrida já chega paga." icon="car-outline" selected={role === 'driver'} onPress={() => onSelectRole?.('driver')} testID="onboarding-role-driver" />
     </OnboardingShell>
   );
 }

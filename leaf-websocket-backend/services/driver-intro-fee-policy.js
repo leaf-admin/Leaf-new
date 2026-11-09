@@ -10,7 +10,12 @@ const DRIVER_INTRO_FEE_POLICY = Object.freeze({
   operationalFeeCents: 99,
   paymentFeeIncluded: true,
   pixExcessChargedToDriver: true,
-  leafFeeCents: 49
+  leafFeeCents: 49,
+  // Owner-approved on 2026-11-09: every ride offered until 30/11/2026 23:59:59 (Brasília,
+  // UTC-3) gets the promotion, whatever the driver's ride count. The offer time decides,
+  // so a ride offered on 30/11 and finished on 01/12 keeps it. Never shorten this
+  // retroactively: stored contexts are recomputed against it at settlement.
+  eligibleUntil: '2026-12-01T03:00:00.000Z'
 });
 // Sandbox (QA) rides count on their own counter, never on the operational one.
 const DRIVER_INTRO_FEE_NAMESPACES = Object.freeze(['operational', 'sandbox']);
@@ -30,7 +35,8 @@ function buildDriverIntroFeeContext({
   historySnapshotId,
   namespace = 'operational',
   paymentFeeIncluded = DRIVER_INTRO_FEE_POLICY.paymentFeeIncluded,
-  pixExcessChargedToDriver = DRIVER_INTRO_FEE_POLICY.pixExcessChargedToDriver
+  pixExcessChargedToDriver = DRIVER_INTRO_FEE_POLICY.pixExcessChargedToDriver,
+  offeredAt = null
 } = {}) {
   if (historyVerified !== true || typeof historySnapshotId !== 'string' || !historySnapshotId.trim()) {
     throw policyError('DRIVER_INTRO_FEE_HISTORY_UNVERIFIED');
@@ -42,7 +48,19 @@ function buildDriverIntroFeeContext({
     throw policyError('DRIVER_INTRO_FEE_CONTEXT_INVALID');
   }
   if (!DRIVER_INTRO_FEE_NAMESPACES.includes(namespace)) throw policyError('DRIVER_INTRO_FEE_CONTEXT_INVALID');
-  const eligible = qualifiedCompletedRides < DRIVER_INTRO_FEE_POLICY.qualifyingRideLimit;
+  // Offers made since 2026-11-09 carry offeredAt and follow the date rule. A context
+  // without it was accepted under the 25-ride rule and keeps that rule.
+  let eligible;
+  if (offeredAt === null || offeredAt === undefined) {
+    eligible = qualifiedCompletedRides < DRIVER_INTRO_FEE_POLICY.qualifyingRideLimit;
+  } else {
+    const offeredAtMs = typeof offeredAt === 'string' ? Date.parse(offeredAt) : NaN;
+    if (!Number.isFinite(offeredAtMs)) throw policyError('DRIVER_INTRO_FEE_CONTEXT_INVALID');
+    eligible = offeredAtMs < Date.parse(DRIVER_INTRO_FEE_POLICY.eligibleUntil);
+  }
+  const dateTerms = offeredAt === null || offeredAt === undefined
+    ? {}
+    : { offeredAt: new Date(Date.parse(offeredAt)).toISOString(), eligibleUntil: DRIVER_INTRO_FEE_POLICY.eligibleUntil };
   return Object.freeze({
     policyId: DRIVER_INTRO_FEE_POLICY.policyId,
     namespace,
@@ -56,8 +74,14 @@ function buildDriverIntroFeeContext({
     pixExcessChargedToDriver: paymentFeeIncluded === true && pixExcessChargedToDriver === true,
     leafFeeCents: eligible && paymentFeeIncluded === true && pixExcessChargedToDriver === true
       ? DRIVER_INTRO_FEE_POLICY.leafFeeCents
-      : null
+      : null,
+    ...dateTerms
   });
+}
+
+// The promotion takes new offers only before eligibleUntil. Accepted rides settle anyway.
+function isDriverIntroFeeOpen(nowMs = Date.now()) {
+  return nowMs < Date.parse(DRIVER_INTRO_FEE_POLICY.eligibleUntil);
 }
 
 function normalizeDriverIntroFeeContext(context) {
@@ -73,7 +97,8 @@ function normalizeDriverIntroFeeContext(context) {
   return buildDriverIntroFeeContext({
     ...context,
     paymentFeeIncluded: context.paymentFeeIncluded === true,
-    pixExcessChargedToDriver: context.pixExcessChargedToDriver === true
+    pixExcessChargedToDriver: context.pixExcessChargedToDriver === true,
+    offeredAt: context.offeredAt ?? null
   });
 }
 
@@ -81,5 +106,6 @@ module.exports = {
   DRIVER_INTRO_FEE_POLICY,
   DRIVER_INTRO_FEE_NAMESPACES,
   buildDriverIntroFeeContext,
-  normalizeDriverIntroFeeContext
+  normalizeDriverIntroFeeContext,
+  isDriverIntroFeeOpen
 };

@@ -39,7 +39,8 @@ describe('mobile driver fee policy matches the backend', () => {
     expect(DRIVER_INTRO_FEE_POLICY.pixExcessChargedToDriver).toBe(true);
     expect(numbersAfter('promoLeafFeeCents')).toBe(DRIVER_INTRO_FEE_POLICY.leafFeeCents);
     expect(numbersAfter('promoTotalFeeCents')).toBe(DRIVER_INTRO_FEE_POLICY.operationalFeeCents);
-    expect(numbersAfter('promoQualifyingRides')).toBe(DRIVER_INTRO_FEE_POLICY.qualifyingRideLimit);
+    expect(mobileSource).toContain(`promoEligibleUntil: '${DRIVER_INTRO_FEE_POLICY.eligibleUntil}'`);
+    expect(mobileSource).toContain("promoEndsOnLabel: '30/11/2026'");
   });
 
   test('withdrawal fee', () => {

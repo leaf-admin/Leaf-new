@@ -45,7 +45,7 @@ const DriverIntroStep = ({ onContinue, onBack, progressMeta }) => {
           você fica com {formatCents(example.netCents)}
         </Text>
         <Text style={styles.exampleDetail}>
-          {`${String(example.netPercent).replace('.', ',')}% da corrida. Taxa da Leaf ${formatCents(example.serviceFeeCents)} e processamento do Pix ${formatCents(example.processingCents)}. Nas ${DRIVER_FEE_POLICY.promoQualifyingRides} primeiras corridas, você fica com ${formatCents(example.promoNetCents)}. O passageiro paga antes, então a corrida já está paga quando você aceita.`}
+          {`${String(example.netPercent).replace('.', ',')}% da corrida. Taxa da Leaf ${formatCents(example.serviceFeeCents)} e processamento do Pix ${formatCents(example.processingCents)}. Até ${DRIVER_FEE_POLICY.promoEndsOnLabel}, você fica com ${formatCents(example.promoNetCents)}. O passageiro paga antes, então a corrida já está paga quando você aceita.`}
         </Text>
       </View>
 
