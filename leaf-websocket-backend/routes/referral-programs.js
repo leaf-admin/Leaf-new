@@ -644,6 +644,11 @@ router.get('/invites/public/:code', publicInviteLookupLimiter, async (req, res) 
     if (looksLikePersonalCode(code) && typeof referralProgramStateService.findPersonalCode === 'function') {
       const personalCode = await referralProgramStateService.findPersonalCode(code);
       if (personalCode) {
+        if (personalCode.sourceKind && typeof referralProgramStateService.recordSourceCodeVisit === 'function') {
+          await referralProgramStateService.recordSourceCodeVisit(personalCode.code).catch((error) => {
+            logError(error, 'Erro ao contar visita do link de grupo', { service: 'referral-programs' });
+          });
+        }
         const { activeCampaign, matchingCampaigns } = await resolveCampaignSelectionForType(personalCode.type);
         return res.json({
           success: true,
@@ -1168,7 +1173,8 @@ async function acceptPersonalCodeInvite(req, res, personalCode, inviteeId) {
     activeCampaign?.params?.requiredCompletedTrips ?? config.driver.requiredCompletedTrips,
     DEFAULT_DRIVER_REQUIRED_TRIPS
   );
-  const rewardMonths = referralRewardsEnabled(config)
+  // Link de grupo não tem pessoa dona: nunca gera recompensa.
+  const rewardMonths = !personalCode.sourceKind && referralRewardsEnabled(config)
     ? toPositiveInt(activeCampaign?.params?.rewardMonths ?? config.driver.rewardMonths, DEFAULT_DRIVER_REWARD_MONTHS)
     : 0;
   const qualificationWindowDays = toPositiveInt(
@@ -1495,6 +1501,119 @@ router.get('/invites/me', ensureUserFromFirebaseToken, async (req, res) => {
   }
 });
 
+// Links de grupo (Facebook, WhatsApp, Telegram): um código de convite por grupo,
+// com dono sintético leaf-source:<slug>. O post no grupo é manual; aqui só se mede
+// visitas à página, cadastros que aceitaram o código, aprovados e primeira corrida.
+const SOURCE_CHANNELS = ['facebook_group', 'whatsapp_group', 'telegram_group', 'outro'];
+const SOURCE_OWNER_PREFIX = 'leaf-source:';
+const SOURCE_FUNNEL_MAX_INVITEES = 300;
+// Só nomes de grupo e contagens, sem dado pessoal: o usuário de leitura dos bots
+// (perfil support) acompanha o funil por aqui.
+const SOURCE_READ_ROLES = [...ADMIN_ROLES, 'support'];
+
+function slugifySourceLabel(label) {
+  return String(label || '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+    .slice(0, 60);
+}
+
+function buildSourceCodeRow(item, funnel = {}) {
+  return {
+    code: item.code,
+    label: item.label,
+    channel: item.channel,
+    status: item.status,
+    link: buildPersonalInviteLink(item.code),
+    visits: item.visitCount,
+    accepted: item.acceptedCount,
+    approved: funnel.approved ?? null,
+    firstRide: funnel.firstRide ?? null,
+    lastVisitedAt: item.lastVisitedAt,
+    lastAcceptedAt: item.lastAcceptedAt,
+    createdBy: item.createdBy,
+    createdAt: item.createdAt
+  };
+}
+
+router.get('/sources', authenticateJWT, requireRole(SOURCE_READ_ROLES), async (_req, res) => {
+  try {
+    const [codes, invites] = await Promise.all([
+      referralProgramStateService.listPersonalCodes(),
+      loadInvites()
+    ]);
+    const sources = codes.filter((item) => item.sourceKind);
+    const sourceCodes = new Set(sources.map((item) => item.code));
+    const accepted = invites.filter((invite) =>
+      sourceCodes.has(String(invite.personalCode || '').toUpperCase()) &&
+      ['accepted', 'qualified', 'rewarded'].includes(String(invite.status || '').toLowerCase())
+    ).slice(0, SOURCE_FUNNEL_MAX_INVITEES);
+
+    const funnelByCode = {};
+    await Promise.all(accepted.map(async (invite) => {
+      const code = String(invite.personalCode).toUpperCase();
+      const inviteeId = normalizeIdentifier(invite.acceptedBy || invite.inviteeId);
+      if (!inviteeId) return;
+      const funnel = funnelByCode[code] || (funnelByCode[code] = { approved: 0, firstRide: 0 });
+      const profile = await referralProgramStateService.getUserProfile(inviteeId).catch(() => null);
+      if (profile && (profile.approved === true || profile.isApproved === true)) funnel.approved += 1;
+      const acceptedTs = parseTimestamp(invite.acceptedAt || invite.createdAt) || 0;
+      const trips = await countDriverTripsWithinWindow(inviteeId, acceptedTs, null).catch(() => 0);
+      if (trips > 0) funnel.firstRide += 1;
+    }));
+
+    const rows = sources
+      .map((item) => buildSourceCodeRow(item, funnelByCode[item.code] || { approved: 0, firstRide: 0 }))
+      .sort((a, b) => (b.accepted - a.accepted) || (b.visits - a.visits));
+    return res.json({ success: true, sources: rows, channels: SOURCE_CHANNELS });
+  } catch (error) {
+    logError(error, 'Erro ao listar links de grupo', { service: 'referral-programs' });
+    return res.status(500).json({ error: 'Erro ao listar links de grupo' });
+  }
+});
+
+router.post('/sources', authenticateJWT, requireRole(ADMIN_ROLES), requireAdminMutationsEnabled, async (req, res) => {
+  try {
+    const label = String(req.body?.label || '').trim().replace(/\s+/g, ' ');
+    const channel = String(req.body?.channel || '').trim();
+    if (label.length < 3 || label.length > 80) {
+      return res.status(400).json({ error: 'Nome do grupo deve ter de 3 a 80 caracteres' });
+    }
+    if (!SOURCE_CHANNELS.includes(channel)) {
+      return res.status(400).json({ error: `Canal deve ser um de: ${SOURCE_CHANNELS.join(', ')}` });
+    }
+    const slug = slugifySourceLabel(label);
+    if (!slug) {
+      return res.status(400).json({ error: 'Nome do grupo inválido' });
+    }
+
+    const createdBy = req.user?.id || req.user?.email || 'admin';
+    const ownerId = `${SOURCE_OWNER_PREFIX}${channel}:${slug}`;
+    const existing = await referralProgramStateService.getPersonalCodeForOwner(ownerId);
+    const item = existing || await referralProgramStateService.ensurePersonalCode(ownerId, generatePersonalCode, {
+      type: 'driver_referral',
+      attempts: MAX_INVITE_CODE_ATTEMPTS,
+      sourceFields: { sourceKind: 'group', label, channel, createdBy, visitCount: 0 }
+    });
+
+    logStructured('info', 'Auditoria referral invite', {
+      service: 'referral-programs',
+      action: existing ? 'referral_programs.source_code.reuse' : 'referral_programs.source_code.create',
+      entity: { type: 'referral_personal_code', id: item.code },
+      operator: buildAuditOperator(req.user || {}),
+      channel
+    });
+
+    return res.status(existing ? 200 : 201).json({ success: true, created: !existing, source: buildSourceCodeRow(item) });
+  } catch (error) {
+    logError(error, 'Erro ao criar link de grupo', { service: 'referral-programs' });
+    return res.status(error.statusCode || 500).json({
+      error: error.statusCode ? error.message : 'Erro ao criar link de grupo',
+      code: error.code || undefined
+    });
+  }
+});
+
 router.get('/summary', authenticateJWT, requireRole(ADMIN_ROLES), async (_req, res) => {
   try {
     const [config, campaigns, invites, passengerBenefits, personalCodes] = await Promise.all([
@@ -1571,7 +1690,7 @@ router.get('/summary', authenticateJWT, requireRole(ADMIN_ROLES), async (_req, r
         }))
       },
       // Códigos pessoais: quantas vezes cada um compartilhou e quantos entraram.
-      personalCodes: [...personalCodes]
+      personalCodes: personalCodes.filter((item) => !item.sourceKind)
         .sort((a, b) => (b.acceptedCount - a.acceptedCount) || (b.shareCount - a.shareCount))
         .slice(0, 100)
         .map((item) => ({
