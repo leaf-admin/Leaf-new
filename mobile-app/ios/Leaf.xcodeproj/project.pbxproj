@@ -20,6 +20,7 @@
 		3DCB0EF04A90481A809B621B /* horn.wav in Resources */ = {isa = PBXBuildFile; fileRef = C40C34B7254B4AD0A5A711A6 /* horn.wav */; };
 		3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */; };
 		3EE614912FFA4AA0A9CA0C64 /* LeafFaceEmbeddingModule.m in Sources */ = {isa = PBXBuildFile; fileRef = 79CA3003C57A449FA0952712 /* LeafFaceEmbeddingModule.m */; };
+		56A65927B0FA2834ED6369C7 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22A4085CE5AF9BDFA8F381D8 /* SceneDelegate.swift */; };
 		57ECE3DFA49049B18B0BBA18 /* LeafRideActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = D19C57DEAE98491A992BF0F6 /* LeafRideActivityAttributes.swift */; };
 		59391FFF9BE24BB5A2B98363 /* LeafRideActivityWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8574948FF1F840E7A79D3A3F /* LeafRideActivityWidget.swift */; };
 		5EB4822E2E47EF2EF9FC18BF /* Pods_Leaf.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 3CBFC6EF50E514B4A5DD6BCF /* Pods_Leaf.framework */; };
@@ -65,6 +66,7 @@
 		13B07F961A680F5B00A75B9A /* Leaf.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Leaf.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = Leaf/Images.xcassets; sourceTree = "<group>"; };
 		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = Leaf/Info.plist; sourceTree = "<group>"; };
+		22A4085CE5AF9BDFA8F381D8 /* SceneDelegate.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Leaf/SceneDelegate.swift; sourceTree = "<group>"; };
 		3CBFC6EF50E514B4A5DD6BCF /* Pods_Leaf.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_Leaf.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		5007C290CE094343B79AAED0 /* LeafAwsLivenessModule.swift */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.swift; name = LeafAwsLivenessModule.swift; path = Leaf/LeafAwsLivenessModule.swift; sourceTree = "<group>"; };
 		5145ED1A1CB5476487774F15 /* Inter_300Light.ttf */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = Inter_300Light.ttf; path = "../../node_modules/@expo-google-fonts/inter/300Light/Inter_300Light.ttf"; sourceTree = "<group>"; };
@@ -141,6 +143,7 @@
 				079CD5E50F674F46B5718A0A /* LeafMaterialView.m */,
 				0882C4C938DE42E5A5B89A4E /* LeafVoiceGuidance.swift */,
 				E243C58BC61942AA8DA91ADB /* LeafVoiceGuidance.m */,
+				22A4085CE5AF9BDFA8F381D8 /* SceneDelegate.swift */,
 			);
 			name = Leaf;
 			sourceTree = "<group>";
@@ -633,6 +636,7 @@
 				184BA88472364ABEB0C4DEAB /* LeafMaterialView.m in Sources */,
 				3B155D9914C44CB3A3821CA9 /* LeafVoiceGuidance.swift in Sources */,
 				06E7EABA633340589FB9B02A /* LeafVoiceGuidance.m in Sources */,
+				56A65927B0FA2834ED6369C7 /* SceneDelegate.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -658,7 +662,7 @@
 				CODE_SIGN_ENTITLEMENTS = Leaf/Leaf.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 53;
+				CURRENT_PROJECT_VERSION = 54;
 				DEVELOPMENT_TEAM = DTA8W5KA5D;
 				ENABLE_BITCODE = NO;
 				GCC_PREPROCESSOR_DEFINITIONS = (
@@ -697,7 +701,7 @@
 				CODE_SIGN_ENTITLEMENTS = Leaf/Leaf.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 53;
+				CURRENT_PROJECT_VERSION = 54;
 				DEVELOPMENT_TEAM = DTA8W5KA5D;
 				INFOPLIST_FILE = Leaf/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -728,7 +732,7 @@
 				CODE_SIGN_ENTITLEMENTS = LeafRideActivityWidget/LeafRideActivityWidget.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 53;
+				CURRENT_PROJECT_VERSION = 54;
 				DEVELOPMENT_TEAM = DTA8W5KA5D;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"DEBUG=1",
@@ -923,7 +927,7 @@
 				CODE_SIGN_ENTITLEMENTS = LeafRideActivityWidget/LeafRideActivityWidget.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 53;
+				CURRENT_PROJECT_VERSION = 54;
 				DEVELOPMENT_TEAM = DTA8W5KA5D;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LeafRideActivityWidget/Info.plist;

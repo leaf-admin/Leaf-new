@@ -435,6 +435,8 @@ module.exports = {
         "./plugins/withLeafRideOverlay",
         "./plugins/withLeafMaterial",
         "./plugins/withLeafNotificationIcon",
+        // iOS 27 SDK: sem ciclo de cenas o app fecha ao abrir (2026-11-11).
+        "./plugins/withSceneLifecycle",
         [
             "expo-notifications",
             {
