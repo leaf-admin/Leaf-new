@@ -8,6 +8,7 @@ const firebaseConfig = require('../firebase-config');
 const rioBairros = require('../config/rio-bairros.json');
 const { authenticateSupport, requireSupportRoles } = require('../middleware/support-auth');
 const { logStructured, logError } = require('../utils/logger');
+const waitlistReadCache = require('../services/waitlist-admin-read-cache');
 
 const router = express.Router();
 
@@ -139,6 +140,7 @@ router.post('/api/public/region-interest', formLimiter, requireSiteOrigin, dropH
       { merge: true }
     );
     await batch.commit();
+    await waitlistReadCache.invalidate();
     logStructured('info', 'Pedido de região pelo site', { service: 'public-site', regionKey: key, role });
     return res.status(201).json({ success: true });
   } catch (error) {

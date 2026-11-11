@@ -92,6 +92,7 @@ function createDriverEntryWaitlistService({
   serverTimestamp,
   loadCityConfig = () => require('./city-activation-state-service').getConfig(),
   getNotifier = () => require('./waitlist-notification-service'),
+  getReadCache = () => require('./waitlist-admin-read-cache'),
   now = () => new Date().toISOString()
 } = {}) {
   // Idempotente: se o motorista já tem entrada pendente, devolve a mesma posição.
@@ -152,6 +153,11 @@ function createDriverEntryWaitlistService({
       waitListPriority: 'normal',
       waitListPriorityWeight: 1
     }, { merge: true });
+
+    // A página Waitlist do painel guarda as leituras por 2 min; a entrada nova aparece na hora.
+    try {
+      await getReadCache().invalidate();
+    } catch (_error) { /* o cache expira sozinho */ }
 
     try {
       await getNotifier().dispatch(driverId, JOINED_EVENT, {

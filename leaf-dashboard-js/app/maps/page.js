@@ -105,7 +105,9 @@ export default function MapsPage() {
       }
     };
     load();
-    const timer = setInterval(load, 30000);
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") load();
+    }, 30000);
     return () => {
       mounted = false;
       clearInterval(timer);

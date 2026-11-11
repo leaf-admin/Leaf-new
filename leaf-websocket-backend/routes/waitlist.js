@@ -9,6 +9,7 @@ const waitlistNotificationService = require('../services/waitlist-notification-s
 const { WAITLIST_EVENTS } = require('../services/waitlist-notification-service');
 const { authenticateSupport, requireSupportRoles } = require('../middleware/support-auth');
 const { isEntryReady } = require('../services/driver-entry-waitlist-service');
+const waitlistReadCache = require('../services/waitlist-admin-read-cache');
 const {
   isLaunchFeatureEnabled,
   buildLaunchFeatureDisabledPayload
@@ -579,6 +580,17 @@ const ensureCorsHeaders = (req, res, next) => {
 // OPTIONS /api/waitlist/landing - Preflight CORS
 router.options('/api/waitlist/landing', corsWaitlist);
 
+// Toda alteração bem-sucedida na fila limpa o cache curto das leituras do painel.
+const WAITLIST_READ_ONLY_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+router.use((req, res, next) => {
+  if (!WAITLIST_READ_ONLY_METHODS.has(req.method) && String(req.path || '').startsWith('/api/waitlist')) {
+    res.on('finish', () => {
+      if (res.statusCode < 400) waitlistReadCache.invalidate();
+    });
+  }
+  next();
+});
+
 // POST /api/waitlist/landing - Registrar na lista de espera da landing page (público)
 // Aplicar middlewares de segurança na ordem: CORS -> rate limit -> origem -> validação -> duplicatas -> ensure CORS
 router.post('/api/waitlist/landing', 
@@ -982,17 +994,29 @@ router.get('/api/waitlist/drivers', authenticateSupport, requireSupportRoles(WAI
       waitListQuery = waitListQuery.where('cityKey', '==', cityKeyFilter);
     }
 
+    const { value, cache } = await waitlistReadCache.read(
+      'drivers',
+      { status, city: cityKeyFilter || '', page, limit },
+      async () => {
     const waitListSnapshot = await waitListQuery.get();
     const sortedWaitListDocs = waitListSnapshot.docs.sort(compareWaitlistDocsForQueue);
     const waitListDocs = sortedWaitListDocs.slice(offset, offset + parseInt(limit, 10));
+
+    // Perfis da página em uma chamada só (antes, uma leitura por motorista em sequência).
+    const userRefs = waitListDocs
+      .map((doc) => doc.data().driverId)
+      .filter(Boolean)
+      .map((driverId) => admin.firestore().collection('users').doc(String(driverId)));
+    const userSnapshots = userRefs.length ? await admin.firestore().getAll(...userRefs) : [];
+    const usersById = new Map(userSnapshots.map((snapshot) => [snapshot.id, snapshot]));
 
     const drivers = [];
     for (const doc of waitListDocs) {
       const waitListData = doc.data();
       
       // Buscar dados do motorista
-      const userSnapshot = await admin.firestore().collection('users').doc(waitListData.driverId).get();
-      if (userSnapshot.exists) {
+      const userSnapshot = usersById.get(String(waitListData.driverId));
+      if (userSnapshot && userSnapshot.exists) {
         const userData = userSnapshot.data();
         drivers.push({
           id: doc.id,
@@ -1024,30 +1048,26 @@ router.get('/api/waitlist/drivers', authenticateSupport, requireSupportRoles(WAI
       }
     }
 
-    // Buscar total de motoristas na wait list
-    let totalQuery = admin.firestore()
-      .collection('waitList')
-      .where('status', '==', status);
+    // O total vem da mesma leitura (antes a fila era lida de novo só para contar).
+    const total = waitListSnapshot.size;
 
-    if (cityKeyFilter) {
-      totalQuery = totalQuery.where('cityKey', '==', cityKeyFilter);
-    }
-
-    const totalSnapshot = await totalQuery.get();
-
-    res.json({
+    return {
       drivers,
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
-        total: totalSnapshot.size,
-        pages: Math.ceil(totalSnapshot.size / limit)
+        total,
+        pages: Math.ceil(total / limit)
       },
       filters: {
         status,
         city: cityKeyFilter || null
       }
-    });
+    };
+      }
+    );
+    res.set('X-Leaf-Waitlist-Cache', cache);
+    res.json(value);
 
   } catch (error) {
     logger.error('Erro ao listar motoristas da wait list:', error);
@@ -1471,6 +1491,17 @@ router.put('/api/waitlist/position', authenticateSupport, requireSupportRoles(WA
 // GET /api/waitlist/stats - Estatísticas da wait list (admin)
 router.get('/api/waitlist/stats', authenticateSupport, requireSupportRoles(WAITLIST_ADMIN_ROLES), async (req, res) => {
   try {
+    const { value, cache } = await waitlistReadCache.read('stats', {}, loadWaitlistStats);
+    res.set('X-Leaf-Waitlist-Cache', cache);
+    res.json(value);
+  } catch (error) {
+    logger.error('Erro ao buscar estatísticas da wait list:', error);
+    res.status(500).json({ error: 'Erro interno do servidor' });
+  }
+});
+
+// Uma leitura por status (antes eram duas) e a landing uma vez; o resultado fica no cache curto.
+async function loadWaitlistStats() {
     // Buscar configurações
     const configSnapshot = await admin.firestore().collection('systemConfig').doc('waitList').get();
     const config = configSnapshot.exists ? configSnapshot.data() : {
@@ -1480,26 +1511,14 @@ router.get('/api/waitlist/stats', authenticateSupport, requireSupportRoles(WAITL
     };
 
     // Buscar estatísticas da wait list
-    const pendingSnapshot = await admin.firestore()
-      .collection('waitList')
-      .where('status', '==', 'pending')
-      .get();
-
-    const approvedSnapshot = await admin.firestore()
-      .collection('waitList')
-      .where('status', '==', 'approved')
-      .get();
-
-    const rejectedSnapshot = await admin.firestore()
-      .collection('waitList')
-      .where('status', '==', 'rejected')
-      .get();
-
-    const [pendingCitySnapshot, approvedCitySnapshot, rejectedCitySnapshot] = await Promise.all([
+    const [pendingSnapshot, approvedSnapshot, rejectedSnapshot] = await Promise.all([
       admin.firestore().collection('waitList').where('status', '==', 'pending').get(),
       admin.firestore().collection('waitList').where('status', '==', 'approved').get(),
       admin.firestore().collection('waitList').where('status', '==', 'rejected').get()
     ]);
+    const pendingCitySnapshot = pendingSnapshot;
+    const approvedCitySnapshot = approvedSnapshot;
+    const rejectedCitySnapshot = rejectedSnapshot;
     const landingSnapshot = await admin.firestore()
       .collection('waitlist_landing')
       .get()
@@ -1584,7 +1603,7 @@ router.get('/api/waitlist/stats', authenticateSupport, requireSupportRoles(WAITL
       })
       .sort((a, b) => String(a.cityLabel || '').localeCompare(String(b.cityLabel || ''), 'pt-BR'));
 
-    res.json({
+    return {
       config,
       stats: {
         pending: pendingSnapshot.size,
@@ -1608,13 +1627,8 @@ router.get('/api/waitlist/stats', authenticateSupport, requireSupportRoles(WAITL
         }
       },
       byCity
-    });
-
-  } catch (error) {
-    logger.error('Erro ao buscar estatísticas da wait list:', error);
-    res.status(500).json({ error: 'Erro interno do servidor' });
-  }
-});
+    };
+}
 
 // ==================== LISTA DE ESPERA DA LANDING PAGE (DASHBOARD) ====================
 
@@ -1631,55 +1645,20 @@ router.get('/api/waitlist/landing/list', authenticateSupport, requireSupportRole
       status // 'pending', 'contacted', 'converted', 'all'
     } = req.query;
 
-    const firestore = admin.firestore();
-    let query = firestore.collection('waitlist_landing').orderBy('timestamp', 'desc');
-
-    // Aplicar filtro de status
-    if (status && status !== 'all') {
-      query = query.where('status', '==', status);
-    }
-
-    // Buscar todos os documentos
-    const snapshot = await query.get();
-    
-    let waitlist = [];
-    snapshot.forEach(doc => {
-      const data = doc.data();
-      waitlist.push({
-        id: doc.id,
-        nome: data.nome || '',
-        sobrenome: data.sobrenome || '', // Pode não existir, será extraído do nome se necessário
-        celular: data.celular || '',
-        cidade: data.cidade || '',
-        status: data.status || 'pending',
-        role: data.role || 'driver',
-        userType: data.userType || data.role || 'driver',
-        acquisitionChannel: data.acquisitionChannel || 'driver_waitlist_landing',
-        timestamp: data.timestamp ? data.timestamp.toDate().toISOString() : null,
-        origem: data.origem || 'landing_page',
-        ip: data.ip || '',
-        userAgent: data.userAgent || ''
-      });
-    });
-
-    // Extrair sobrenome do nome se não existir campo separado
-    waitlist = waitlist.map(item => {
-      if (!item.sobrenome && item.nome) {
-        const nameParts = item.nome.trim().split(/\s+/);
-        if (nameParts.length > 1) {
-          item.nome = nameParts[0];
-          item.sobrenome = nameParts.slice(1).join(' ');
-        } else {
-          item.sobrenome = '';
-        }
-      }
-      return item;
-    });
+    // A coleção inteira é lida uma vez e fica no cache curto; busca e paginação usam a cópia.
+    const statusKey = status && status !== 'all' ? String(status) : 'all';
+    const { value: cachedRows, cache } = await waitlistReadCache.read(
+      'landing',
+      { status: statusKey },
+      () => loadLandingRows(statusKey)
+    );
+    res.set('X-Leaf-Waitlist-Cache', cache);
+    let waitlist = cachedRows.map((item) => ({ ...item }));
 
     // Aplicar busca (nome, sobrenome, celular, cidade)
     if (search) {
       const searchLower = search.toLowerCase();
-      waitlist = waitlist.filter(item => 
+      waitlist = waitlist.filter(item =>
         item.nome.toLowerCase().includes(searchLower) ||
         item.sobrenome.toLowerCase().includes(searchLower) ||
         item.celular.includes(search) ||
@@ -1720,7 +1699,6 @@ router.get('/api/waitlist/landing/list', authenticateSupport, requireSupportRole
         totalPages: Math.ceil(total / limit)
       }
     });
-
   } catch (error) {
     logger.error('❌ Erro ao listar waitlist:', error);
     res.status(500).json({
@@ -1729,6 +1707,50 @@ router.get('/api/waitlist/landing/list', authenticateSupport, requireSupportRole
     });
   }
 });
+
+async function loadLandingRows(statusKey) {
+    let query = admin.firestore().collection('waitlist_landing').orderBy('timestamp', 'desc');
+    if (statusKey !== 'all') {
+      query = query.where('status', '==', statusKey);
+    }
+    const snapshot = await query.get();
+
+    let waitlist = [];
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      waitlist.push({
+        id: doc.id,
+        nome: data.nome || '',
+        sobrenome: data.sobrenome || '', // Pode não existir, será extraído do nome se necessário
+        celular: data.celular || '',
+        cidade: data.cidade || '',
+        status: data.status || 'pending',
+        role: data.role || 'driver',
+        userType: data.userType || data.role || 'driver',
+        acquisitionChannel: data.acquisitionChannel || 'driver_waitlist_landing',
+        timestamp: data.timestamp ? data.timestamp.toDate().toISOString() : null,
+        origem: data.origem || 'landing_page',
+        ip: data.ip || '',
+        userAgent: data.userAgent || ''
+      });
+    });
+
+    // Extrair sobrenome do nome se não existir campo separado
+    waitlist = waitlist.map(item => {
+      if (!item.sobrenome && item.nome) {
+        const nameParts = item.nome.trim().split(/\s+/);
+        if (nameParts.length > 1) {
+          item.nome = nameParts[0];
+          item.sobrenome = nameParts.slice(1).join(' ');
+        } else {
+          item.sobrenome = '';
+        }
+      }
+      return item;
+    });
+
+    return waitlist;
+}
 
 /**
  * PATCH /api/waitlist/landing/:id/status - Atualizar status de um cadastro
