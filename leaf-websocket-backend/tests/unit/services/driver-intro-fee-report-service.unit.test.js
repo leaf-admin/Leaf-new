@@ -53,15 +53,37 @@ describe('driver intro fee report', () => {
     );
     const redis = { mget: jest.fn().mockResolvedValue([null, null]) };
 
-    const report = await getDriverIntroFeeReport({ firestore, redis, env: { DRIVER_INTRO_FEE_ENABLED: 'true' } });
+    const report = await getDriverIntroFeeReport({
+      firestore, redis, env: { DRIVER_INTRO_FEE_ENABLED: 'true' }, nowMs: Date.parse('2026-11-20T12:00:00.000Z')
+    });
 
     expect(firestore.collection).not.toHaveBeenCalledWith('sandbox_driver_intro_fee_states');
-    expect(report.policy).toEqual({ enabled: true, rideLimit: 25, feeCents: 99, paymentFeeIncluded: true, pixExcessChargedToDriver: true });
-    expect(report.summary).toEqual({ drivers: 2, active: 1, finished: 1, needsReview: 0, ridesUsed: 28 });
-    expect(report.drivers[0]).toEqual({
-      driverId: 'driver-2', name: 'Ana Lima', ridesUsed: 3, ridesRemaining: 22, inRide: false, status: 'active'
+    expect(report.policy).toEqual({
+      enabled: true,
+      rideLimit: null,
+      eligibleUntil: '2026-12-01T03:00:00.000Z',
+      feeCents: 99,
+      paymentFeeIncluded: true,
+      pixExcessChargedToDriver: true
     });
-    expect(report.drivers[1]).toMatchObject({ driverId: 'driver-1', name: null, ridesRemaining: 0, status: 'finished' });
+    // Date rule: 25 counted rides no longer end the promotion for the driver.
+    expect(report.summary).toEqual({ drivers: 2, active: 2, finished: 0, needsReview: 0, ridesUsed: 28 });
+    expect(report.drivers[0]).toEqual({
+      driverId: 'driver-1', name: null, ridesUsed: 25, ridesRemaining: null, inRide: false, status: 'active'
+    });
+    expect(report.drivers[1]).toMatchObject({ driverId: 'driver-2', name: 'Ana Lima', ridesUsed: 3, status: 'active' });
+  });
+
+  it('marks every driver finished and the promotion off after 30/11 in Brasília', async () => {
+    const { firestore } = setup([docFor(seed('driver-1', 3))]);
+    const redis = { mget: jest.fn().mockResolvedValue([null]) };
+
+    const report = await getDriverIntroFeeReport({
+      firestore, redis, env: { DRIVER_INTRO_FEE_ENABLED: 'true' }, nowMs: Date.parse('2026-12-01T03:00:00.000Z')
+    });
+
+    expect(report.policy.enabled).toBe(false);
+    expect(report.drivers[0]).toMatchObject({ ridesUsed: 3, status: 'finished' });
   });
 
   it('prefers the live counter and shows a ride still being counted', async () => {
@@ -81,7 +103,7 @@ describe('driver intro fee report', () => {
     const report = await getDriverIntroFeeReport({ firestore, redis, env: {} });
 
     expect(redis.mget).toHaveBeenCalledWith(keyForDriver('driver-1'));
-    expect(report.drivers[0]).toMatchObject({ ridesUsed: 5, ridesRemaining: 20, inRide: true });
+    expect(report.drivers[0]).toMatchObject({ ridesUsed: 5, ridesRemaining: null, inRide: true });
   });
 
   it.each([

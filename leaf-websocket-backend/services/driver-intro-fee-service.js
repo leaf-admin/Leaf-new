@@ -1,4 +1,4 @@
-const { DRIVER_INTRO_FEE_POLICY, buildDriverIntroFeeContext, normalizeDriverIntroFeeContext } = require('./driver-intro-fee-policy');
+const { DRIVER_INTRO_FEE_POLICY, buildDriverIntroFeeContext, normalizeDriverIntroFeeContext, isDriverIntroFeeOpen } = require('./driver-intro-fee-policy');
 const { buildSeedState, mergeCheckpoint, normalizeState, parseObject, fail } = require('./driver-intro-fee-state');
 const { INSTALL_STATE, RECORD_COMPLETION, ACK_CHECKPOINT } = require('./driver-intro-fee-redis');
 const { resolveFinancialContext } = require('./financial-runtime-context');
@@ -33,14 +33,17 @@ function acceptedContext(booking = {}, driverId = booking.driverId || booking.dr
 }
 
 class DriverIntroFeeService {
-  constructor({ getFirestore, getAuth, env = () => process.env } = {}) {
+  constructor({ getFirestore, getAuth, env = () => process.env, now = () => Date.now() } = {}) {
     this.getFirestore = getFirestore || (() => require('../firebase-config').getFirestore());
     this.getAuth = getAuth || (() => require('firebase-admin').auth());
     this.env = env;
+    this.now = now;
     this.checkpointCursors = { operational: '0', sandbox: '0' };
   }
 
-  enabled() { return this.env().DRIVER_INTRO_FEE_ENABLED === 'true'; }
+  // After eligibleUntil no new offer carries the promotion; rides already accepted settle
+  // with their stored context and counters keep closing out.
+  enabled() { return this.env().DRIVER_INTRO_FEE_ENABLED === 'true' && isDriverIntroFeeOpen(this.now()); }
 
   config() {
     const env = this.env();
@@ -113,8 +116,9 @@ class DriverIntroFeeService {
       // Active rides cannot release their slot through this path.
       state = await this.recordCompletion(redis, driverId, state.inflightBookingId, namespace);
     }
-    if (state.reviewRequiredBookingId) fail('DRIVER_INTRO_FEE_HISTORY_REVIEW_REQUIRED');
-    return buildDriverIntroFeeContext(state);
+    // The date rule does not depend on the counter, so a ride awaiting history review
+    // no longer holds the driver's offers.
+    return buildDriverIntroFeeContext({ ...state, offeredAt: new Date(this.now()).toISOString() });
   }
 
   async recordCompletion(redis, driverId, bookingId, namespace = 'operational') {

@@ -1,6 +1,7 @@
 const {
   DRIVER_INTRO_FEE_POLICY,
-  buildDriverIntroFeeContext
+  buildDriverIntroFeeContext,
+  normalizeDriverIntroFeeContext
 } = require('../../../services/driver-intro-fee-policy');
 const {
   buildRideFinancialContract,
@@ -35,6 +36,33 @@ describe('approved first 25 destination completions policy', () => {
 
   it.each([25, 26, 1000])('returns to the existing table after %i completions', (count) => {
     expect(context(count)).toMatchObject({ eligible: false, operationalFeeCents: null, leafFeeCents: null });
+  });
+
+  it.each([0, 25, 1000])('grants every ride offered until 30/11 in Brasília with %i completions', (count) => {
+    expect(context(count, { offeredAt: '2026-12-01T02:59:59.999Z' })).toMatchObject({
+      eligible: true,
+      operationalFeeCents: 99,
+      leafFeeCents: 49,
+      offeredAt: '2026-12-01T02:59:59.999Z',
+      eligibleUntil: '2026-12-01T03:00:00.000Z'
+    });
+  });
+
+  it('returns to the existing table for a ride offered from 01/12 in Brasília', () => {
+    expect(context(0, { offeredAt: '2026-12-01T03:00:00.000Z' }))
+      .toMatchObject({ eligible: false, operationalFeeCents: null, leafFeeCents: null });
+  });
+
+  it.each(['not-a-date', 123, {}])('rejects an unreadable offer time %p', (offeredAt) => {
+    expect(() => context(0, { offeredAt })).toThrow('DRIVER_INTRO_FEE_CONTEXT_INVALID');
+  });
+
+  it('settles a stored date context by its offer time, not the settlement time', () => {
+    const stored = JSON.parse(JSON.stringify(context(30, { offeredAt: '2026-11-30T23:00:00.000Z' })));
+    expect(normalizeDriverIntroFeeContext(stored)).toMatchObject({ eligible: true, operationalFeeCents: 99, qualifiedCompletedRides: 30 });
+    const legacy = JSON.parse(JSON.stringify(context(30)));
+    expect(normalizeDriverIntroFeeContext(legacy)).toMatchObject({ eligible: false, operationalFeeCents: null });
+    expect(legacy).not.toHaveProperty('offeredAt');
   });
 
   it.each([-1, 0.5, '0', null, undefined, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1])(
