@@ -31,6 +31,10 @@ set -euo pipefail
 #   REMOTE_BASE_COMPOSE=docker-compose.yml
 #   REMOTE_EXTRA_COMPOSE=""          (host overlay, e.g. docker-compose.santiago.yml)
 #   GATEWAY_SERVICES="websocket-gateway-2 websocket-gateway-3 websocket-gateway-4"
+#   ROLLBACK_TO_BACKUP=""            (latest | modular-rollout-YYYYMMDD-HHMMSS: no deploy;
+#                                     restores that backup's source, compose and images
+#                                     exactly like the automatic rollback, then exits;
+#                                     ROLLBACK_DRY_RUN=true only shows what it would restore)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -46,6 +50,12 @@ PRODUCTION_RELEASE_SHA="${PRODUCTION_RELEASE_SHA:-}"
 SKIP_LOCAL_TESTS="${SKIP_LOCAL_TESTS:-false}"
 VALIDATE_LOCAL_RUNTIME_CONFIG="${VALIDATE_LOCAL_RUNTIME_CONFIG:-true}"
 DEPLOY_TRACKED_PATHS="${DEPLOY_TRACKED_PATHS:-}"
+ROLLBACK_TO_BACKUP="${ROLLBACK_TO_BACKUP:-}"
+if [[ -n "$ROLLBACK_TO_BACKUP" && "$ROLLBACK_TO_BACKUP" != "latest" \
+  && ! "$ROLLBACK_TO_BACKUP" =~ ^modular-rollout-[0-9]{8}-[0-9]{6}$ ]]; then
+  echo "[deploy][error] ROLLBACK_TO_BACKUP must be latest or modular-rollout-YYYYMMDD-HHMMSS." >&2
+  exit 2
+fi
 GATEWAY_ONLY_DEPLOY="${GATEWAY_ONLY_DEPLOY:-false}"
 # Compose only recreates a container whose image or config changed, so rolling out the
 # same release left every gateway running (found in the 2026-10-22 mid-ride drill). A
@@ -163,30 +173,33 @@ for boolean_name in \
   fi
 done
 
-if [[ -n "$(git -C "$REPO_ROOT" status --porcelain)" ]]; then
-  echo "[deploy][error] Production deploy bloqueado: worktree contém alterações não commitadas." >&2
-  echo "[deploy][error] Crie a RC em um commit imutável e execute novamente." >&2
-  exit 2
-fi
+# A rollback restores a backup that is already on the host; it ships no release.
+if [[ -z "$ROLLBACK_TO_BACKUP" ]]; then
+  if [[ -n "$(git -C "$REPO_ROOT" status --porcelain)" ]]; then
+    echo "[deploy][error] Production deploy bloqueado: worktree contém alterações não commitadas." >&2
+    echo "[deploy][error] Crie a RC em um commit imutável e execute novamente." >&2
+    exit 2
+  fi
 
-CURRENT_BRANCH="$(git -C "$REPO_ROOT" branch --show-current)"
-RELEASE_SHA="$(git -C "$REPO_ROOT" rev-parse HEAD)"
-REMOTE_MAIN_SHA="$(git -C "$REPO_ROOT" rev-parse --verify refs/remotes/origin/main 2>/dev/null)" || {
-  echo "[deploy][error] origin/main is unavailable; refresh the remote reference first." >&2
-  exit 2
-}
+  CURRENT_BRANCH="$(git -C "$REPO_ROOT" branch --show-current)"
+  RELEASE_SHA="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+  REMOTE_MAIN_SHA="$(git -C "$REPO_ROOT" rev-parse --verify refs/remotes/origin/main 2>/dev/null)" || {
+    echo "[deploy][error] origin/main is unavailable; refresh the remote reference first." >&2
+    exit 2
+  }
 
-if [[ "$CURRENT_BRANCH" != "main" ]]; then
-  echo "[deploy][error] Production deploy must run from main." >&2
-  exit 2
-fi
-if [[ -z "$PRODUCTION_RELEASE_SHA" || "$PRODUCTION_RELEASE_SHA" != "$RELEASE_SHA" ]]; then
-  echo "[deploy][error] PRODUCTION_RELEASE_SHA must exactly match HEAD ($RELEASE_SHA)." >&2
-  exit 2
-fi
-if [[ "$RELEASE_SHA" != "$REMOTE_MAIN_SHA" ]]; then
-  echo "[deploy][error] HEAD must exactly match origin/main before deployment." >&2
-  exit 2
+  if [[ "$CURRENT_BRANCH" != "main" ]]; then
+    echo "[deploy][error] Production deploy must run from main." >&2
+    exit 2
+  fi
+  if [[ -z "$PRODUCTION_RELEASE_SHA" || "$PRODUCTION_RELEASE_SHA" != "$RELEASE_SHA" ]]; then
+    echo "[deploy][error] PRODUCTION_RELEASE_SHA must exactly match HEAD ($RELEASE_SHA)." >&2
+    exit 2
+  fi
+  if [[ "$RELEASE_SHA" != "$REMOTE_MAIN_SHA" ]]; then
+    echo "[deploy][error] HEAD must exactly match origin/main before deployment." >&2
+    exit 2
+  fi
 fi
 
 if [[ -z "$CONTABO_HOST" ]]; then
@@ -249,6 +262,63 @@ remote() {
   ssh "${SSH_OPTS[@]}" "$VPS_USER@$CONTABO_HOST" "$@"
 }
 
+restore_remote_backup() {
+  # Restores REMOTE_BACKUP_DIR: source, compose files, container images, then
+  # readiness and nginx. Used by the automatic rollback and ROLLBACK_TO_BACKUP.
+  remote "
+    set -e
+    cd '$REMOTE_BACKEND_DIR'
+    tar -xzf '$REMOTE_BACKUP_DIR/source-before.tar.gz' -C '$REMOTE_BACKEND_DIR'
+    cp '$REMOTE_BACKUP_DIR/$REMOTE_BASE_COMPOSE' '$REMOTE_BASE_COMPOSE'
+    cp '$REMOTE_BACKUP_DIR/$REMOTE_SCALE_COMPOSE' '$REMOTE_SCALE_COMPOSE'
+    cp '$REMOTE_BACKUP_DIR/$REMOTE_OPS_COMPOSE' '$REMOTE_OPS_COMPOSE'
+    if [ -n '$REMOTE_EXTRA_COMPOSE' ]; then
+      cp '$REMOTE_BACKUP_DIR/$REMOTE_EXTRA_COMPOSE' '$REMOTE_EXTRA_COMPOSE'
+    fi
+
+    while IFS='|' read -r container configured_image previous_image rollback_tag; do
+      test -n \"\$container\"
+      test -n \"\$configured_image\"
+      test -n \"\$previous_image\"
+      docker image inspect \"\$rollback_tag\" >/dev/null
+      docker image tag \"\$previous_image\" \"\$configured_image\"
+    done < '$REMOTE_BACKUP_DIR/container-images-before.txt'
+
+    compose='docker compose $REMOTE_COMPOSE_FILES'
+    for service in $GATEWAY_SERVICES websocket; do
+      \$compose up -d --no-deps --no-build --force-recreate \"\$service\"
+    done
+
+    if [ '$GATEWAY_ONLY_DEPLOY' != true ]; then
+      for service in \
+        trip-location-worker \
+        queue-worker \
+        sideeffects-worker \
+        billing-worker \
+        pricing-baseline-worker \
+        ride-health-monitor-worker; do
+        \$compose up -d --no-deps --no-build --force-recreate \"\$service\"
+      done
+    fi
+
+    elapsed=0
+    until docker exec leaf-websocket \
+      curl -fsS --max-time 10 http://127.0.0.1:3001/health/readiness >/dev/null 2>&1; do
+      if [ \"\$elapsed\" -ge '$HEALTH_TIMEOUT_SECONDS' ]; then
+        echo '[deploy][rollback][error] Readiness did not recover.' >&2
+        exit 1
+      fi
+      sleep 3
+      elapsed=\$((elapsed + 3))
+    done
+    $UPSTREAM_FN
+    write_upstream ''
+    docker exec leaf-nginx nginx -t
+    docker exec leaf-nginx nginx -s reload
+    cmp -s .env '$REMOTE_BACKUP_DIR/.env.before'
+  "
+}
+
 rollback_on_error() {
   original_status=$?
   trap - ERR
@@ -256,58 +326,7 @@ rollback_on_error() {
   if [[ "$ROLLBACK_ARMED" == "true" && "$AUTO_ROLLBACK" == "true" ]]; then
     echo "[deploy][rollback] Failure detected; restoring source, compose and container images." >&2
     set +e
-    remote "
-      set -e
-      cd '$REMOTE_BACKEND_DIR'
-      tar -xzf '$REMOTE_BACKUP_DIR/source-before.tar.gz' -C '$REMOTE_BACKEND_DIR'
-      cp '$REMOTE_BACKUP_DIR/$REMOTE_BASE_COMPOSE' '$REMOTE_BASE_COMPOSE'
-      cp '$REMOTE_BACKUP_DIR/$REMOTE_SCALE_COMPOSE' '$REMOTE_SCALE_COMPOSE'
-      cp '$REMOTE_BACKUP_DIR/$REMOTE_OPS_COMPOSE' '$REMOTE_OPS_COMPOSE'
-      if [ -n '$REMOTE_EXTRA_COMPOSE' ]; then
-        cp '$REMOTE_BACKUP_DIR/$REMOTE_EXTRA_COMPOSE' '$REMOTE_EXTRA_COMPOSE'
-      fi
-
-      while IFS='|' read -r container configured_image previous_image rollback_tag; do
-        test -n \"\$container\"
-        test -n \"\$configured_image\"
-        test -n \"\$previous_image\"
-        docker image inspect \"\$rollback_tag\" >/dev/null
-        docker image tag \"\$previous_image\" \"\$configured_image\"
-      done < '$REMOTE_BACKUP_DIR/container-images-before.txt'
-
-      compose='docker compose $REMOTE_COMPOSE_FILES'
-      for service in $GATEWAY_SERVICES websocket; do
-        \$compose up -d --no-deps --no-build --force-recreate \"\$service\"
-      done
-
-      if [ '$GATEWAY_ONLY_DEPLOY' != true ]; then
-        for service in \
-          trip-location-worker \
-          queue-worker \
-          sideeffects-worker \
-          billing-worker \
-          pricing-baseline-worker \
-          ride-health-monitor-worker; do
-          \$compose up -d --no-deps --no-build --force-recreate \"\$service\"
-        done
-      fi
-
-      elapsed=0
-      until docker exec leaf-websocket \
-        curl -fsS --max-time 10 http://127.0.0.1:3001/health/readiness >/dev/null 2>&1; do
-        if [ \"\$elapsed\" -ge '$HEALTH_TIMEOUT_SECONDS' ]; then
-          echo '[deploy][rollback][error] Readiness did not recover.' >&2
-          exit 1
-        fi
-        sleep 3
-        elapsed=\$((elapsed + 3))
-      done
-      $UPSTREAM_FN
-      write_upstream ''
-      docker exec leaf-nginx nginx -t
-      docker exec leaf-nginx nginx -s reload
-      cmp -s .env '$REMOTE_BACKUP_DIR/.env.before'
-    "
+    restore_remote_backup
     rollback_status=$?
     set -e
 
@@ -322,6 +341,41 @@ rollback_on_error() {
 }
 
 trap rollback_on_error ERR
+
+if [[ -n "$ROLLBACK_TO_BACKUP" ]]; then
+  trap - ERR
+  backup_name="$ROLLBACK_TO_BACKUP"
+  if [[ "$backup_name" == "latest" ]]; then
+    backup_name="$(remote "ls -1 '$REMOTE_BACKEND_DIR/backups' | grep -E '^modular-rollout-[0-9]{8}-[0-9]{6}\$' | sort | tail -1")"
+  fi
+  [[ "$backup_name" =~ ^modular-rollout-[0-9]{8}-[0-9]{6}$ ]] || { echo "[deploy][error] No rollout backup found on the host." >&2; exit 2; }
+  REMOTE_BACKUP_DIR="$REMOTE_BACKEND_DIR/backups/$backup_name"
+  current_sha="$(remote "docker inspect leaf-websocket --format '{{index .Config.Labels \"org.opencontainers.image.revision\"}}'" || true)"
+  target_sha="$(remote "set -e
+    test -s '$REMOTE_BACKUP_DIR/source-before.tar.gz'
+    test -s '$REMOTE_BACKUP_DIR/container-images-before.txt'
+    tag=\$(grep '^leaf-websocket|' '$REMOTE_BACKUP_DIR/container-images-before.txt' | cut -d'|' -f4)
+    docker image inspect --format '{{index .Config.Labels \"org.opencontainers.image.revision\"}}' \"\$tag\"")" || {
+    echo "[deploy][error] Backup $backup_name is incomplete or its rollback images are gone." >&2
+    exit 2
+  }
+  echo "[deploy][rollback] Backup: $REMOTE_BACKUP_DIR"
+  echo "[deploy][rollback] Running ${current_sha:-unknown} -> restoring ${target_sha:-unknown}"
+  if [[ -n "$target_sha" && "$target_sha" == "$current_sha" ]]; then
+    echo "[deploy][error] That backup holds the release already running; name an older backup." >&2
+    exit 2
+  fi
+  if [[ "${ROLLBACK_DRY_RUN:-false}" == "true" ]]; then
+    echo "[deploy][rollback] Dry run: nothing was changed."
+    exit 0
+  fi
+  if restore_remote_backup; then
+    echo "[deploy][rollback] Rollback completed: ${target_sha:-unknown} is live. main is now ahead of production."
+    exit 0
+  fi
+  echo "[deploy][rollback][error] Rollback failed; backup: $REMOTE_BACKUP_DIR" >&2
+  exit 1
+fi
 
 if [[ -n "$DEPLOY_TRACKED_PATHS" ]]; then
   RSYNC_TRANSFER_ARGS+=(--from0 --files-from="$TRACKED_MANIFEST")
