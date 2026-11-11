@@ -556,11 +556,11 @@ function fixtureForApiPath(apiPath, method) {
   if (apiPath === "/promotions/driver-intro-fee") {
     return json({
       success: true,
-      policy: { enabled: true, rideLimit: 25, feeCents: 99, paymentFeeIncluded: true, pixExcessChargedToDriver: true },
+      policy: { enabled: true, rideLimit: null, eligibleUntil: "2026-12-01T03:00:00.000Z", feeCents: 99, paymentFeeIncluded: true, pixExcessChargedToDriver: true },
       summary: { drivers: 2, active: 1, finished: 0, needsReview: 1, ridesUsed: 7 },
       drivers: [
-        { driverId: "driver-review", name: "Motorista Revisao", ridesUsed: 4, ridesRemaining: 21, inRide: false, status: "review" },
-        { driverId: "driver-active", name: "Motorista Promocao", ridesUsed: 3, ridesRemaining: 22, inRide: true, status: "active" },
+        { driverId: "driver-review", name: "Motorista Revisao", ridesUsed: 4, ridesRemaining: null, inRide: false, status: "review" },
+        { driverId: "driver-active", name: "Motorista Promocao", ridesUsed: 3, ridesRemaining: null, inRide: true, status: "active" },
       ],
       liveCounters: false,
       truncated: false,
@@ -975,7 +975,7 @@ async function assertFinancialSimulatorRequiresExplicitFlag(page) {
 async function assertDriverIntroFeeContract(page) {
   await page.goto("/promotions", { waitUntil: "domcontentloaded" });
   await page.locator("body", { hasText: "Motorista Promocao" }).waitFor({ timeout: 15000 });
-  await page.locator("body", { hasText: "25 corridas a R$" }).waitFor({ timeout: 15000 });
+  await page.locator("body", { hasText: "todas as corridas até 30/11/2026 a R$" }).waitFor({ timeout: 15000 });
   await page.locator("body", { hasText: "corrida em andamento" }).waitFor({ timeout: 15000 });
   await page.locator("body", { hasText: "Contadores ao vivo indisponíveis" }).waitFor({ timeout: 15000 });
   log("promotions renders driver intro fee tracking ok");
