@@ -65,7 +65,9 @@ export default function UsersPage() {
     };
 
     load();
-    const timer = setInterval(load, USERS_REFRESH_MS);
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") load();
+    }, USERS_REFRESH_MS);
     return () => {
       mounted = false;
       clearInterval(timer);

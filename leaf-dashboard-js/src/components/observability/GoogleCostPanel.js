@@ -56,7 +56,9 @@ export default function GoogleCostPanel() {
       }
     };
     load();
-    const timer = setInterval(load, REFRESH_MS);
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") load();
+    }, REFRESH_MS);
     return () => {
       mounted = false;
       clearInterval(timer);

@@ -125,7 +125,9 @@ export default function MarketplaceMetricsPage() {
     };
 
     load();
-    const timer = setInterval(load, DASHBOARD_REFRESH_MS);
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") load();
+    }, DASHBOARD_REFRESH_MS);
     return () => {
       mounted = false;
       clearInterval(timer);
