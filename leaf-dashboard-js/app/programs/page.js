@@ -36,6 +36,13 @@ const defaultCampaignForm = {
   endAt: "",
 };
 
+const SOURCE_CHANNEL_LABELS = {
+  facebook_group: "Grupo do Facebook",
+  whatsapp_group: "Grupo do WhatsApp",
+  telegram_group: "Grupo do Telegram",
+  outro: "Outro",
+};
+
 function toNumber(value, fallback = 0) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -99,6 +106,9 @@ export default function ProgramsPage() {
   const [campaignStatusFilter, setCampaignStatusFilter] = useState("all");
 
   const [campaignForm, setCampaignForm] = useState(defaultCampaignForm);
+  const [sources, setSources] = useState([]);
+  const [sourceForm, setSourceForm] = useState({ label: "", channel: "facebook_group" });
+  const [savingSource, setSavingSource] = useState(false);
   const allowedRoles = useMemo(() => ["admin", "super-admin", "manager", "development"], []);
   const roleMessage = roleBlockedMessage(user, allowedRoles);
   const featureMessage = runtimeFeatureMessage(runtimeFlags, "referralProgramsEnabled", "Programas de convite");
@@ -140,12 +150,14 @@ export default function ProgramsPage() {
         return;
       }
 
-      const [summaryData, configData, campaignsData] = await Promise.all([
+      const [summaryData, configData, campaignsData, sourcesData] = await Promise.all([
         leafAPI.getReferralProgramsSummary(),
         leafAPI.getReferralProgramsConfig(),
         leafAPI.listReferralCampaigns(),
+        leafAPI.listReferralSources().catch(() => null),
       ]);
 
+      setSources(sourcesData?.sources || []);
       setSummary(summaryData?.summary || null);
       setConfig(configData?.config || null);
       setCampaigns(campaignsData?.campaigns || []);
@@ -168,6 +180,38 @@ export default function ProgramsPage() {
         [key]: value,
       },
     }));
+  };
+
+  const createSource = async () => {
+    if (!canMutatePrograms) {
+      setError(roleMessage || featureMessage || mutationMessage || "Criação bloqueada para este perfil.");
+      return;
+    }
+    try {
+      setSavingSource(true);
+      setError("");
+      setNotice("");
+      const result = await leafAPI.createReferralSource(sourceForm);
+      setNotice(result?.created
+        ? `Link criado: ${result?.source?.link}`
+        : `Esse grupo já tinha link: ${result?.source?.link}`);
+      setSourceForm((prev) => ({ ...prev, label: "" }));
+      const sourcesData = await leafAPI.listReferralSources().catch(() => null);
+      setSources(sourcesData?.sources || []);
+    } catch (err) {
+      setError(err?.message || "Falha ao criar link do grupo");
+    } finally {
+      setSavingSource(false);
+    }
+  };
+
+  const copySourceLink = async (link) => {
+    try {
+      await navigator.clipboard?.writeText(link);
+      setNotice(`Link copiado: ${link}`);
+    } catch (_err) {
+      setNotice(link);
+    }
   };
 
   const rewardsEnabled = config?.rewardsEnabled === true;
@@ -731,6 +775,83 @@ export default function ProgramsPage() {
               </table>
             </div>
             <TechnicalDetails title="Ver payload técnico dos programas" data={{ summary, campaigns }} />
+          </Panel>
+
+          <Panel
+            className="panel-span-full"
+            title="Links de grupos"
+            subtitle="Um link por grupo de motoristas. O post no grupo é manual. Visitas conta quem abriu o link; entraram, quem aceitou o código no app; aprovados e 1ª corrida seguem essas pessoas."
+          >
+            <div className="form-grid">
+              <label className="form-field">
+                Nome do grupo
+                <input
+                  placeholder="Ex.: Motoristas de App Rio (Facebook)"
+                  value={sourceForm.label}
+                  maxLength={80}
+                  onChange={(e) => setSourceForm((prev) => ({ ...prev, label: e.target.value }))}
+                />
+              </label>
+              <label className="form-field">
+                Canal
+                <select
+                  value={sourceForm.channel}
+                  onChange={(e) => setSourceForm((prev) => ({ ...prev, channel: e.target.value }))}
+                >
+                  {Object.entries(SOURCE_CHANNEL_LABELS).map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
+              </label>
+              <button
+                onClick={createSource}
+                disabled={savingSource || !canMutatePrograms || sourceForm.label.trim().length < 3}
+              >
+                {savingSource ? "Criando..." : "Criar link do grupo"}
+              </button>
+            </div>
+            <div className="table-shell">
+              <table className="table table-compact">
+                <thead>
+                  <tr>
+                    <th>Grupo</th>
+                    <th>Canal</th>
+                    <th>Código</th>
+                    <th>Visitas</th>
+                    <th>Entraram</th>
+                    <th>Aprovados</th>
+                    <th>1ª corrida</th>
+                    <th>Última visita</th>
+                    <th>Link</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sources.length === 0 ? (
+                    <tr>
+                      <td colSpan={9}>Nenhum link de grupo criado ainda.</td>
+                    </tr>
+                  ) : (
+                    sources.map((item) => (
+                      <tr key={item.code}>
+                        <td><strong>{item.label || "-"}</strong></td>
+                        <td>{SOURCE_CHANNEL_LABELS[item.channel] || item.channel || "-"}</td>
+                        <td>{item.code}</td>
+                        <td>{item.visits ?? 0}</td>
+                        <td>{item.accepted ?? 0}</td>
+                        <td>{item.approved ?? 0}</td>
+                        <td>{item.firstRide ?? 0}</td>
+                        <td>{item.lastVisitedAt ? formatInviteDate(item.lastVisitedAt) : "-"}</td>
+                        <td>
+                          <button type="button" className="button-secondary" onClick={() => copySourceLink(item.link)}>
+                            Copiar
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </Panel>
 
           <Panel

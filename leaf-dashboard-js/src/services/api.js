@@ -858,6 +858,17 @@ class LeafApiService {
     });
   }
 
+  async listReferralSources() {
+    return this.request("/programs/referrals/sources");
+  }
+
+  async createReferralSource(payload = {}) {
+    return this.request("/programs/referrals/sources", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
   async listReferralCampaigns() {
     return this.request("/programs/referrals/campaigns");
   }
