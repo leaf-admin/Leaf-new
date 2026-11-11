@@ -19,7 +19,7 @@ module.exports.AppConfig = {
     app_description: 'O novo jeito de ir e vir',
     app_identifier: 'br.com.leaf.ride',
     ios_app_version: '1.0.12',
-    ios_build_number: '53',
+    ios_build_number: '54',
     android_app_version: 147,
     expo_owner: 'leaf-app',
     expo_slug: 'leaf',
