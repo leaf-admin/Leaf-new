@@ -218,7 +218,41 @@ NODE
     fi
   fi
 
+  assert_bundle_has_release_env "${tmp_dir}"
+
   rm -rf "${tmp_dir}"
+}
+
+# O Metro embute EXPO_PUBLIC_* no main.jsbundle. Sem elas o app sobe sem Sentry e
+# sem PostHog e ninguém vê crash nem uso. Os valores nunca são impressos.
+assert_bundle_has_release_env() {
+  local app_dir="$1"
+  local bundle_path
+  local missing
+
+  bundle_path="$(find "${app_dir}/Payload" -maxdepth 2 -path "*/Leaf.app/main.jsbundle" -type f | head -n 1)"
+  if [[ -z "${bundle_path}" ]]; then
+    echo "❌ IPA sem main.jsbundle. Não envie ao TestFlight."
+    exit 1
+  fi
+  missing="$(node - "${bundle_path}" <<'NODE'
+const fs = require('fs');
+const bundle = fs.readFileSync(process.argv[2]);
+const keys = ['EXPO_PUBLIC_API_URL', 'EXPO_PUBLIC_SENTRY_DSN', 'EXPO_PUBLIC_POSTHOG_API_KEY'];
+const missing = keys.filter((key) => {
+  const value = String(process.env[key] || '');
+  if (!value) return true;
+  return !bundle.includes(Buffer.from(value)) && !bundle.includes(Buffer.from(value, 'utf16le'));
+});
+console.log(missing.join(' '));
+NODE
+)"
+  if [[ -n "${missing}" ]]; then
+    echo "❌ main.jsbundle sem os valores do perfil ${EAS_BUILD_PROFILE:-?}: ${missing}"
+    echo "   Refaça o archive com o perfil carregado (build-local-ios.sh archive). Não envie ao TestFlight."
+    exit 1
+  fi
+  echo "✅ main.jsbundle tem API, Sentry e PostHog do perfil ${EAS_BUILD_PROFILE:-?}."
 }
 
 main() {
