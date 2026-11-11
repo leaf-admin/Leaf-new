@@ -512,6 +512,18 @@ main() {
       echo "✅ Build iOS simulator concluída em ${IOS_DERIVED_DATA_PATH}"
       ;;
     archive)
+      # O bundle JS nasce no archive: sem o perfil do eas.json o Metro embute o app
+      # sem Sentry e sem PostHog (aconteceu no 1.0.12 b54, 11/11/2026).
+      export EAS_BUILD_PROFILE="${EAS_BUILD_PROFILE:-production}"
+      export LEAF_BUILD_PROFILE="${LEAF_BUILD_PROFILE:-${EAS_BUILD_PROFILE}}"
+      export EXPO_UPDATE_CHANNEL="${EXPO_UPDATE_CHANNEL:-production}"
+      load_eas_build_profile_env
+      # Com o mapa, o hermesc tira a depuração do bundle (~6 MB a menos) e o
+      # mapa serve para o upload ao Sentry.
+      export SOURCEMAP_FILE="${SOURCEMAP_FILE:-${IOS_DERIVED_DATA_PATH}/main.jsbundle.map}"
+      mkdir -p "$(dirname "${SOURCEMAP_FILE}")"
+      echo "ℹ️  Perfil ${EAS_BUILD_PROFILE}; mapa do bundle em ${SOURCEMAP_FILE}"
+
       if [[ "${force_signed}" == "1" && "${identity_count:-0}" == "0" ]]; then
         echo "❌ FORCE_SIGNED_ARCHIVE=1 definido, mas nenhuma identidade de assinatura Apple foi encontrada."
         echo "💡 Configure certificado/provisioning local (Xcode > Settings > Accounts > Manage Certificates)."
