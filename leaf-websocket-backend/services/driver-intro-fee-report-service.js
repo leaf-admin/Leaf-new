@@ -1,4 +1,4 @@
-const { DRIVER_INTRO_FEE_POLICY } = require('./driver-intro-fee-policy');
+const { DRIVER_INTRO_FEE_POLICY, isDriverIntroFeeOpen } = require('./driver-intro-fee-policy');
 const { normalizeState } = require('./driver-intro-fee-state');
 const { keyForDriver } = require('./driver-intro-fee-service');
 
@@ -47,20 +47,19 @@ async function readDriverNames(firestore, driverIds) {
   }));
 }
 
-function buildRow(driverId, name, state) {
-  const limit = DRIVER_INTRO_FEE_POLICY.qualifyingRideLimit;
+// Since 2026-11-09 the promotion runs by date (eligibleUntil), not by ride count: the
+// counter stays as a record of rides finished at the destination (it stops at 25).
+function buildRow(driverId, name, state, promoOpen) {
   if (!state) {
     return { driverId, name, ridesUsed: null, ridesRemaining: null, inRide: false, status: 'invalid' };
   }
-  const ridesUsed = state.qualifiedCompletedRides;
-  const finished = ridesUsed >= limit;
   return {
     driverId,
     name,
-    ridesUsed,
-    ridesRemaining: Math.max(0, limit - ridesUsed),
+    ridesUsed: state.qualifiedCompletedRides,
+    ridesRemaining: null,
     inRide: Boolean(state.inflightBookingId),
-    status: state.reviewRequiredBookingId ? 'review' : (finished ? 'finished' : 'active')
+    status: state.reviewRequiredBookingId ? 'review' : (promoOpen ? 'active' : 'finished')
   };
 }
 
@@ -68,8 +67,10 @@ function buildRow(driverId, name, state) {
 async function getDriverIntroFeeReport({
   firestore = require('../firebase-config').getFirestore(),
   redis,
-  env = process.env
+  env = process.env,
+  nowMs = Date.now()
 } = {}) {
+  const promoOpen = isDriverIntroFeeOpen(nowMs);
   const snapshot = await firestore
     .collection('driver_intro_fee_states')
     .limit(REPORT_LIMIT + 1)
@@ -84,7 +85,7 @@ async function getDriverIntroFeeReport({
   const drivers = docs.map((doc, index) => {
     const checkpoint = parseState(doc.data());
     const state = checkpoint ? latestState(checkpoint, live.values[index]) : null;
-    return buildRow(driverIds[index], names.get(driverIds[index]) || null, state);
+    return buildRow(driverIds[index], names.get(driverIds[index]) || null, state, promoOpen);
   }).sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status]
     || (b.ridesUsed ?? 0) - (a.ridesUsed ?? 0));
 
@@ -92,8 +93,9 @@ async function getDriverIntroFeeReport({
   return {
     success: true,
     policy: {
-      enabled: env.DRIVER_INTRO_FEE_ENABLED === 'true',
-      rideLimit: DRIVER_INTRO_FEE_POLICY.qualifyingRideLimit,
+      enabled: env.DRIVER_INTRO_FEE_ENABLED === 'true' && promoOpen,
+      rideLimit: null,
+      eligibleUntil: DRIVER_INTRO_FEE_POLICY.eligibleUntil,
       feeCents: DRIVER_INTRO_FEE_POLICY.operationalFeeCents,
       paymentFeeIncluded: DRIVER_INTRO_FEE_POLICY.paymentFeeIncluded,
       pixExcessChargedToDriver: DRIVER_INTRO_FEE_POLICY.pixExcessChargedToDriver

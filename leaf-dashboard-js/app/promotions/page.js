@@ -24,7 +24,7 @@ const statusOptions = ["all", "active", "paused", "completed", "expired"];
 
 const introFeeStatusLabels = {
   active: "Na promoção",
-  finished: "Concluiu",
+  finished: "Encerrada",
   review: "Em revisão",
   invalid: "Contador ilegível",
 };
@@ -34,15 +34,22 @@ const formatCents = (cents) =>
 
 const introFeeSubtitle = (report) => {
   if (!report) return "";
-  const { enabled, rideLimit, feeCents, paymentFeeIncluded, pixExcessChargedToDriver } = report.policy;
+  const { enabled, rideLimit, eligibleUntil, feeCents, paymentFeeIncluded, pixExcessChargedToDriver } = report.policy;
   const pixTerms = paymentFeeIncluded
     ? (pixExcessChargedToDriver ? ", Pix incluído até R$ 62,50 (acima, o motorista paga a diferença)" : ", Pix incluído")
     : "";
-  const terms = `${rideLimit} corridas a ${formatCents(feeCents)}${pixTerms}`;
+  // Desde 09/11/2026 a promoção vale por data (todas as corridas oferecidas até o fim do dia 30/11).
+  const lastDay = eligibleUntil
+    ? new Date(Date.parse(eligibleUntil) - 1).toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" })
+    : null;
+  const terms = lastDay
+    ? `todas as corridas até ${lastDay} a ${formatCents(feeCents)}${pixTerms}`
+    : `${rideLimit} corridas a ${formatCents(feeCents)}${pixTerms}`;
   const notes = [
     enabled ? terms : `Desligada. Condição: ${terms}`,
     "Lista só quem já recebeu oferta de corrida.",
   ];
+  if (lastDay) notes.push("O contador registra corridas concluídas no destino e para em 25; ele não encerra mais a promoção.");
   if (!report.liveCounters) notes.push("Contadores ao vivo indisponíveis: valores podem estar atrasados.");
   if (report.truncated) notes.push(`Mostrando os primeiros ${report.drivers.length} motoristas.`);
   return notes.join(" ");
@@ -256,7 +263,7 @@ export default function PromotionsPage() {
         {loading ? <LoadingState message="Carregando promocoes..." /> : null}
 
         <section className="grid">
-          <Panel className="panel-span-full" title="Primeiras corridas do motorista" subtitle={introFeeSubtitle(introFeeReport)}>
+          <Panel className="panel-span-full" title="Promoção de lançamento do motorista" subtitle={introFeeSubtitle(introFeeReport)}>
             <ErrorText message={introFeeError} />
             {introFeeReport ? (
               <>
@@ -265,9 +272,9 @@ export default function PromotionsPage() {
                   labels={{
                     drivers: "Motoristas",
                     active: "Na promoção",
-                    finished: "Concluíram",
+                    finished: "Encerradas",
                     needsReview: "Precisam de revisão",
-                    ridesUsed: "Corridas usadas",
+                    ridesUsed: "Corridas no destino",
                   }}
                 />
                 <div className="table-shell">
@@ -275,22 +282,20 @@ export default function PromotionsPage() {
                     <thead>
                       <tr>
                         <th>Motorista</th>
-                        <th>Usadas</th>
-                        <th>Restantes</th>
+                        <th>No destino</th>
                         <th>Situação</th>
                       </tr>
                     </thead>
                     <tbody>
                       {introFeeReport.drivers.length === 0 ? (
                         <tr>
-                          <td colSpan={4}>Nenhum motorista com contador da promoção.</td>
+                          <td colSpan={3}>Nenhum motorista com contador da promoção.</td>
                         </tr>
                       ) : (
                         introFeeReport.drivers.map((row) => (
                           <tr key={row.driverId}>
                             <td>{row.name || row.driverId}</td>
                             <td>{row.ridesUsed ?? "-"}</td>
-                            <td>{row.ridesRemaining ?? "-"}</td>
                             <td>
                               {introFeeStatusLabels[row.status] || row.status}
                               {row.inRide ? " · corrida em andamento" : ""}

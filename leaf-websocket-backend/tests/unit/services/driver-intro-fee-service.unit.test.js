@@ -5,12 +5,14 @@ const generation = 'test-generation';
 const env = { DRIVER_INTRO_FEE_ENABLED: 'true', DRIVER_INTRO_FEE_HISTORY_CUTOFF: '2026-10-22T00:00:00Z', REDIS_CRITICAL_DATASET_GENERATION: generation,
   KYC_ACTIVE_TRIP_AUTHORITY_MODE: 'redis_noeviction', REDIS_CRITICAL_AUTHORITY_ATTESTATION_ENABLED: 'true', REDIS_CRITICAL_DATASET_QUARANTINE_ENABLED: 'true' };
 const initial = () => ({ ...buildSeedState({ driverId: 'driver-1', qualifiedCompletedRides: 24, historySnapshotId: 'history-1', historyThrough: env.DRIVER_INTRO_FEE_HISTORY_CUTOFF }), approvedGeneration: generation });
-function setup(overrides = {}) {
+// Fixed clock inside the promotion window; tests that cross the end date pass their own.
+const DURING_PROMO = Date.parse('2026-11-20T12:00:00.000Z');
+function setup(overrides = {}, now = () => DURING_PROMO) {
   const ref = { get: jest.fn().mockResolvedValue({ exists: true, data: initial }) };
   const tx = { get: jest.fn().mockResolvedValue({ exists: true, data: initial }), set: jest.fn() };
   const firestore = { collection: jest.fn(() => ({ doc: jest.fn(() => ref) })), runTransaction: jest.fn(callback => callback(tx)) };
   const auth = { getUser: jest.fn() };
-  const service = new DriverIntroFeeService({ getFirestore: () => firestore, getAuth: () => auth, env: () => ({ ...env, ...overrides }) });
+  const service = new DriverIntroFeeService({ getFirestore: () => firestore, getAuth: () => auth, env: () => ({ ...env, ...overrides }), now });
   const redis = { get: jest.fn(key => Promise.resolve(key.includes('generation') ? generation : null)), hget: jest.fn().mockResolvedValue(null), exists: jest.fn().mockResolvedValue(0), eval: jest.fn(async (_script, _count, ...args) => args[args.length - 1]) };
   return { service, redis, ref, firestore, auth, tx };
 }
@@ -84,11 +86,32 @@ describe('introductory fee service boundaries', () => {
     expect(() => acceptedContext({ driverId: 'driver-1', driverIntroFee: operational,
       financialContext: sealFinancialContext({ providerEnvironment: 'sandbox' }) })).toThrow();
   });
-  it('queues review without changing the account status', async () => {
+  it('keeps offering the promotion while a ride waits for history review', async () => {
     const { service, redis } = setup();
     redis.get.mockImplementation(key => Promise.resolve(key.includes('generation') ? generation : JSON.stringify({ ...initial(), generation, reviewRequiredBookingId: 'missing-proof' })));
-    await expect(service.resolveOfferContext(redis, 'driver-1', {})).rejects.toMatchObject({ code: 'DRIVER_INTRO_FEE_HISTORY_REVIEW_REQUIRED' });
+    await expect(service.resolveOfferContext(redis, 'driver-1', {})).resolves.toMatchObject({ eligible: true, operationalFeeCents: 99 });
     expect(redis.eval).not.toHaveBeenCalled();
+  });
+  it('grants every offer until 30/11 in Brasília, whatever the ride count', async () => {
+    const { service, redis } = setup();
+    const capped = { ...buildSeedState({ driverId: 'driver-1', qualifiedCompletedRides: 25, historySnapshotId: 'history-1', historyThrough: env.DRIVER_INTRO_FEE_HISTORY_CUTOFF }), approvedGeneration: generation };
+    redis.get.mockImplementation(key => Promise.resolve(key.includes('generation') ? generation : JSON.stringify({ ...capped, generation })));
+    await expect(service.resolveOfferContext(redis, 'driver-1', {})).resolves.toMatchObject({
+      eligible: true,
+      qualifiedCompletedRides: 25,
+      operationalFeeCents: 99,
+      offeredAt: '2026-11-20T12:00:00.000Z',
+      eligibleUntil: '2026-12-01T03:00:00.000Z'
+    });
+  });
+  it('stops offering the promotion at 01/12 00:00 in Brasília', async () => {
+    const lastSecond = setup({}, () => Date.parse('2026-12-01T02:59:59.999Z'));
+    expect(lastSecond.service.enabled()).toBe(true);
+    const { service, redis, firestore } = setup({}, () => Date.parse('2026-12-01T03:00:00.000Z'));
+    expect(service.enabled()).toBe(false);
+    expect(await service.resolveOfferContext(redis, 'driver-1', {})).toBe(null);
+    expect(redis.get).not.toHaveBeenCalled();
+    expect(firestore.collection).not.toHaveBeenCalled();
   });
   it('keeps the accepted context when the promotion flag is later disabled', () => {
     expect(acceptedContext({ driverId: 'driver-1', driverIntroFee: JSON.stringify(initial()) }))

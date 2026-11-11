@@ -247,4 +247,23 @@ describe('referral-program-state-service production guards', () => {
       acceptedCount: 2
     });
   });
+
+  it('counts visits only on group links and keeps their name and channel', async () => {
+    const firestore = createInMemoryFirestore();
+    resetServiceWithFirestore(firestore);
+    await referralProgramStateService.ensurePersonalCode('leaf-source:facebook_group:motoristas-rio', () => 'GRP4ZA', {
+      sourceFields: { sourceKind: 'group', label: 'Motoristas Rio', channel: 'facebook_group', createdBy: 'admin_1', visitCount: 0 }
+    });
+    await referralProgramStateService.ensurePersonalCode('owner_1', () => 'K7M2QX');
+
+    await referralProgramStateService.recordSourceCodeVisit('grp4za');
+    await referralProgramStateService.recordSourceCodeVisit('GRP4ZA');
+    expect(await referralProgramStateService.recordSourceCodeVisit('K7M2QX')).toBeNull();
+    expect(await referralProgramStateService.recordSourceCodeVisit('NOPE22')).toBeNull();
+
+    expect(await referralProgramStateService.findPersonalCode('GRP4ZA')).toMatchObject({
+      sourceKind: 'group', label: 'Motoristas Rio', channel: 'facebook_group', visitCount: 2
+    });
+    expect(await referralProgramStateService.findPersonalCode('K7M2QX')).toMatchObject({ sourceKind: null, visitCount: 0 });
+  });
 });

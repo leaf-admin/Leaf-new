@@ -8,7 +8,7 @@ import { RoleCard } from '../../onboarding/onboardingSteps';
 import { DRIVER_FEE_POLICY, formatCents } from '../../../config/driverFeePolicy';
 
 // A promoção de lançamento é o principal argumento para o motorista: o cartão segue a política de taxas.
-const DRIVER_ROLE_DESCRIPTION = `${formatCents(DRIVER_FEE_POLICY.promoTotalFeeCents)} de taxa operacional por corrida nas ${DRIVER_FEE_POLICY.promoQualifyingRides} primeiras. A corrida já chega paga.`;
+const DRIVER_ROLE_DESCRIPTION = `${formatCents(DRIVER_FEE_POLICY.promoTotalFeeCents)} de taxa operacional por corrida até ${DRIVER_FEE_POLICY.promoEndsOnLabel}. A corrida já chega paga.`;
 
 const options = [
   {

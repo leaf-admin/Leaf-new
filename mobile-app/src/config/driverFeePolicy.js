@@ -13,7 +13,10 @@ export const DRIVER_FEE_POLICY = Object.freeze({
   // do mínimo e o motorista paga a diferença; a parte da Leaf fica em R$ 0,49.
   promoTotalFeeCents: 99,
   promoLeafFeeCents: 49,
-  promoQualifyingRides: 25,
+  // Vale para toda corrida oferecida até 30/11/2026 23:59 de Brasília
+  // (DRIVER_INTRO_FEE_POLICY.eligibleUntil no backend). Aprovado em 09/11/2026.
+  promoEndsOnLabel: '30/11/2026',
+  promoEligibleUntil: '2026-12-01T03:00:00.000Z',
   serviceFeeBands: Object.freeze([
     Object.freeze({ upToCents: 1000, feeCents: 79 }),
     Object.freeze({ upToCents: 2500, feeCents: 99 }),
@@ -97,9 +100,9 @@ export function buildDriverFeeRows(policy = DRIVER_FEE_POLICY) {
   return [
     {
       key: 'promo',
-      title: `Promoção nas ${policy.promoQualifyingRides} primeiras corridas`,
+      title: `Promoção até ${policy.promoEndsOnLabel}`,
       value: formatCents(policy.promoTotalFeeCents),
-      detail: `Taxa total por corrida concluída no destino, com o Pix incluso em corridas de até ${formatCents(promoPixIncludedUpToCents(policy))}. Acima disso, o Pix passa de ${formatCents(policy.paymentProcessingMinimumCents)} e você paga a diferença. É uma condição promocional e pode ser alterada. Depois, valem as taxas abaixo.`,
+      detail: `Taxa total em todas as corridas até ${policy.promoEndsOnLabel}, com o Pix incluso em corridas de até ${formatCents(promoPixIncludedUpToCents(policy))}. Acima disso, o Pix passa de ${formatCents(policy.paymentProcessingMinimumCents)} e você paga a diferença. É uma condição promocional e pode ser alterada. Depois, valem as taxas abaixo.`,
     },
     {
       key: 'service',

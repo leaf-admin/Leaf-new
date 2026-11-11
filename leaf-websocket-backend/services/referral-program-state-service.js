@@ -101,6 +101,14 @@ function normalizePersonalCode(raw = {}, fallbackCode = '') {
     acceptedCount: Number.isFinite(Number(raw.acceptedCount)) ? Number(raw.acceptedCount) : 0,
     lastSharedAt: toIso(raw.lastSharedAt, null),
     lastAcceptedAt: toIso(raw.lastAcceptedAt, null),
+    // Link de origem (grupo de motoristas): dono sintético leaf-source:<slug>,
+    // com nome, canal e visitas à página do convite.
+    sourceKind: raw.sourceKind ? String(raw.sourceKind).trim() : null,
+    label: raw.label ? String(raw.label).trim() : null,
+    channel: raw.channel ? String(raw.channel).trim() : null,
+    createdBy: raw.createdBy ? String(raw.createdBy).trim() : null,
+    visitCount: Number.isFinite(Number(raw.visitCount)) ? Number(raw.visitCount) : 0,
+    lastVisitedAt: toIso(raw.lastVisitedAt, null),
     createdAt: toIso(raw.createdAt, nowIso()),
     updatedAt: toIso(raw.updatedAt, toIso(raw.createdAt, nowIso())),
     source: String(raw.source || '').trim() || 'firestore'
@@ -582,6 +590,7 @@ class ReferralProgramStateService {
           status: 'active',
           shareCount: 0,
           acceptedCount: 0,
+          ...(options.sourceFields || {}),
           createdAt,
           updatedAt: createdAt
         }, candidate);
@@ -594,6 +603,25 @@ class ReferralProgramStateService {
     }
 
     throw serviceError('Não foi possível gerar o código pessoal', 'PERSONAL_CODE_GENERATION_FAILED', 500);
+  }
+
+  // Visita à página pública de um link de grupo. Só links de origem contam.
+  async recordSourceCodeVisit(code) {
+    const safeCode = String(code || '').trim().toUpperCase();
+    if (!safeCode) return null;
+    const firestore = this.getFirestore();
+    const codeRef = this.personalCodesCollection().doc(safeCode);
+    let updated = null;
+    await firestore.runTransaction(async (transaction) => {
+      const codeDoc = await transaction.get(codeRef);
+      if (!codeDoc.exists) return;
+      const current = normalizePersonalCode(codeDoc.data(), safeCode);
+      if (!current.sourceKind) return;
+      const at = nowIso();
+      updated = { ...current, visitCount: current.visitCount + 1, lastVisitedAt: at, updatedAt: at };
+      transaction.set(codeRef, { visitCount: updated.visitCount, lastVisitedAt: at, updatedAt: at }, { merge: true });
+    });
+    return updated;
   }
 
   async recordPersonalCodeShare(code, ownerId) {
