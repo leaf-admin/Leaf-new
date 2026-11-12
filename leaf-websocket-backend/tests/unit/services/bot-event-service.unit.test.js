@@ -14,6 +14,7 @@ const {
   BotEventService,
   ROUTES,
   signPayload,
+  signAgentesPayload,
   sanitizeData,
   retryDelayMs,
 } = require('../../../services/bot-event-service');
@@ -90,6 +91,12 @@ describe('bot event service', () => {
     expect(signPayload({ secret: SECRET, id: 'evt_1', timestamp: '1792544000', body })).toMatch(/^sha256=[a-f0-9]{64}$/);
   });
 
+  it('signs in the agentes.chat routine webhook format (HMAC of the body only)', () => {
+    const body = '{"id":"evt_1","type":"test.ping"}';
+    const expected = crypto.createHmac('sha256', SECRET).update(body).digest('hex');
+    expect(signAgentesPayload({ secret: SECRET, body })).toBe(`sha256=${expected}`);
+  });
+
   it('does nothing while the flag is off', async () => {
     process.env.BOT_EVENTS_ENABLED = 'false';
     const { service, redis, post } = build();
@@ -138,6 +145,11 @@ describe('bot event service', () => {
     expect(timestamp).toMatch(/^[0-9]{1,12}$/);
     const expected = crypto.createHmac('sha256', SECRET).update(`${timestamp}.${id}.`).update(body).digest('hex');
     expect(signature).toBe(`sha256=${expected}`);
+
+    // Formato das rotinas do agentes.chat, no mesmo envio.
+    expect(options.headers['idempotency-key']).toBe(result.id);
+    const agentes = crypto.createHmac('sha256', SECRET).update(body).digest('hex');
+    expect(options.headers['x-agentes-signature']).toBe(`sha256=${agentes}`);
   });
 
   it('sends one event to every configured destination and skips the rest', async () => {
