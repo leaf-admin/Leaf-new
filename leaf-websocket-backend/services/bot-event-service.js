@@ -1,4 +1,4 @@
-// Avisa os bots do OpenBot quando algo acontece no app (chamado, mensagem, incidente,
+// Avisa os bots (agentes.chat; antes OpenBot) quando algo acontece no app (chamado, mensagem, incidente,
 // disputa, estorno), em vez de os bots varrerem o backend por horário.
 //
 // - Desligado por padrão (BOT_EVENTS_ENABLED=true liga). Desligado, emit() não faz nada.
@@ -7,6 +7,9 @@
 // - Entrega assinada no formato de webhook do OpenBot (x-openbot-timestamp,
 //   x-openbot-delivery-id, x-openbot-signature), com fila no Redis e novas tentativas por até 24 h, porque o
 //   OpenBot roda no Mac do Izaak e pode estar offline.
+// - Também assina no formato das rotinas do agentes.chat: x-agentes-signature =
+//   "sha256=" + hex(HMAC-SHA256(segredo, corpo)) e idempotency-key = id do evento, para a
+//   rotina descartar reentregas. Os dois formatos vão juntos; cada destino lê o seu.
 // - O payload só leva tipo, ids técnicos (chamado, incidente, disputa, corrida),
 //   categoria, severidade, sinal de dinheiro e valores. Nunca nome, telefone, documento,
 //   texto da mensagem ou id de usuário: o bot busca o detalhe pela API com o próprio login.
@@ -100,6 +103,11 @@ function signPayload({ secret, id, timestamp, body }) {
   return `sha256=${digest}`;
 }
 
+// Formato das rotinas do agentes.chat: "sha256=" + hex(HMAC-SHA256(segredo, corpo)).
+function signAgentesPayload({ secret, body }) {
+  return `sha256=${crypto.createHmac('sha256', String(secret)).update(body).digest('hex')}`;
+}
+
 function retryDelayMs(attempts) {
   return Math.min(MAX_RETRY_MS, BASE_RETRY_MS * (2 ** Math.max(0, attempts - 1)));
 }
@@ -173,6 +181,8 @@ class BotEventService {
           'x-openbot-timestamp': timestamp,
           'x-openbot-delivery-id': item.event.id,
           'x-openbot-signature': signPayload({ secret: config.secret, id: item.event.id, timestamp, body }),
+          'x-agentes-signature': signAgentesPayload({ secret: config.secret, body }),
+          'idempotency-key': item.event.id,
         },
         timeout: 8000,
         transformRequest: [(value) => value],
@@ -261,5 +271,6 @@ module.exports = new BotEventService();
 module.exports.BotEventService = BotEventService;
 module.exports.ROUTES = ROUTES;
 module.exports.signPayload = signPayload;
+module.exports.signAgentesPayload = signAgentesPayload;
 module.exports.sanitizeData = sanitizeData;
 module.exports.retryDelayMs = retryDelayMs;
