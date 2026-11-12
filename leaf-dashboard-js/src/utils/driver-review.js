@@ -41,6 +41,10 @@ export function resolveDriverSteps(application = {}) {
   const kyc = application.kyc || {};
   const cnh = findDocument(application, "cnh");
   const crlv = findDocument(application, "crlv");
+  const backgroundCertificate = findDocument(application, "antecedentes_criminais");
+  const backgroundCertificateStatus = checklist.backgroundCertificate === true
+    ? "approved"
+    : documentStepStatus(backgroundCertificate);
   const faceStatus = activation.livenessPassed || kyc.approved
     ? "approved"
     : kyc.blocked
@@ -53,7 +57,15 @@ export function resolveDriverSteps(application = {}) {
     { key: "cnh", title: "CNH", status: documentStepStatus(cnh), document: cnh, detail: cnh?.rejectionReason || null },
     { key: "crlv", title: "CRLV e veículo", status: activation.vehicleReady ? "approved" : documentStepStatus(crlv), document: crlv, detail: crlv?.rejectionReason || null },
     { key: "face", title: "Validação facial", status: faceStatus, detail: kyc.message || null },
-    { key: "consent", title: "Antecedentes e termos", status: checklist.backgroundCheckConsent ? "approved" : "pending" },
+    { key: "consent", title: "Aceite de antecedentes e termos", status: checklist.backgroundCheckConsent ? "approved" : "pending" },
+    {
+      key: "background_certificate",
+      title: "Certidão de antecedentes",
+      status: backgroundCertificateStatus,
+      document: backgroundCertificate,
+      detail: backgroundCertificate?.rejectionReason
+        || (checklist.awaitingBackgroundCertificate ? "Emitir e anexar a certidão para liberar o motorista." : null),
+    },
   ].map((step) => ({ ...step, ...STEP_STATUS[step.status] }));
 }
 
@@ -66,6 +78,7 @@ export function classifyDriver(application = {}) {
   const needsHuman = normalize(application.autoApproval?.status) === "needs_review"
     || application.activation?.canGoOnline === true
     || application.kyc?.needsReview === true
+    || application.activation?.checklist?.awaitingBackgroundCertificate === true
     || steps.some((step) => step.status === "review" && step.document);
   return needsHuman ? "review" : "onboarding";
 }
@@ -86,6 +99,13 @@ export function resolveDriverHeadline(application = {}) {
     return reasons[auto.reason] || "Precisa de revisão manual";
   }
   if (application.activation?.canGoOnline) return "Tudo certo, aguardando aprovação";
+  if (application.activation?.checklist?.awaitingBackgroundCertificate === true) {
+    const certificate = findDocument(application, "antecedentes_criminais");
+    const certificateStatus = documentStepStatus(certificate);
+    if (certificateStatus === "review") return "Certidão anexada, falta revisar";
+    if (certificateStatus === "failed") return "Certidão recusada, emitir de novo";
+    return "Emitir e anexar a certidão de antecedentes";
+  }
   return application.activation?.blockingReason || "Cadastro em andamento";
 }
 

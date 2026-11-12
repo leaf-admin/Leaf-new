@@ -64,6 +64,7 @@ function createApprovedActivation(overrides = {}) {
           cor: 'branca'
         }
       },
+      antecedentes_criminais: { status: 'approved' },
       ...documentOverrides
     },
     consent: {
@@ -851,6 +852,114 @@ describe('driver-activation-state-service', () => {
       crlvPlateMatch: true,
       identityComplete: true
     }));
+  });
+
+  describe('certidao de antecedentes criminais', () => {
+    const verifiedUser = {
+      kycStatus: 'approved',
+      kycFirstAccessVerifiedAt: '2026-07-14T10:00:00.000Z'
+    };
+    const originalFlag = process.env.DRIVER_REQUIRE_BACKGROUND_CERTIFICATE;
+
+    afterEach(() => {
+      if (originalFlag === undefined) delete process.env.DRIVER_REQUIRE_BACKGROUND_CERTIFICATE;
+      else process.env.DRIVER_REQUIRE_BACKGROUND_CERTIFICATE = originalFlag;
+    });
+
+    async function resolveWithCertificate(certificate, userData = verifiedUser) {
+      const driverId = 'driver_certificate';
+      createMockDb({
+        [`user_vehicles/${driverId}`]: { vehicleA: createApprovedVehicle() },
+        'vehicles/vehicleA': createCatalogVehicle()
+      });
+      const activationNode = createApprovedActivation();
+      if (certificate === undefined) delete activationNode.documents.antecedentes_criminais;
+      else activationNode.documents.antecedentes_criminais = certificate;
+      return resolveDriverActivationState({ driverId, activationNode, userData });
+    }
+
+    it('bloqueia ficar online sem certidao anexada, mesmo com o resto aprovado', async () => {
+      delete process.env.DRIVER_REQUIRE_BACKGROUND_CERTIFICATE;
+      const result = await resolveWithCertificate(undefined);
+
+      expect(result.state).toBe(DRIVER_ACTIVATION_STATES.DRIVER_DOCS_IN_REVIEW);
+      expect(result.canGoOnline).toBe(false);
+      expect(result.canAttemptOnline).toBe(false);
+      expect(result.blockingReason).toBe('Cadastro em analise pela equipe Leaf.');
+      expect(result.blockingReason).not.toMatch(/antecedentes|certid|criminal/i);
+      expect(result.checklist).toEqual(expect.objectContaining({
+        backgroundCertificate: false,
+        backgroundCertificateRequired: true,
+        awaitingBackgroundCertificate: true,
+        backgroundCheckConsent: true
+      }));
+    });
+
+    it('mantem em analise com certidao anexada e pendente de revisao', async () => {
+      const result = await resolveWithCertificate({ status: 'pending' });
+
+      expect(result.state).toBe(DRIVER_ACTIVATION_STATES.DRIVER_DOCS_IN_REVIEW);
+      expect(result.canGoOnline).toBe(false);
+      expect(result.documents.antecedentes_criminais).toBe('pending');
+    });
+
+    it('certidao rejeitada volta para documentos pendentes', async () => {
+      const result = await resolveWithCertificate({ status: 'rejected' });
+
+      expect(result.state).toBe(DRIVER_ACTIVATION_STATES.DRIVER_DOCS_PENDING);
+      expect(result.canGoOnline).toBe(false);
+      expect(result.checklist.awaitingBackgroundCertificate).toBe(true);
+      expect(result.blockingReason).not.toMatch(/antecedentes|certid|criminal/i);
+    });
+
+    it('nao pede validacao facial antes da certidao aprovada', async () => {
+      const result = await resolveWithCertificate(undefined, { kycStatus: 'approved' });
+
+      expect(result.state).toBe(DRIVER_ACTIVATION_STATES.DRIVER_DOCS_IN_REVIEW);
+      expect(result.requiresLiveness).toBe(false);
+    });
+
+    it('libera com certidao aprovada', async () => {
+      const result = await resolveWithCertificate({ status: 'approved' });
+
+      expect(result.state).toBe(DRIVER_ACTIVATION_STATES.ACTIVE);
+      expect(result.canGoOnline).toBe(true);
+      expect(result.checklist.backgroundCertificate).toBe(true);
+      expect(result.checklist.awaitingBackgroundCertificate).toBe(false);
+    });
+
+    it('so desliga com DRIVER_REQUIRE_BACKGROUND_CERTIFICATE=false explicito', async () => {
+      process.env.DRIVER_REQUIRE_BACKGROUND_CERTIFICATE = 'false';
+      const result = await resolveWithCertificate(undefined);
+
+      expect(result.state).toBe(DRIVER_ACTIVATION_STATES.ACTIVE);
+      expect(result.checklist.backgroundCertificateRequired).toBe(false);
+    });
+
+    it('dispensa a certidao so para IDs da lista de revisao das lojas', async () => {
+      const originalExempt = process.env.DRIVER_BACKGROUND_CERTIFICATE_EXEMPT_IDS;
+      try {
+        process.env.DRIVER_BACKGROUND_CERTIFICATE_EXEMPT_IDS = ' other_driver , driver_certificate ';
+        const exempt = await resolveWithCertificate(undefined);
+        expect(exempt.state).toBe(DRIVER_ACTIVATION_STATES.ACTIVE);
+        expect(exempt.checklist.backgroundCertificateExempt).toBe(true);
+
+        process.env.DRIVER_BACKGROUND_CERTIFICATE_EXEMPT_IDS = 'other_driver,driver_cert';
+        const notExempt = await resolveWithCertificate(undefined);
+        expect(notExempt.canGoOnline).toBe(false);
+        expect(notExempt.checklist.backgroundCertificateExempt).toBe(false);
+      } finally {
+        if (originalExempt === undefined) delete process.env.DRIVER_BACKGROUND_CERTIFICATE_EXEMPT_IDS;
+        else process.env.DRIVER_BACKGROUND_CERTIFICATE_EXEMPT_IDS = originalExempt;
+      }
+    });
+
+    it('nao se deixa desligar por valor ambiguo', async () => {
+      process.env.DRIVER_REQUIRE_BACKGROUND_CERTIFICATE = '';
+      const result = await resolveWithCertificate(undefined);
+
+      expect(result.canGoOnline).toBe(false);
+    });
   });
 
   describe('vehicle id hint', () => {
