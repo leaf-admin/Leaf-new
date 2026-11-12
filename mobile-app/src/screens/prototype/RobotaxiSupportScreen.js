@@ -181,6 +181,16 @@ export default function RobotaxiSupportScreen({ navigation, route }) {
       runtime.driverTripMeta,
     ],
   );
+  // A ligação sai na hora; em paralelo, abre o incidente de emergência com a corrida e a
+  // localização atual. Falha no alerta nunca impede nem atrasa a ligação.
+  const handleCallPolice = useCallback(() => {
+    Promise.resolve()
+      .then(() => runtime.sendEmergencyAlert?.({ ...supportRideContext, source: 'support-call-190' }))
+      .catch(() => null);
+    Linking.openURL('tel:190').catch(() => {
+      Alert.alert('Não foi possível abrir a ligação', 'Disque 190 pelo telefone.');
+    });
+  }, [runtime.sendEmergencyAlert, supportRideContext]);
   const hasRideChatContext = Boolean(
     supportRideContext.bookingId || supportRideContext.rideId || supportRideContext.tripId,
   );
@@ -355,11 +365,7 @@ export default function RobotaxiSupportScreen({ navigation, route }) {
                     icon="alert-circle-outline"
                     title="Ligar para a polícia (190)"
                     subtitle="Em caso de perigo imediato"
-                    onPress={() => {
-                      Linking.openURL('tel:190').catch(() => {
-                        Alert.alert('Não foi possível abrir a ligação', 'Disque 190 pelo telefone.');
-                      });
-                    }}
+                    onPress={handleCallPolice}
                     testID="robotaxi-support-call-190"
                     accessibilityLabel="Ligar para a polícia, 190"
                     last

@@ -1,6 +1,7 @@
 const express = require('express');
 const { authenticateSupport, requireSupportRoles } = require('../middleware/support-auth');
 const safetyIncidentService = require('../services/safety-incident-service');
+const { getDefaultEmergencyPackageService } = require('../services/emergency-package-service');
 const safetySignalService = require('../services/safety-signal-service');
 const passengerTrustService = require('../services/passenger-trust-service');
 const operationalAreaPolicyService = require('../services/operational-area-policy-service');
@@ -331,6 +332,36 @@ router.get('/incidents/:incidentId', async (req, res) => {
   } catch (error) {
     logError(error, { service: 'ops-routes', operation: 'getIncident' });
     return res.status(500).json({ success: false, error: 'Erro ao buscar incidente' });
+  }
+});
+
+// Pacote de emergência (placa, nomes, telefones, localização). Tem dados pessoais: fica fora
+// do perfil só leitura. `location` é atualizada com a última posição da viagem a cada consulta.
+const EMERGENCY_PACKAGE_ROLES = ['admin', 'manager', 'super-admin', 'support', 'development'];
+router.get('/incidents/:incidentId/emergency-package', requireSupportRoles(EMERGENCY_PACKAGE_ROLES), async (req, res) => {
+  try {
+    const incident = await safetyIncidentService.getIncident(req.params.incidentId);
+    if (!incident) {
+      return res.status(404).json({ success: false, error: 'Incidente não encontrado' });
+    }
+    const emergencyPackage = await safetyIncidentService.getEmergencyPackage(req.params.incidentId);
+    if (!emergencyPackage) {
+      return res.status(404).json({ success: false, error: 'Incidente sem pacote de emergência' });
+    }
+    const current = incident.bookingId
+      ? await getDefaultEmergencyPackageService().readCurrentLocation(incident.bookingId)
+      : { location: null };
+    return res.json({
+      success: true,
+      incidentId: incident.incidentId,
+      status: incident.status,
+      publicSafetyDispatch: incident.publicSafetyDispatch,
+      emergencyPackage,
+      currentLocation: current.location
+    });
+  } catch (error) {
+    logError(error, { service: 'ops-routes', operation: 'getEmergencyPackage' });
+    return res.status(500).json({ success: false, error: 'Erro ao buscar pacote de emergência' });
   }
 });
 

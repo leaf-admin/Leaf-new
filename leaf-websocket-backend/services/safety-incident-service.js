@@ -76,7 +76,12 @@ function normalizeIncident(incidentId, raw = {}) {
     timeline: Array.isArray(raw.timeline) ? raw.timeline : [],
     financialContext: raw.financialContext || null,
     financialNamespace: raw.financialNamespace || raw.financialContext?.namespace || null,
-    financialContextId: raw.financialContextId || raw.financialContext?.contextId || null
+    financialContextId: raw.financialContextId || raw.financialContext?.contextId || null,
+    // O pacote com dados pessoais fica em subcoleção própria; aqui só o indicador e o envio.
+    emergencyPackageAvailable: raw.emergencyPackageAvailable === true,
+    publicSafetyDispatch: raw.publicSafetyDispatch && typeof raw.publicSafetyDispatch === 'object'
+      ? raw.publicSafetyDispatch
+      : null
   };
 }
 
@@ -285,6 +290,49 @@ class SafetyIncidentService {
       ticketId: ticket?.id || incident.ticketId || null,
       ticket
     };
+  }
+
+  emergencyPackageDoc(incidentId, persistenceContext = null) {
+    const docRef = this.incidentDoc(incidentId, persistenceContext);
+    return docRef ? docRef.collection('emergency').doc('package') : null;
+  }
+
+  // Guarda o pacote de emergência (dados pessoais) fora do documento do incidente, que é lido
+  // por perfis só de leitura, e registra no incidente apenas o indicador e o resultado do envio.
+  async attachEmergencyPackage(incidentId, {
+    emergencyPackage,
+    publicSafetyDispatch = null,
+    persistenceContext = null
+  } = {}) {
+    const packageRef = this.emergencyPackageDoc(incidentId, persistenceContext);
+    const incidentRef = this.incidentDoc(incidentId, persistenceContext);
+    if (!packageRef || !incidentRef || !emergencyPackage) return false;
+    const at = new Date().toISOString();
+    await packageRef.set({ ...emergencyPackage, incidentId, storedAt: at });
+    const snapshot = await incidentRef.get();
+    const timeline = Array.isArray(snapshot.exists ? snapshot.data()?.timeline : null)
+      ? snapshot.data().timeline
+      : [];
+    await incidentRef.set({
+      emergencyPackageAvailable: true,
+      publicSafetyDispatch: publicSafetyDispatch || null,
+      updatedAt: at,
+      timeline: [
+        ...timeline,
+        { action: 'emergency_package_stored', actorId: 'system', at },
+        ...(publicSafetyDispatch
+          ? [{ action: `public_safety_dispatch_${publicSafetyDispatch.status}`, actorId: 'system', at }]
+          : [])
+      ]
+    }, { merge: true });
+    return true;
+  }
+
+  async getEmergencyPackage(incidentId, persistenceContext = null) {
+    const packageRef = this.emergencyPackageDoc(incidentId, persistenceContext);
+    if (!packageRef) return null;
+    const snapshot = await packageRef.get();
+    return snapshot.exists ? snapshot.data() : null;
   }
 
   async getIncident(incidentId) {

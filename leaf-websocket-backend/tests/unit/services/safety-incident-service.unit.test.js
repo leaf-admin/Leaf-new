@@ -220,3 +220,51 @@ describe('safety-incident-service', () => {
     expect(queueService.createSupportTicket).not.toHaveBeenCalled();
   });
 });
+
+describe('safety-incident-service emergency package', () => {
+  function createNestedFirestore() {
+    const docs = new Map();
+    const docRef = (path) => ({
+      async get() {
+        return { exists: docs.has(path), id: path.split('/').pop(), data: () => docs.get(path) };
+      },
+      async set(value, options = {}) {
+        const current = docs.get(path) || {};
+        docs.set(path, options.merge ? { ...current, ...value } : value);
+      },
+      collection: (name) => ({ doc: (id) => docRef(`${path}/${name}/${id}`) })
+    });
+    return { docs, collection: (name) => ({ doc: (id) => docRef(`${name}/${id}`) }) };
+  }
+
+  it('guarda o pacote fora do incidente e deixa no incidente só o indicador e o envio', async () => {
+    const firestore = createNestedFirestore();
+    const service = new SafetyIncidentService({
+      firebase: { getFirestore: () => firestore },
+      redis: { getConnection: () => null },
+      queueService: { buildQueueMetadata: jest.fn(() => ({})) },
+      trustService: { recordSignal: jest.fn() }
+    });
+    firestore.docs.set('ops_incidents/INC-1', { incidentId: 'INC-1', status: 'OPEN', timeline: [{ action: 'opened' }] });
+
+    const stored = await service.attachEmergencyPackage('INC-1', {
+      emergencyPackage: { version: 1, driver: { phone: '+5521900000001' } },
+      publicSafetyDispatch: { status: 'disabled', agency: null }
+    });
+
+    expect(stored).toBe(true);
+    const incidentDoc = firestore.docs.get('ops_incidents/INC-1');
+    expect(incidentDoc.emergencyPackageAvailable).toBe(true);
+    expect(incidentDoc.publicSafetyDispatch).toEqual({ status: 'disabled', agency: null });
+    expect(JSON.stringify(incidentDoc)).not.toContain('+5521900000001');
+    expect(incidentDoc.timeline.map((entry) => entry.action)).toEqual([
+      'opened', 'emergency_package_stored', 'public_safety_dispatch_disabled'
+    ]);
+    await expect(service.getEmergencyPackage('INC-1')).resolves.toEqual(expect.objectContaining({
+      incidentId: 'INC-1',
+      driver: { phone: '+5521900000001' }
+    }));
+    const incident = await service.getIncident('INC-1');
+    expect(incident.emergencyPackageAvailable).toBe(true);
+  });
+});
