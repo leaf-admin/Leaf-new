@@ -103,6 +103,17 @@ function requiresBackgroundCertificate() {
   return String(process.env.DRIVER_REQUIRE_BACKGROUND_CERTIFICATE || 'true').trim().toLowerCase() !== 'false';
 }
 
+// Contas de revisão das lojas (Apple/Google) são fictícias e não têm certidão. A lista vem do
+// .env (IDs completos separados por vírgula) e só dispensa a certidão; o resto do gate continua.
+function isBackgroundCertificateExempt(driverId) {
+  if (!driverId) return false;
+  return String(process.env.DRIVER_BACKGROUND_CERTIFICATE_EXEMPT_IDS || '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .includes(driverId);
+}
+
 function extractDocumentStatus(activationNode = {}, userData = {}, type) {
   return normalizeStatus(
     activationNode?.documents?.[type]?.status ||
@@ -484,7 +495,8 @@ async function resolveDriverActivationState({
     resolvedUserData,
     'antecedentes_criminais'
   );
-  const backgroundCertificateRequired = requiresBackgroundCertificate();
+  const backgroundCertificateExempt = isBackgroundCertificateExempt(safeDriverId);
+  const backgroundCertificateRequired = requiresBackgroundCertificate() && !backgroundCertificateExempt;
   const backgroundCertificateApproved = isApprovedStatus(backgroundCertificateStatus);
   const cnhApproved = isApprovedStatus(cnhStatus);
   const crlvApproved = crlvStatus === 'approved';
@@ -526,6 +538,7 @@ async function resolveDriverActivationState({
       backgroundCheckConsent: effectiveBackgroundConsent,
       backgroundCertificate: backgroundCertificateApproved,
       backgroundCertificateRequired,
+      backgroundCertificateExempt,
       awaitingBackgroundCertificate: false,
       vehicleRegistration: vehicleActivationComplete
     },

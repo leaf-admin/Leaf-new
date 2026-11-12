@@ -936,6 +936,24 @@ describe('driver-activation-state-service', () => {
       expect(result.checklist.backgroundCertificateRequired).toBe(false);
     });
 
+    it('dispensa a certidao so para IDs da lista de revisao das lojas', async () => {
+      const originalExempt = process.env.DRIVER_BACKGROUND_CERTIFICATE_EXEMPT_IDS;
+      try {
+        process.env.DRIVER_BACKGROUND_CERTIFICATE_EXEMPT_IDS = ' other_driver , driver_certificate ';
+        const exempt = await resolveWithCertificate(undefined);
+        expect(exempt.state).toBe(DRIVER_ACTIVATION_STATES.ACTIVE);
+        expect(exempt.checklist.backgroundCertificateExempt).toBe(true);
+
+        process.env.DRIVER_BACKGROUND_CERTIFICATE_EXEMPT_IDS = 'other_driver,driver_cert';
+        const notExempt = await resolveWithCertificate(undefined);
+        expect(notExempt.canGoOnline).toBe(false);
+        expect(notExempt.checklist.backgroundCertificateExempt).toBe(false);
+      } finally {
+        if (originalExempt === undefined) delete process.env.DRIVER_BACKGROUND_CERTIFICATE_EXEMPT_IDS;
+        else process.env.DRIVER_BACKGROUND_CERTIFICATE_EXEMPT_IDS = originalExempt;
+      }
+    });
+
     it('nao se deixa desligar por valor ambiguo', async () => {
       process.env.DRIVER_REQUIRE_BACKGROUND_CERTIFICATE = '';
       const result = await resolveWithCertificate(undefined);
