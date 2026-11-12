@@ -96,6 +96,13 @@ function requiresMeiDocument() {
   return String(process.env.DRIVER_REQUIRE_MEI_DOCUMENT || 'false').toLowerCase() === 'true';
 }
 
+// Lei 12.587/2012, art. 11-B, IV: certidão negativa de antecedentes criminais. No piloto a Leaf
+// emite e anexa a certidão pelo painel; sem ela aprovada o motorista não fica online, nem por
+// aprovação manual nem automática. Ligado por padrão; só `false` explícito desliga (rollback).
+function requiresBackgroundCertificate() {
+  return String(process.env.DRIVER_REQUIRE_BACKGROUND_CERTIFICATE || 'true').trim().toLowerCase() !== 'false';
+}
+
 function extractDocumentStatus(activationNode = {}, userData = {}, type) {
   return normalizeStatus(
     activationNode?.documents?.[type]?.status ||
@@ -472,6 +479,13 @@ async function resolveDriverActivationState({
   const meiStatus = extractDocumentStatus(resolvedActivationNode, resolvedUserData, 'mei');
   const backgroundCheckConsent = hasBackgroundConsent(resolvedActivationNode, resolvedUserData);
   const meiRequired = requiresMeiDocument();
+  const backgroundCertificateStatus = extractDocumentStatus(
+    resolvedActivationNode,
+    resolvedUserData,
+    'antecedentes_criminais'
+  );
+  const backgroundCertificateRequired = requiresBackgroundCertificate();
+  const backgroundCertificateApproved = isApprovedStatus(backgroundCertificateStatus);
   const cnhApproved = isApprovedStatus(cnhStatus);
   const crlvApproved = crlvStatus === 'approved';
   const crlvInReview = crlvPresent && isReviewStatus(crlvStatus);
@@ -502,12 +516,17 @@ async function resolveDriverActivationState({
       cnh: cnhStatus,
       crlv: crlvStatus,
       mei: meiStatus,
-      meiRequired
+      meiRequired,
+      antecedentes_criminais: backgroundCertificateStatus,
+      backgroundCertificateRequired
     },
     checklist: {
       cnhEar: effectiveCnhApproved,
       inssOrMei: effectiveMeiApproved,
       backgroundCheckConsent: effectiveBackgroundConsent,
+      backgroundCertificate: backgroundCertificateApproved,
+      backgroundCertificateRequired,
+      awaitingBackgroundCertificate: false,
       vehicleRegistration: vehicleActivationComplete
     },
     vehicle,
@@ -582,6 +601,24 @@ async function resolveDriverActivationState({
                 : !vehicle.crlvPlateMatch
                   ? 'A placa do CRLV aprovado deve corresponder ao veiculo ativo.'
                   : 'Identidade completa do veiculo e obrigatoria para ficar online.'
+      }
+    );
+  }
+
+  // Depois de CNH, KYC e veículo, antes da validação facial: o motorista termina a parte dele e
+  // espera a Leaf anexar a certidão, sem gastar liveness antes de poder ficar online.
+  if (backgroundCertificateRequired && !backgroundCertificateApproved) {
+    const certificateRejected = isRejectedStatus(backgroundCertificateStatus);
+    return buildStatePayload(
+      certificateRejected
+        ? DRIVER_ACTIVATION_STATES.DRIVER_DOCS_PENDING
+        : DRIVER_ACTIVATION_STATES.DRIVER_DOCS_IN_REVIEW,
+      {
+        ...meta,
+        checklist: { ...meta.checklist, awaitingBackgroundCertificate: true },
+        reason: certificateRejected
+          ? 'Certidao de antecedentes nao aprovada. A equipe Leaf vai falar com voce.'
+          : 'Certidao de antecedentes criminais em analise pela equipe Leaf.'
       }
     );
   }
