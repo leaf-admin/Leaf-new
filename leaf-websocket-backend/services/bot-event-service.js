@@ -48,7 +48,12 @@ const ROUTES = Object.freeze({
   // derrubado da sessão com corrida ativa (connection-cleanup-service).
   'ride.driver_location_stale': ['operacao'],
   'ride.driver_offline_during_active': ['operacao'],
+  // Motorista concluiu o cadastro (primeira conclusão do perfil como motorista). Piloto:
+  // avisa o onboarding com o link da ficha no painel; o detalhe fica no painel.
+  'driver.registered': ['onboarding'],
 });
+
+const DEFAULT_DASHBOARD_BASE_URL = 'https://dashboard.leaf.app.br';
 
 // Únicos campos que saem do backend em data.
 const DATA_FIELDS = Object.freeze([
@@ -60,7 +65,18 @@ const DATA_FIELDS = Object.freeze([
   'signalId', 'score',
   // Só ids e tempos do alerta de motorista: driverId é o id técnico pedido pela operação.
   'driverId', 'staleSeconds', 'lastLocationAt',
+  // Link da ficha do motorista no painel (só base + id técnico, sem dado pessoal).
+  'dashboardUrl',
 ]);
+
+// Link da ficha do motorista no painel (app/drivers/[id] do leaf-dashboard-js).
+// Base por LEAF_DASHBOARD_BASE_URL; sem ela, o painel de produção.
+function driverDashboardUrl(driverId) {
+  const id = String(driverId || '').trim();
+  if (!id) return null;
+  const base = String(process.env.LEAF_DASHBOARD_BASE_URL || DEFAULT_DASHBOARD_BASE_URL).trim().replace(/\/+$/, '');
+  return `${base}/drivers/${encodeURIComponent(id)}`;
+}
 
 function boolEnv(name, fallback = false) {
   const value = process.env[name];
@@ -274,3 +290,4 @@ module.exports.signPayload = signPayload;
 module.exports.signAgentesPayload = signAgentesPayload;
 module.exports.sanitizeData = sanitizeData;
 module.exports.retryDelayMs = retryDelayMs;
+module.exports.driverDashboardUrl = driverDashboardUrl;
