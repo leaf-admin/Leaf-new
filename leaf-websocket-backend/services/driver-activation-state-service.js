@@ -616,9 +616,10 @@ async function resolveDriverActivationState({
       {
         ...meta,
         checklist: { ...meta.checklist, awaitingBackgroundCertificate: true },
+        // Texto genérico de propósito: o app não diz ao motorista qual verificação está pendente.
         reason: certificateRejected
-          ? 'Certidao de antecedentes nao aprovada. A equipe Leaf vai falar com voce.'
-          : 'Certidao de antecedentes criminais em analise pela equipe Leaf.'
+          ? 'Seu cadastro tem uma pendencia. A equipe Leaf vai falar com voce.'
+          : 'Cadastro em analise pela equipe Leaf.'
       }
     );
   }

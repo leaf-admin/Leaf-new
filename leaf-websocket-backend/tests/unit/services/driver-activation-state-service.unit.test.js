@@ -885,7 +885,8 @@ describe('driver-activation-state-service', () => {
       expect(result.state).toBe(DRIVER_ACTIVATION_STATES.DRIVER_DOCS_IN_REVIEW);
       expect(result.canGoOnline).toBe(false);
       expect(result.canAttemptOnline).toBe(false);
-      expect(result.blockingReason).toMatch(/antecedentes/i);
+      expect(result.blockingReason).toBe('Cadastro em analise pela equipe Leaf.');
+      expect(result.blockingReason).not.toMatch(/antecedentes|certid|criminal/i);
       expect(result.checklist).toEqual(expect.objectContaining({
         backgroundCertificate: false,
         backgroundCertificateRequired: true,
@@ -908,6 +909,7 @@ describe('driver-activation-state-service', () => {
       expect(result.state).toBe(DRIVER_ACTIVATION_STATES.DRIVER_DOCS_PENDING);
       expect(result.canGoOnline).toBe(false);
       expect(result.checklist.awaitingBackgroundCertificate).toBe(true);
+      expect(result.blockingReason).not.toMatch(/antecedentes|certid|criminal/i);
     });
 
     it('nao pede validacao facial antes da certidao aprovada', async () => {
