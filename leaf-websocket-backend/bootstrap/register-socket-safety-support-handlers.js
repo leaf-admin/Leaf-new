@@ -12,6 +12,7 @@ const {
 const { publishSupportEvent } = require('../services/support-realtime-publisher');
 const { serializeSupportTicket } = require('../services/support-visibility-policy');
 const supportTicketService = require('../services/support-ticket-service');
+const { getDefaultEmergencyResponseService } = require('../services/emergency-response-service');
 const { resolveKycRuntimeForUser } = require('../services/kyc-runtime-scope-service');
 const {
     resolveRidePersistenceScope,
@@ -419,6 +420,23 @@ function registerSocketSafetySupportHandlers({
                 status: emergencyData.status,
                 slaTargetAt: emergencyData.slaTargetAt,
                 message: 'Contato de emergência realizado'
+            });
+
+            // Pacote da ocorrência e envio à força de segurança (desligado até haver termo).
+            // Depois da confirmação ao app, para nunca atrasar quem pediu ajuda.
+            getDefaultEmergencyResponseService().handleEmergencyIncident({
+                incident: emergencyData,
+                reporterId: identity.userId,
+                reporterType: identity.userType || 'passenger',
+                location: location || null,
+                persistenceContext
+            }).catch((packageError) => {
+                logStructured('error', 'Falha ao registrar pacote de emergência', {
+                    service: 'websocket',
+                    operation: 'emergencyContact',
+                    incidentId: emergencyData.incidentId,
+                    error: packageError?.message || String(packageError)
+                });
             });
 
             logStructured('warn', 'Contato de emergência realizado', {
