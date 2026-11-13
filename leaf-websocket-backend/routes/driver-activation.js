@@ -55,7 +55,17 @@ function sanitizeFilename(fileName) {
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-zA-Z0-9._-]/g, '_')
-    .replace(/_+/g, '_');
+    .replace(/_+/g, '_')
+    // O caminho canônico recusa qualquer ".." (validateBinding); um nome como
+    // "cnh..pdf" travava o envio da CNH. Colapsa pontos repetidos e tira
+    // pontos do início para o nome nunca formar "..".
+    .replace(/\.{2,}/g, '.')
+    .replace(/^\.+/, '') || 'documento';
+}
+
+function resolveActivationBucket() {
+  const bucketName = process.env.FIREBASE_STORAGE_BUCKET || 'leaf-reactnative.firebasestorage.app';
+  return admin.storage().bucket(bucketName);
 }
 
 function parseBoolean(value, fallback = false) {
@@ -233,8 +243,7 @@ async function uploadActivationPdfToStorage({ driverId, documentType, file }) {
   try {
     ensureFirebaseInitialized();
 
-    const bucketName = process.env.FIREBASE_STORAGE_BUCKET || 'leaf-reactnative.firebasestorage.app';
-    const bucket = admin.storage().bucket(bucketName);
+    const bucket = resolveActivationBucket();
     const originalName = sanitizeFilename(file?.originalname || `${documentType}.pdf`);
     const extension = path.extname(originalName) || '.pdf';
     const objectPath = `driver-activation/${driverId}/${documentType}/${Date.now()}_${originalName.replace(extension, '')}${extension}`;
@@ -293,11 +302,12 @@ async function deleteActivationStorageObject(filePath, { driverId, reason } = {}
   const safePath = String(filePath || '').trim();
   if (!safePath) return false;
   try {
-    const bucket = admin.storage().bucket();
+    // Mesmo bucket do upload: o default do app pode não ser o bucket da ativação.
+    const bucket = resolveActivationBucket();
     await bucket.file(safePath).delete({ ignoreNotFound: true });
     return true;
   } catch (error) {
-    logStructured('warn', 'Falha ao remover upload de CNH que perdeu o guard KYC', {
+    logStructured('warn', 'Falha ao remover upload de documento de ativação não registrado', {
       service: 'driver-activation-routes',
       driverId: driverId || null,
       reason: reason || null,
@@ -555,16 +565,25 @@ router.post(
       };
 
       if (documentType === 'cnh') {
-        await canonicalDriverDocumentApprovalService.markPending({
-          driverId,
-          documentType,
-          submissionId,
-          filePath,
-          documentSha256,
-          storageGeneration,
-          uploadedAt: nowIso,
-          fileSize: Number(req.file.size || 0)
-        });
+        try {
+          await canonicalDriverDocumentApprovalService.markPending({
+            driverId,
+            documentType,
+            submissionId,
+            filePath,
+            documentSha256,
+            storageGeneration,
+            uploadedAt: nowIso,
+            fileSize: Number(req.file.size || 0)
+          });
+        } catch (markPendingError) {
+          // Sem registro canônico, o PDF salvo fica órfão no Storage (dado pessoal).
+          await deleteActivationStorageObject(filePath, {
+            driverId,
+            reason: markPendingError?.code || 'cnh_canonical_mark_pending_failed'
+          });
+          throw markPendingError;
+        }
       }
 
       const activationDocPayload = {

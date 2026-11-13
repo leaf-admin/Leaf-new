@@ -165,12 +165,12 @@ function uploadCrlv(app = createApp()) {
     });
 }
 
-function uploadCnh(app = createApp()) {
+function uploadCnh(app = createApp(), filename = 'cnh.pdf') {
   return request(app)
     .post('/api/drivers/me/activation/documents/cnh')
     .set('Authorization', 'Bearer firebase-token')
     .attach('pdf', Buffer.from('%PDF-1.4\n% leaf cnh test pdf'), {
-      filename: 'cnh.pdf',
+      filename,
       contentType: 'application/pdf'
     });
 }
@@ -400,6 +400,66 @@ describe('driver activation routes document upload storage boundary', () => {
     expect(mockStorageFileSave).toHaveBeenCalledTimes(1);
     expect(mockStorageFileDelete).toHaveBeenCalledWith({ ignoreNotFound: true });
     expect(mockMarkCanonicalDocumentPending).not.toHaveBeenCalled();
+    expect(mockRootUpdate).not.toHaveBeenCalled();
+    expect(mockQueueEnqueue).not.toHaveBeenCalled();
+  });
+
+  describe('CNH file name and the canonical path binding', () => {
+    const { CanonicalDriverDocumentApprovalService } = jest.requireActual(
+      '../../../services/canonical-driver-document-approval-service'
+    );
+    const realBindingCheck = new CanonicalDriverDocumentApprovalService({
+      firestoreProvider: () => null
+    });
+
+    beforeEach(() => {
+      // Usa a checagem real do caminho canônico (a que recusou a CNH em produção).
+      mockMarkCanonicalDocumentPending.mockImplementation(async (input) => {
+        realBindingCheck.validateBinding(input);
+        return { status: 'pending' };
+      });
+    });
+
+    it.each([
+      'cnh..pdf',
+      'CNH Digital.pdf',
+      'CNH...Digital..pdf',
+      '..cnh.pdf',
+      '../../outro-motorista/cnh.pdf',
+      'cnh.pdf'
+    ])('accepts a CNH named %p with a canonical path free of ".."', async (filename) => {
+      const response = await uploadCnh(createApp(), filename);
+
+      expect(response.status).toBe(202);
+      expect(mockMarkCanonicalDocumentPending).toHaveBeenCalledTimes(1);
+      const { filePath } = mockMarkCanonicalDocumentPending.mock.calls[0][0];
+      expect(filePath.startsWith('driver-activation/driver-1/cnh/')).toBe(true);
+      expect(filePath).not.toContain('..');
+      expect(filePath.slice('driver-activation/driver-1/cnh/'.length)).not.toContain('/');
+      expect(filePath).toMatch(/\.pdf$/);
+      expect(mockStorageFileDelete).not.toHaveBeenCalled();
+      expect(mockCommitDocumentSubmissionState).toHaveBeenCalledWith(expect.objectContaining({
+        activationDocument: expect.objectContaining({ fileName: expect.not.stringContaining('..') })
+      }));
+    });
+  });
+
+  it('deletes the stored CNH when the canonical pending record fails', async () => {
+    mockMarkCanonicalDocumentPending.mockRejectedValueOnce(Object.assign(
+      new Error('Caminho do documento canonico invalido'),
+      { code: 'KYC_CANONICAL_DOCUMENT_PATH_INVALID' }
+    ));
+
+    const response = await uploadCnh();
+
+    expect(response.status).toBeGreaterThanOrEqual(400);
+    expect(mockStorageFileSave).toHaveBeenCalledTimes(1);
+    const savedPath = mockStorageFile.mock.calls[0][0];
+    expect(mockStorageFile).toHaveBeenLastCalledWith(savedPath);
+    expect(mockStorageFileDelete).toHaveBeenCalledWith({ ignoreNotFound: true });
+    expect(mockStorageBucket).toHaveBeenLastCalledWith(
+      process.env.FIREBASE_STORAGE_BUCKET || 'leaf-reactnative.firebasestorage.app'
+    );
     expect(mockRootUpdate).not.toHaveBeenCalled();
     expect(mockQueueEnqueue).not.toHaveBeenCalled();
   });
