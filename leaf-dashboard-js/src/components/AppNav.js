@@ -7,6 +7,34 @@ import { useAuth } from "@/src/contexts/AuthContext";
 import { leafAPI } from "@/src/services/api";
 import { canAccessItem, isLaunchFeatureEnabled } from "@/src/utils/dashboard-access";
 import { dashboardNavigationGroups } from "@/src/config/dashboard-navigation";
+import {
+  formatWaiting,
+  onOpsPendingIncrease,
+  readNotifyPreference,
+  subscribeOpsPending,
+  waitingTone,
+  writeNotifyPreference,
+} from "@/src/services/ops-pending-store";
+
+const OPS_ROLES = ["admin", "super-admin", "manager", "support", "development"];
+const REVIEW_ROLES = ["admin", "super-admin", "manager"];
+
+// Quantos itens esperam em cada entrada do menu.
+function pendingCountFor(href, summary, canReview) {
+  if (!summary) return 0;
+  if (href === "/drivers?tab=review") return canReview ? Number(summary.drivers?.review || 0) : 0;
+  if (href === "/support") return Number(summary.supportOpen || 0);
+  return 0;
+}
+
+function PendingBadge({ count, tone = "warn", label }) {
+  if (!count) return null;
+  return (
+    <span className={`app-pending-badge app-pending-badge-${tone}`} aria-label={label || `${count} pendentes`}>
+      {count > 99 ? "99+" : count}
+    </span>
+  );
+}
 
 function resolveActiveItem(pathname, navGroups) {
   const allItems = navGroups.flatMap((group) =>
@@ -59,6 +87,74 @@ export default function AppNav() {
   const menuButtonRef = useRef(null);
   const wasMobileOpenRef = useRef(false);
   const adminMutationsEnabled = runtimeFlags?.launch?.adminMutationsEnabled !== false;
+  const [pending, setPending] = useState(null);
+  const [toast, setToast] = useState(null);
+  const [notifyEnabled, setNotifyEnabled] = useState(false);
+  const baseTitleRef = useRef("");
+  const canReview = canAccessItem({ allowedRoles: REVIEW_ROLES }, user);
+  const canSeePending = Boolean(user) && canAccessItem({ allowedRoles: OPS_ROLES }, user);
+
+  useEffect(() => {
+    setNotifyEnabled(readNotifyPreference());
+  }, []);
+
+  useEffect(() => {
+    if (!canSeePending) return undefined;
+    const unsubscribe = subscribeOpsPending((next) => setPending(next.summary));
+    const offIncrease = onOpsPendingIncrease(({ previous, summary }) => {
+      if (!canReview) return;
+      const added = Number(summary.drivers?.review || 0) - Number(previous.drivers?.review || 0);
+      if (added <= 0) return;
+      const message = added === 1 ? "1 novo cadastro para revisar" : `${added} novos cadastros para revisar`;
+      setToast({ message, at: Date.now() });
+      if (readNotifyPreference() && typeof Notification !== "undefined" && Notification.permission === "granted" && document.hidden) {
+        try {
+          const notification = new Notification("Leaf", { body: message, tag: "leaf-ops-pending" });
+          notification.onclick = () => {
+            window.focus();
+            router.push("/drivers?tab=review");
+          };
+        } catch {
+          // Navegador sem suporte: fica o aviso na tela.
+        }
+      }
+    });
+    return () => {
+      unsubscribe();
+      offIncrease();
+    };
+  }, [canSeePending, canReview, router]);
+
+  useEffect(() => {
+    if (!toast) return undefined;
+    const timer = setTimeout(() => setToast(null), 8000);
+    return () => clearTimeout(timer);
+  }, [toast]);
+
+  const reviewCount = canReview ? Number(pending?.drivers?.review || 0) : 0;
+  const tabCount = reviewCount + Number(pending?.supportOpen || 0);
+  const oldestMs = pending?.drivers?.oldestWaitingMs;
+
+  // Título da aba com o total, como no WhatsApp Web.
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const current = document.title.replace(/^\(\d+\+?\)\s*/, "");
+    baseTitleRef.current = current;
+    document.title = tabCount > 0 ? `(${tabCount > 99 ? "99+" : tabCount}) ${current}` : current;
+  }, [tabCount, pathname]);
+
+  const toggleNotify = async () => {
+    const next = !notifyEnabled;
+    if (next && typeof Notification !== "undefined" && Notification.permission === "default") {
+      try {
+        await Notification.requestPermission();
+      } catch {
+        // Sem permissão: os avisos continuam só na tela.
+      }
+    }
+    writeNotifyPreference(next);
+    setNotifyEnabled(next);
+  };
 
   useEffect(() => {
     let mounted = true;
@@ -192,9 +288,28 @@ export default function AppNav() {
         </div>
         <div className="app-topbar-right">
           {canAccessItem({ allowedRoles: ["admin", "super-admin", "manager"] }, user) ? (
-            <Link href="/drivers?tab=review" className="app-topbar-link">
+            <Link
+              href="/drivers?tab=review"
+              className="app-topbar-link"
+              title={reviewCount && oldestMs ? `O mais antigo espera há ${formatWaiting(oldestMs)}` : undefined}
+            >
               Aprovar motoristas
+              <PendingBadge count={reviewCount} tone={waitingTone(oldestMs)} label={`${reviewCount} cadastros para revisar`} />
             </Link>
+          ) : null}
+          {canSeePending ? (
+            <button
+              type="button"
+              className={notifyEnabled ? "app-topbar-notify app-topbar-notify-on" : "app-topbar-notify"}
+              onClick={toggleNotify}
+              aria-pressed={notifyEnabled}
+              title={notifyEnabled ? "Avisos do navegador ligados" : "Ligar avisos do navegador para novas pendências"}
+            >
+              <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" width="16" height="16">
+                <path d="M10 3a4 4 0 00-4 4v3l-1.5 3h11L14 10V7a4 4 0 00-4-4zM8.5 16a1.5 1.5 0 003 0" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              <span className="sr-only">Avisos</span>
+            </button>
           ) : null}
           {runtimeFlags && !adminMutationsEnabled ? (
             <span className="app-topbar-readonly" role="status">
@@ -206,6 +321,14 @@ export default function AppNav() {
           </div>
         </div>
       </header>
+
+      {toast ? (
+        <div className="app-ops-toast" role="status">
+          <span>{toast.message}</span>
+          <Link href="/drivers?tab=review" onClick={() => setToast(null)}>Revisar</Link>
+          <button type="button" onClick={() => setToast(null)} aria-label="Fechar aviso">×</button>
+        </div>
+      ) : null}
 
       <div
         className={mobileOpen ? "app-sidebar-backdrop app-sidebar-backdrop-visible" : "app-sidebar-backdrop"}
@@ -242,9 +365,12 @@ export default function AppNav() {
                 >
                   <NavGroupIcon name={group.icon} />
                   <span className="app-sidebar-group-label">{group.section}</span>
-                  {!expanded && group.items.length > 1 ? (
-                    <span className="app-sidebar-group-count">{group.items.length}</span>
-                  ) : null}
+                  {(() => {
+                    const groupPending = group.items.reduce((sum, item) => sum + pendingCountFor(item.href, pending, canReview), 0);
+                    if (!expanded && groupPending > 0) return <PendingBadge count={groupPending} />;
+                    if (!expanded && group.items.length > 1) return <span className="app-sidebar-group-count">{group.items.length}</span>;
+                    return null;
+                  })()}
                   <svg className="app-sidebar-chevron" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                     <path d="M6 4l4 4-4 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
@@ -261,6 +387,10 @@ export default function AppNav() {
                           aria-current={active ? "page" : undefined}
                         >
                           {item.label}
+                          <PendingBadge
+                            count={pendingCountFor(item.href, pending, canReview)}
+                            tone={item.href === "/drivers?tab=review" ? waitingTone(oldestMs) : "warn"}
+                          />
                         </Link>
                       );
                     })}

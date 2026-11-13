@@ -8,6 +8,7 @@ const RedisLeaderLease = require('../utils/redis-leader-lease');
 const { buildWorkerConsumerName } = require('./worker-consumer-identity');
 const googleUsageCostService = require('../services/google-usage-cost-service');
 const alertService = require('../services/alert-service');
+const { maybeRunOpsDailyDigest } = require('../services/ops-daily-digest');
 
 const DEFAULT_INTERVAL_MS = Number.parseInt(process.env.RIDE_HEALTH_MONITOR_INTERVAL_MS || '60000', 10);
 
@@ -116,6 +117,7 @@ async function runRideHealthMonitorCycle(reason = 'interval') {
       });
 
       await maybeRunGoogleCostCycle(redis);
+      await maybeRunOpsDailyDigest(redis).catch(() => null);
 
       logStructured('info', 'Ciclo de ride health concluído', {
         service: 'ride-health-monitor-worker',

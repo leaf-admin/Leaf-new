@@ -544,6 +544,26 @@ class LeafApiService {
     });
   }
 
+  // Pendências do painel: resumo em cache compartilhado no backend.
+  async getOpsPendingSummary() {
+    return this.request("/admin/ops/pending-summary");
+  }
+
+  async getReviewClaims() {
+    return this.request("/admin/ops/review-claims");
+  }
+
+  async claimDriverReview(driverId, { force = false } = {}) {
+    return this.request(`/admin/ops/review-claims/${encodeURIComponent(driverId)}`, {
+      method: "POST",
+      body: JSON.stringify({ force }),
+    });
+  }
+
+  async releaseDriverReview(driverId) {
+    return this.request(`/admin/ops/review-claims/${encodeURIComponent(driverId)}`, { method: "DELETE" });
+  }
+
   async getDriverAirConditioning(driverId, context = {}) {
     const scope = context.scope === "sandbox" ? "?scope=sandbox" : "";
     return this.request(`/drivers/${encodeURIComponent(driverId)}/air-conditioning${scope}`);

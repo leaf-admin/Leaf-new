@@ -2,14 +2,18 @@
 
 import { Suspense, use, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import ProtectedRoute from "@/src/components/ProtectedRoute";
 import AppNav from "@/src/components/AppNav";
 import Panel from "@/src/components/ui/Panel";
 import ConfirmActionDialog from "@/src/components/ui/ConfirmActionDialog";
 import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
 import { leafAPI } from "@/src/services/api";
-import { classifyDriver, resolveDriverHeadline, resolveDriverSteps } from "@/src/utils/driver-review";
+import { REVIEW_QUEUE_STORAGE_KEY, classifyDriver, resolveDriverHeadline, resolveDriverSteps } from "@/src/utils/driver-review";
+import { useAuth } from "@/src/contexts/AuthContext";
+import { canAccessItem } from "@/src/utils/dashboard-access";
+
+const CLAIM_RENEW_MS = 5 * 60 * 1000;
 
 // Ficha do motorista: o mesmo andamento que ele vê no app, os documentos lidos e as decisões
 // (aprovar documento, pedir reenvio, aprovação final, bloquear), todas com motivo auditável.
@@ -154,6 +158,57 @@ function DriverDetailContent({ id }) {
 
   const steps = useMemo(() => resolveDriverSteps(application || {}), [application]);
   const bucket = application ? classifyDriver(application) : null;
+  const router = useRouter();
+  const { user } = useAuth();
+  const canReview = canAccessItem({ allowedRoles: ["admin", "super-admin", "manager"] }, user);
+  const [claimConflict, setClaimConflict] = useState(null);
+  const [nextId, setNextId] = useState(null);
+  const scopeSuffix = kycScope === "sandbox" ? "?kycScope=sandbox" : "";
+
+  // "Em revisão por": marca ao abrir um cadastro da fila, renova enquanto a
+  // ficha está aberta e libera ao sair. Fica só no Redis do backend.
+  const claim = useCallback(async (force = false) => {
+    try {
+      await leafAPI.claimDriverReview(id, { force });
+      setClaimConflict(null);
+    } catch (err) {
+      if (err?.status === 409) setClaimConflict(err?.payload?.claim || { name: "outra pessoa" });
+    }
+  }, [id]);
+
+  useEffect(() => {
+    if (bucket !== "review" || !canReview) return undefined;
+    claim(false);
+    const timer = setInterval(() => claim(false), CLAIM_RENEW_MS);
+    return () => {
+      clearInterval(timer);
+      leafAPI.releaseDriverReview(id).catch(() => {});
+    };
+  }, [bucket, canReview, claim, id]);
+
+  // Próximo da fila, na ordem que a lista mostrou (sessionStorage desta aba).
+  useEffect(() => {
+    try {
+      const queue = JSON.parse(window.sessionStorage.getItem(REVIEW_QUEUE_STORAGE_KEY) || "[]");
+      if (!Array.isArray(queue)) return;
+      const index = queue.indexOf(id);
+      const candidates = index >= 0 ? queue.slice(index + 1) : queue.filter((item) => item !== id);
+      setNextId(candidates[0] || null);
+    } catch {
+      setNextId(null);
+    }
+  }, [id, application]);
+
+  const goNext = useCallback(() => {
+    if (!nextId) return;
+    try {
+      const queue = JSON.parse(window.sessionStorage.getItem(REVIEW_QUEUE_STORAGE_KEY) || "[]");
+      window.sessionStorage.setItem(REVIEW_QUEUE_STORAGE_KEY, JSON.stringify(queue.filter((item) => item !== id)));
+    } catch {
+      // Sem armazenamento: só navega.
+    }
+    router.push(`/drivers/${encodeURIComponent(nextId)}${scopeSuffix}`);
+  }, [id, nextId, router, scopeSuffix]);
   const driver = application?.driver || {};
   const vehicle = application?.vehicleConfig || {};
   const activation = application?.activation || {};
@@ -213,6 +268,34 @@ function DriverDetailContent({ id }) {
     }
   };
 
+  // Atalhos: A abre a aprovação final, N vai para o próximo da fila.
+  useEffect(() => {
+    const onKey = (event) => {
+      if (dialog || event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target;
+      const tag = String(target?.tagName || "").toLowerCase();
+      if (["input", "textarea", "select"].includes(tag) || target?.isContentEditable) return;
+      const key = String(event.key || "").toLowerCase();
+      if (key === "n" && nextId) {
+        event.preventDefault();
+        goNext();
+      } else if (key === "a" && canFinalApprove) {
+        event.preventDefault();
+        openDialog({
+          kind: "approve-driver",
+          title: "Aprovar motorista",
+          description: "O backend confere de novo CNH, CRLV/veículo, validação facial e termos antes de aprovar.",
+          confirmLabel: "Aprovar",
+          tone: "neutral",
+          requiresReason: true,
+          defaultReason: "Documentos conferidos no dashboard.",
+        });
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
   if (loading) return <LoadingState message="Carregando motorista..." />;
 
   return (
@@ -226,6 +309,11 @@ function DriverDetailContent({ id }) {
           </p>
         </div>
         <div className="filters">
+          {nextId ? (
+            <button type="button" className="button-secondary" onClick={goNext} data-testid="driver-next-in-queue">
+              Próximo da fila ›
+            </button>
+          ) : null}
           {canFinalApprove ? (
             <button
               type="button"
@@ -264,6 +352,22 @@ function DriverDetailContent({ id }) {
       </header>
 
       <AppNav />
+
+      {claimConflict ? (
+        <section className="driver-claim-banner" role="status" data-testid="driver-claim-banner">
+          <span>
+            Em revisão por <strong>{claimConflict.name}</strong>
+            {claimConflict.claimedAt ? ` desde ${formatDateTime(claimConflict.claimedAt)}` : ""}. Evite decidir ao mesmo tempo.
+          </span>
+          <button type="button" className="button-secondary" onClick={() => claim(true)}>Assumir a revisão</button>
+        </section>
+      ) : null}
+
+      {bucket === "review" && (nextId || canFinalApprove) ? (
+        <p className="driver-shortcuts">
+          Atalhos: {canFinalApprove ? <><kbd>A</kbd> aprovar</> : null}{canFinalApprove && nextId ? " · " : null}{nextId ? <><kbd>N</kbd> próximo da fila</> : null}
+        </p>
+      ) : null}
 
       <section className={`driver-banner driver-banner-${bucket}`} data-testid="driver-status-banner">
         <strong>{resolveDriverHeadline(application || {})}</strong>

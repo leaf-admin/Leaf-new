@@ -11,6 +11,8 @@ const BOT_MESSAGE_COALESCE_MS = 5 * 60 * 1000;
 // Avisa o bot de suporte do OpenBot. Não espera nem lança: o chamado nunca depende disso.
 function notifySupportBot(type, ticket = {}, { dedupeKey, senderType = null } = {}) {
   if (!ticket?.id || ticket.financialNamespace === 'sandbox') return;
+  // Contador de pendências do painel (sem leitura: só invalida o cache e avisa).
+  require('./ops-pending-service').notifyPendingChanged('support');
   const classification = ticket.metadata?.supportClassification || {};
   const reasons = [...(classification.reasons || []), ...(classification.resolutionReasons || [])];
   const money = ticket.category === 'payment' || reasons.some((reason) => MONEY_REASONS.has(reason));
@@ -531,6 +533,9 @@ class SupportTicketService {
     };
 
     await this.ticketDoc(ticketId, persistenceScope).set(updates, { merge: true });
+    if (persistenceScope?.namespace !== 'sandbox') {
+      require('./ops-pending-service').notifyPendingChanged('support');
+    }
 
     await this.addMessage(ticketId, {
       senderId: actorId,

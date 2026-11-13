@@ -125,3 +125,64 @@ export function matchesSearch(application = {}, term = "") {
   return [driver.name, driver.phone, driver.email, driver.cpf, vehicle.activeVehiclePlate, application.id]
     .some((value) => normalize(value).includes(query));
 }
+
+export const REVIEW_QUEUE_STORAGE_KEY = "leaf.dashboard.review-queue";
+
+// Fila de revisão do mais antigo para o mais novo (reviewWaitingSince vem do
+// backend; sem ela, a data do cadastro).
+export function waitingSinceMs(application = {}) {
+  const raw = application.reviewWaitingSince || application.updatedAt || application.submissionDate;
+  const parsed = raw ? Date.parse(raw) : NaN;
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function sortReviewQueue(applications = []) {
+  return applications.slice().sort((left, right) => {
+    const a = waitingSinceMs(left);
+    const b = waitingSinceMs(right);
+    if (a === null && b === null) return 0;
+    if (a === null) return 1;
+    if (b === null) return -1;
+    return a - b;
+  });
+}
+
+const FUNNEL_STEPS = [
+  { key: "cnh", label: "CNH aprovada" },
+  { key: "crlv", label: "CRLV e veículo" },
+  { key: "face", label: "Validação facial" },
+  { key: "consent", label: "Aceite de antecedentes" },
+  { key: "background_certificate", label: "Certidão aprovada" },
+];
+
+// Funil e tempo de aprovação a partir da lista já carregada (sem leitura extra).
+export function buildDriverFunnel(applications = []) {
+  const active = applications.filter((item) => classifyDriver(item) !== "rejected");
+  const total = active.length;
+  const stages = FUNNEL_STEPS.map((stage) => {
+    const count = active.filter((item) => {
+      const step = resolveDriverSteps(item).find((entry) => entry.key === stage.key);
+      return step?.status === "approved";
+    }).length;
+    return { ...stage, count, percent: total ? Math.round((count / total) * 100) : 0 };
+  });
+  const approved = active.filter((item) => classifyDriver(item) === "approved");
+  stages.push({
+    key: "approved",
+    label: "Aprovados",
+    count: approved.length,
+    percent: total ? Math.round((approved.length / total) * 100) : 0,
+  });
+
+  const durations = approved
+    .map((item) => {
+      const start = Date.parse(item.submissionDate || "");
+      const end = Date.parse(item.reviewDate || "");
+      return Number.isFinite(start) && Number.isFinite(end) && end >= start ? end - start : null;
+    })
+    .filter((value) => value !== null)
+    .sort((a, b) => a - b);
+  const medianApprovalMs = durations.length ? durations[Math.floor(durations.length / 2)] : null;
+
+  return { total, stages, medianApprovalMs, approvalSamples: durations.length };
+}

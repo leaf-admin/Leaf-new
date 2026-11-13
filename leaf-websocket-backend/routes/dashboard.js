@@ -11,6 +11,7 @@ require('./dashboard/05-subscriptions-and-legacy-promotions');
 require('./dashboard/06-costs-monitoring-growth');
 require('./dashboard/07-promotions');
 require('./dashboard/08-driver-plans-and-status');
+require('./dashboard/09-ops-pending');
 
 hardenDashboardApiRoutes();
 
