@@ -12,6 +12,13 @@ const { normalizeVehicleOcrPayload } = require('../utils/vehicle-ocr-data');
 const {
   buildApprovedCrlvVehicleLinkUpdates
 } = require('./driver-crlv-vehicle-link-service');
+const vehicleStore = require('./vehicle-store');
+const {
+  REASONS: DOCUMENT_REASONS,
+  evaluateCnhPolicy,
+  evaluateCrlvPolicy,
+  resolveVehicleKind
+} = require('./driver-document-policy-checks');
 
 const MEI_DOCUMENTS_ENABLED =
   String(process.env.ENABLE_DRIVER_MEI_DOCUMENTS || 'false').toLowerCase() === 'true';
@@ -795,6 +802,7 @@ async function updateDocumentState({
   model = null,
   metadata = {},
   biometricState = null,
+  policyChecks = null,
   io = null
 }) {
   const safeDriverId = String(driverId || '').trim();
@@ -823,7 +831,7 @@ async function updateDocumentState({
 
   if (safeType === 'crlv' && normalizedStatus === 'approved' && !hasRequiredCrlvVehicleIdentity(normalizedDocumentData)) {
     normalizedStatus = 'failed';
-    effectiveReason = 'CRLV sem dados obrigatórios de veículo (placa, RENAVAM, modelo e cor).';
+    effectiveReason = DOCUMENT_REASONS.crlvIncomplete;
   }
   const reviewStatus = toReviewQueueStatus(normalizedStatus);
 
@@ -910,7 +918,8 @@ async function updateDocumentState({
       reviewedAt: normalizedStatus === 'approved' || normalizedStatus === 'failed' ? statusUpdatedAt : null,
       model: model || null,
       extractionSource: extractionSource || null,
-      data: normalizedDocumentData
+      data: normalizedDocumentData,
+      policyChecks: Array.isArray(policyChecks) ? policyChecks : null
     };
 
     const historyPayload = {
@@ -928,6 +937,7 @@ async function updateDocumentState({
       // The dashboard review projection reads extractedData. Keep it aligned with
       // analysisData so the CRLV identity cannot diverge between operational views.
       extractedData: normalizedDocumentData,
+      policyChecks: Array.isArray(policyChecks) ? policyChecks : null,
       reviewedAt: normalizedStatus === 'approved' || normalizedStatus === 'failed' ? statusUpdatedAt : null,
       rejectionReason: normalizedStatus === 'failed' ? effectiveReason || 'Documento reprovado na análise.' : null,
       updatedAt: statusUpdatedAt,
@@ -1066,7 +1076,7 @@ async function analyzeCnhDocument(fileBuffer) {
   if (!documentIdentity.valid) {
     return {
       success: false,
-      reason: 'O documento enviado não parece ser uma CNH válida. Envie sua CNH Digital em PDF.',
+      reason: DOCUMENT_REASONS.cnhNotRecognized,
       data: {
         ...(data || {}),
         documentIdentity
@@ -1079,7 +1089,7 @@ async function analyzeCnhDocument(fileBuffer) {
   if (!hasRequiredIdentity) {
     return {
       success: false,
-      reason: 'Não foi possível validar os dados principais da CNH (nome/CPF).',
+      reason: DOCUMENT_REASONS.cnhIdentityUnreadable,
       data,
       extractionSource
     };
@@ -1090,7 +1100,7 @@ async function analyzeCnhDocument(fileBuffer) {
   if (!earApproved) {
     return {
       success: false,
-      reason: 'CNH enviada não possui EAR válido para operação na plataforma.',
+      reason: DOCUMENT_REASONS.cnhWithoutEar,
       data,
       extractionSource
     };
@@ -1141,7 +1151,7 @@ async function analyzeCrlvDocument(fileBuffer) {
   if (!hasRequiredCrlvVehicleIdentity(data)) {
     return {
       success: false,
-      reason: 'CRLV sem dados obrigatórios de veículo (placa, RENAVAM, modelo e cor).',
+      reason: DOCUMENT_REASONS.crlvIncomplete,
       data,
       extractionSource
     };
@@ -1186,6 +1196,115 @@ async function analyzeMeiDocument(fileBuffer) {
     extractionSource: 'pdf_text',
     model: 'rule_engine'
   };
+}
+
+// Lê do cadastro o que as regras de CNH/CRLV precisam: CPF da conta, a
+// categoria da CNH já lida, o tipo do veículo do CRLV já lido e os veículos
+// cadastrados à mão (sem ocrData). Falha de leitura não reprova o documento:
+// as checagens que dependem do cadastro ficam como "não consultado".
+async function loadDriverDocumentPolicyContext(driverId) {
+  const firestore = getFirestoreOrThrow();
+  const [user, links] = await Promise.all([
+    driverDocumentStore.readUser(firestore, driverId),
+    vehicleStore.readVehicleLinks(firestore, driverId)
+  ]);
+  const documents = user?.documents || {};
+  const cnhData = documents?.cnh?.extractedData || documents?.cnh?.analysisData || null;
+  const crlvData = documents?.crlv?.extractedData || documents?.crlv?.analysisData || null;
+  const linkEntries = Object.values(links || {}).filter((link) => link && typeof link === 'object');
+  const declaredVehicles = linkEntries
+    .filter((link) => !link.ocrData)
+    .map((link) => ({
+      plate: link.plateNormalized || link.plate || '',
+      year: link.year || '',
+      vehicleType: link.vehicleType || ''
+    }));
+  const crlvKind = crlvData ? resolveVehicleKind(crlvData) : null;
+  const declaredKinds = declaredVehicles.map((vehicle) => resolveVehicleKind(vehicle)).filter(Boolean);
+
+  return {
+    contextLoaded: true,
+    accountCpf: user?.cpfNormalized || user?.cpf || '',
+    cnhCategory: cnhData?.categoria || null,
+    // Na análise da CNH: o tipo do veículo vem do CRLV já lido; sem ele, de
+    // um único tipo declarado à mão.
+    vehicleKind: crlvKind || (new Set(declaredKinds).size === 1 ? declaredKinds[0] : null),
+    declaredVehicles
+  };
+}
+
+async function applyDriverDocumentPolicy({
+  driverId,
+  documentType,
+  analysisResult,
+  loadContext = loadDriverDocumentPolicyContext,
+  now = new Date()
+}) {
+  if (!analysisResult?.success || !['cnh', 'crlv'].includes(documentType)) {
+    return { analysisResult, policyChecks: null };
+  }
+
+  let context = { contextLoaded: false };
+  try {
+    context = await loadContext(driverId);
+  } catch (error) {
+    logStructured('warn', 'Cadastro indisponível para as regras do documento', {
+      service: 'driver-activation-queue',
+      driverId,
+      documentType,
+      error: error?.message || String(error)
+    });
+  }
+
+  const evaluation = documentType === 'cnh'
+    ? evaluateCnhPolicy(analysisResult.data || {}, context, now)
+    : evaluateCrlvPolicy(normalizeVehicleOcrPayload(analysisResult.data || {}), context);
+
+  if (!evaluation.failureReason) {
+    return { analysisResult, policyChecks: evaluation.checks };
+  }
+
+  return {
+    analysisResult: {
+      ...analysisResult,
+      success: false,
+      reason: evaluation.failureReason
+    },
+    policyChecks: evaluation.checks
+  };
+}
+
+// Avisa o motorista fora do app quando um documento precisa de ajuste. O
+// socket só alcança quem está com o app aberto.
+async function sendDocumentAdjustmentPush({ driverId, documentType, reason }) {
+  try {
+    const FCMService = require('./fcm-service');
+    const redisPool = require('../utils/redis-pool');
+    const fcmService = new FCMService(redisPool.getConnection());
+    await fcmService.initialize();
+    const label = documentType === 'crlv' ? 'CRLV' : 'CNH';
+    return await fcmService.sendNotificationToUser(driverId, {
+      title: `Sua ${label} precisa de ajuste`,
+      body: reason || `Abra o app para ver o que corrigir na sua ${label}.`,
+      data: {
+        type: 'driver_document_request',
+        userType: 'driver',
+        driverId: String(driverId),
+        documentType: String(documentType),
+        screen: 'RobotaxiPrototypeDriverDocuments',
+        source: 'document_analysis'
+      },
+      channelId: 'driver_updates',
+      priority: 'high'
+    });
+  } catch (error) {
+    logError(error, 'Erro ao enviar push de documento com ajuste', {
+      service: 'driver-activation-queue',
+      driverId,
+      documentType
+    });
+    return { success: false, error: error?.message || String(error) };
+  }
 }
 
 function buildQueuedDocumentMetadata(job = {}) {
@@ -1256,6 +1375,14 @@ class DriverDocumentAnalysisQueue {
           throw new Error(`UNSUPPORTED_DOCUMENT_TYPE_${safeDocumentType || 'unknown'}`);
         }
 
+        const policy = await applyDriverDocumentPolicy({
+          driverId: safeDriverId,
+          documentType: safeDocumentType,
+          analysisResult
+        });
+        analysisResult = policy.analysisResult;
+        const policyChecks = policy.policyChecks;
+
         if (!analysisResult?.success) {
           const persistenceResult = await updateDocumentState({
             driverId: safeDriverId,
@@ -1267,8 +1394,17 @@ class DriverDocumentAnalysisQueue {
             extractionSource: analysisResult?.extractionSource || null,
             model: analysisResult?.model || null,
             metadata: buildQueuedDocumentMetadata(currentJob),
+            policyChecks,
             io: currentJob.io
           });
+
+          if (!persistenceResult?.stale) {
+            await sendDocumentAdjustmentPush({
+              driverId: safeDriverId,
+              documentType: safeDocumentType,
+              reason: analysisResult?.reason || ''
+            });
+          }
 
           runtimeMetrics.recordRealtimeUpdate(
             'driver_activation_queue',
@@ -1299,6 +1435,7 @@ class DriverDocumentAnalysisQueue {
             biometricFace: cnhFaceBiometric?.documentPayload || null
           },
           biometricState: cnhFaceBiometric,
+          policyChecks,
           io: currentJob.io
         });
 
@@ -1550,6 +1687,8 @@ module.exports = {
   runWithDocumentMutationLease,
   runWithCurrentDocumentBinding,
   updateDocumentState,
+  applyDriverDocumentPolicy,
+  sendDocumentAdjustmentPush,
   isRetryableCnhFaceBiometricError,
   getCnhFaceBiometricRetryDelayMs
 };

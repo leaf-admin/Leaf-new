@@ -60,6 +60,14 @@ function formatBirthDate(value) {
   return iso ? `${iso[3]}/${iso[2]}/${iso[1]}` : raw || "-";
 }
 
+function formatExtractedValue(key, value) {
+  if (typeof value === "boolean") {
+    if (key === "ear") return value ? "Sim" : "Não consta";
+    return value ? "Sim" : "Não";
+  }
+  return String(value);
+}
+
 function ExtractedData({ data }) {
   const entries = Object.entries(data || {})
     .filter(([key, value]) => DATA_LABELS[key] && value !== null && value !== undefined && typeof value !== "object" && String(value).trim());
@@ -69,10 +77,35 @@ function ExtractedData({ data }) {
       {entries.map(([key, value]) => (
         <div key={key}>
           <dt>{DATA_LABELS[key]}</dt>
-          <dd>{String(value)}</dd>
+          <dd>{formatExtractedValue(key, value)}</dd>
         </div>
       ))}
     </dl>
+  );
+}
+
+const CHECK_TONES = {
+  ok: { tone: "ok", label: "OK" },
+  warn: { tone: "warn", label: "Atenção" },
+  fail: { tone: "bad", label: "Falhou" },
+  unknown: { tone: "muted", label: "Não verificado" },
+};
+
+function PolicyChecks({ checks }) {
+  if (!Array.isArray(checks) || checks.length === 0) return null;
+  return (
+    <ul className="driver-checks" data-testid="driver-policy-checks">
+      {checks.map((check) => {
+        const tone = CHECK_TONES[check?.status] || CHECK_TONES.unknown;
+        return (
+          <li key={check?.key || check?.label}>
+            <span className={`driver-pill driver-pill-${tone.tone}`}>{tone.label}</span>
+            <strong>{check?.label}</strong>
+            {check?.detail ? <span className="table-muted">{check.detail}</span> : null}
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
@@ -258,6 +291,7 @@ function DriverDetailContent({ id }) {
                   {step.document ? (
                     <>
                       <ExtractedData data={step.document.extractedData} />
+                      <PolicyChecks checks={step.document.policyChecks} />
                       <div className="driver-timeline-actions">
                         {step.document.contentAvailable ? (
                           <button type="button" className="button-secondary" disabled={busy === `open-${step.document.type}`} onClick={() => openDocument(step.document.type)}>

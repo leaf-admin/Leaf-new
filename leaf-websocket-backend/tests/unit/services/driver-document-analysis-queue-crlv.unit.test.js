@@ -51,6 +51,7 @@ const {
   runWithCurrentDocumentBinding,
   updateDocumentState
 } = require('../../../services/driver-document-analysis-queue');
+const { REASONS } = require('../../../services/driver-document-policy-checks');
 
 function clone(value) {
   if (value === undefined || value === null) return value;
@@ -532,12 +533,12 @@ describe('driver-document-analysis-queue CRLV persistence', () => {
     const [documentUpdate] = documentCommits(db, 'crlv');
     expect(documentUpdate['driver_activation/driver_1/documents/crlv']).toMatchObject({
       status: 'failed',
-      reason: 'CRLV sem dados obrigatórios de veículo (placa, RENAVAM, modelo e cor).'
+      reason: REASONS.crlvIncomplete
     });
     expect(documentUpdate['users/driver_1/documents/crlv']).toMatchObject({
       status: 'rejected',
       analysisStatus: 'failed',
-      rejectionReason: 'CRLV sem dados obrigatórios de veículo (placa, RENAVAM, modelo e cor).'
+      rejectionReason: REASONS.crlvIncomplete
     });
     expect(db.read('driver_documents_index')).toBeNull();
     expect(db.read('driver_documents_index_stats/crlv')).toEqual({ pending: 0, approved: 0, rejected: 1 });
