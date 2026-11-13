@@ -740,6 +740,18 @@ async function recomputeDriverActivationStatus(driverId) {
       .map(([field, value]) => userWrite(safeDriverId, ['driverActivation', field], value))
   ]);
 
+  try {
+    // Cadastro pronto, faltando só a primeira validação facial: avisa por push uma vez.
+    const { maybeNotifyDriverReady } = require('./driver-ready-online-notify');
+    await maybeNotifyDriverReady({ driverId: safeDriverId, canonicalState, firestore });
+  } catch (error) {
+    logStructured('warn', 'Falha no aviso de cadastro pronto', {
+      service: 'driver-activation-queue',
+      driverId: safeDriverId,
+      error: error?.message || String(error)
+    });
+  }
+
   if (canGoOnline) {
     try {
       // Carregado sob demanda para não criar ciclo de inicialização.
