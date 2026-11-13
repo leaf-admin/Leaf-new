@@ -123,6 +123,12 @@ jest.mock('../../../utils/redis-pool', () => ({
   })),
 }));
 
+const mockBotEventEmit = jest.fn();
+jest.mock('../../../services/bot-event-service', () => ({
+  emit: (...args) => mockBotEventEmit(...args),
+  driverDashboardUrl: (id) => `https://dashboard.leaf.app.br/drivers/${encodeURIComponent(id)}`,
+}));
+
 const accountRoutes = require('../../../routes/account-routes');
 
 function createApp() {
@@ -466,6 +472,42 @@ describe('account deletion route', () => {
       expect.objectContaining({ usertype: 'driver', userType: 'driver', role: 'driver' }),
       expect.objectContaining({ mergeFields: expect.any(Array) })
     );
+    // Onboarding is told once, with only the technical id and the dashboard link.
+    expect(mockBotEventEmit).toHaveBeenCalledTimes(1);
+    expect(mockBotEventEmit).toHaveBeenCalledWith('driver.registered', {
+      driverId: 'review-user',
+      source: 'profile_completion',
+      status: 'pending',
+      dashboardUrl: 'https://dashboard.leaf.app.br/drivers/review-user',
+    }, { dedupeKey: 'review-user', severity: 'N3', money: false });
+  });
+
+  it('does not announce a driver registration for passengers or later profile edits', async () => {
+    const customer = await request(createApp())
+      .put('/api/account/profile')
+      .set('Authorization', 'Bearer firebase-token')
+      .send({ name: 'Passageiro Novo', usertype: 'customer', acceptTerms: true, acceptPrivacy: true });
+    expect(customer.status).toBe(200);
+
+    mockUserDocGet.mockResolvedValue({
+      exists: true,
+      data: () => ({
+        uid: 'review-user',
+        usertype: 'driver',
+        userType: 'driver',
+        phone: '+5521102938475',
+        phoneValidated: true,
+        profileComplete: true,
+        onboardingCompleted: true,
+      }),
+    });
+    const edit = await request(createApp())
+      .put('/api/account/profile')
+      .set('Authorization', 'Bearer firebase-token')
+      .send({ name: 'Motorista Editado' });
+    expect(edit.status).toBe(200);
+
+    expect(mockBotEventEmit).not.toHaveBeenCalled();
   });
 
   it('requires a CPF when a new driver profile is completed', async () => {

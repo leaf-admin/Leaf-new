@@ -792,6 +792,7 @@ router.put('/api/account/profile', requireFirebase, async (req, res) => {
 
     const sanitizedPatch = sanitizeProfilePatch(incomingProfile);
     let baseProfile = existingResult.profile || {};
+    let registeredAsDriver = false;
     if (isFirstProfileCompletion) {
       const explicitRole = resolveExplicitProfileRole(incomingProfile);
       if (explicitRole.error) {
@@ -841,6 +842,7 @@ router.put('/api/account/profile', requireFirebase, async (req, res) => {
         }
 
         sanitizedPatch.consentBackgroundCheck = true;
+        registeredAsDriver = true;
         baseProfile = {
           ...baseProfile,
           approved: false,
@@ -873,6 +875,17 @@ router.put('/api/account/profile', requireFirebase, async (req, res) => {
       await saveAccountProfile({ userId, profile: nextProfile });
     }
     await projectCanonicalDriverRoleToRealtimeDB(userId, nextProfile);
+    if (registeredAsDriver) {
+      // Aviso ao onboarding (piloto): só id técnico e link do painel, nunca nome, CPF ou telefone.
+      // emit() nunca lança; sem await para não atrasar a resposta ao app.
+      const botEvents = require('../services/bot-event-service');
+      botEvents.emit('driver.registered', {
+        driverId: userId,
+        source: 'profile_completion',
+        status: 'pending',
+        dashboardUrl: botEvents.driverDashboardUrl(userId),
+      }, { dedupeKey: userId, severity: 'N3', money: false });
+    }
     const storedDoc = await admin.firestore().collection('users').doc(userId).get();
     const responseProfile = composeProfileRecord(
       userId,

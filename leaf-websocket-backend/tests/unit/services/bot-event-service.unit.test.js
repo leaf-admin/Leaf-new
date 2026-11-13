@@ -17,6 +17,7 @@ const {
   signAgentesPayload,
   sanitizeData,
   retryDelayMs,
+  driverDashboardUrl,
 } = require('../../../services/bot-event-service');
 
 const SECRET = `whsec_${Buffer.from('segredo-de-teste-dos-bots').toString('base64')}`;
@@ -259,6 +260,57 @@ describe('bot event service', () => {
       staleSeconds: 75,
       lastLocationAt: '2026-10-22T12:00:00.000Z',
     });
+  });
+
+  it('routes driver.registered to onboarding with the dashboard link and no personal data', async () => {
+    const savedBase = process.env.LEAF_DASHBOARD_BASE_URL;
+    process.env.BOT_EVENTS_ONBOARDING_URL = 'https://relay.example.test/hooks/onboarding';
+    process.env.BOT_EVENTS_ONBOARDING_SECRET = SECRET;
+    try {
+      delete process.env.LEAF_DASHBOARD_BASE_URL;
+      expect(ROUTES['driver.registered']).toEqual(['onboarding']);
+      expect(driverDashboardUrl('drv/1')).toBe('https://dashboard.leaf.app.br/drivers/drv%2F1');
+      expect(driverDashboardUrl('')).toBeNull();
+      process.env.LEAF_DASHBOARD_BASE_URL = 'https://painel.example.test/';
+      expect(driverDashboardUrl('drv-1')).toBe('https://painel.example.test/drivers/drv-1');
+
+      const { service, post } = build();
+      const result = await service.emit('driver.registered', {
+        driverId: 'drv-1',
+        source: 'profile_completion',
+        status: 'pending',
+        dashboardUrl: driverDashboardUrl('drv-1'),
+        name: 'Motorista Novo',
+        cpf: '123.456.789-09',
+        phone: '+5521999999999',
+      }, { dedupeKey: 'drv-1', severity: 'N3', money: false });
+      const again = await service.emit('driver.registered', { driverId: 'drv-1' }, { dedupeKey: 'drv-1' });
+      await flush();
+
+      expect(result.queued).toBe(1);
+      expect(again).toMatchObject({ queued: 0, skipped: 'duplicate' });
+      expect(post).toHaveBeenCalledTimes(1);
+      const [url, body] = post.mock.calls[0];
+      expect(url).toBe('https://relay.example.test/hooks/onboarding');
+      expect(JSON.parse(body)).toMatchObject({
+        type: 'driver.registered',
+        severity: 'N3',
+        money: false,
+        data: {
+          driverId: 'drv-1',
+          source: 'profile_completion',
+          status: 'pending',
+          dashboardUrl: 'https://painel.example.test/drivers/drv-1',
+        },
+      });
+      expect(Object.keys(JSON.parse(body).data).sort()).toEqual(['dashboardUrl', 'driverId', 'source', 'status']);
+      expect(body).not.toMatch(/Motorista|123\.456|99999/);
+    } finally {
+      delete process.env.BOT_EVENTS_ONBOARDING_URL;
+      delete process.env.BOT_EVENTS_ONBOARDING_SECRET;
+      if (savedBase === undefined) delete process.env.LEAF_DASHBOARD_BASE_URL;
+      else process.env.LEAF_DASHBOARD_BASE_URL = savedBase;
+    }
   });
 
   it('keeps only scalar allowed fields and caps their size', () => {
