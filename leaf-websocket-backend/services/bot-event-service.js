@@ -53,6 +53,9 @@ const ROUTES = Object.freeze({
   'driver.registered': ['onboarding'],
   // Resumo diário das filas do painel (ops-daily-digest, no worker de ride health).
   'ops.daily_digest': ['operacao'],
+  // Motorista pediu saque: o Pix só sai depois de alguém conferir e clicar em Processar
+  // no painel (Reconciliação). Avisa na hora para o saque não ficar parado.
+  'withdrawal.requested': ['operacao'],
 });
 
 const DEFAULT_DASHBOARD_BASE_URL = 'https://dashboard.leaf.app.br';
@@ -72,6 +75,8 @@ const DATA_FIELDS = Object.freeze([
   // Resumo diário: só contagens.
   'reviewCount', 'readyToApprove', 'backgroundCertificates', 'documentsToReview', 'manualReview',
   'waitingOver24h', 'oldestWaitingHours', 'cpfReviews', 'supportOpen', 'withdrawalsPending',
+  // Saque pedido: só o id do saque (o motorista vai em driverId e o valor em amountCents).
+  'withdrawalId',
 ]);
 
 // Link da ficha do motorista no painel (app/drivers/[id] do leaf-dashboard-js).

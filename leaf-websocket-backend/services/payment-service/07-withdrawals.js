@@ -11,6 +11,21 @@ const {
 } = require('./shared');
 const { toPendingWithdrawalAdminView } = require('../driver-withdrawal-view');
 
+// Avisa a rotina Operação que um saque espera conferência. Nunca lança nem atrasa o pedido.
+function notifyWithdrawalRequested({ withdrawalId, driverId, amountCents }) {
+  try {
+    const base = String(process.env.LEAF_DASHBOARD_BASE_URL || 'https://dashboard.leaf.app.br').trim().replace(/\/+$/, '');
+    require('../bot-event-service').emit('withdrawal.requested', {
+      withdrawalId: String(withdrawalId || ''),
+      driverId: String(driverId || ''),
+      amountCents: Number(amountCents || 0),
+      dashboardUrl: `${base}/financial-reconciliation#saques`
+    }, { dedupeKey: String(withdrawalId || ''), severity: 'N2', money: true }).catch(() => null);
+  } catch (_) {
+    // O contador do painel e o resumo diário continuam mostrando o saque.
+  }
+}
+
 function notifyWithdrawalQueueChanged() {
   try {
     require('../ops-pending-service').notifyPendingChanged('withdrawal');
@@ -249,6 +264,7 @@ class PaymentServiceWithdrawalsMethods {
       if (!transactionResult.idempotentReplay) {
         // Contador de saques do painel (sem leitura: só invalida o cache e avisa).
         notifyWithdrawalQueueChanged();
+        notifyWithdrawalRequested({ withdrawalId: transactionResult.withdrawalId, driverId, amountCents });
       }
 
       if (transactionResult.idempotentReplay) {

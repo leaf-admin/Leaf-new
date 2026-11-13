@@ -319,3 +319,23 @@ describe('bot event service', () => {
     expect([1, 2, 3, 10].map(retryDelayMs)).toEqual([30000, 60000, 120000, 1800000]);
   });
 });
+
+describe('withdrawal.requested', () => {
+  it('vai para a Operação e leva só id do saque, motorista, valor e link do painel', () => {
+    expect(ROUTES['withdrawal.requested']).toEqual(['operacao']);
+    const data = sanitizeData({
+      withdrawalId: 'wd_1',
+      driverId: 'd1',
+      amountCents: 1543,
+      dashboardUrl: 'https://dashboard.leaf.app.br/financial-reconciliation#saques',
+      pixKey: 'motorista@email.com',
+      driverName: 'Fulano'
+    });
+    expect(data).toEqual({
+      withdrawalId: 'wd_1',
+      driverId: 'd1',
+      amountCents: 1543,
+      dashboardUrl: 'https://dashboard.leaf.app.br/financial-reconciliation#saques'
+    });
+  });
+});
