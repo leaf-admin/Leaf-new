@@ -506,7 +506,8 @@ class DriverApplicationService {
         fileType: documents[docType]?.fileType || null,
         rejectionReason: documents[docType]?.rejectionReason || null,
         extractedData: documents[docType]?.extractedData || null,
-        extractedIdentity: documents[docType]?.extractedIdentity || null
+        extractedIdentity: documents[docType]?.extractedIdentity || null,
+        policyChecks: Array.isArray(documents[docType]?.policyChecks) ? documents[docType].policyChecks : null
       }))
     };
 

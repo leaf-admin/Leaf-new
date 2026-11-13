@@ -2972,6 +2972,8 @@ code {
 .driver-extracted dt { font-size: 12px; color: var(--text-muted); }
 .driver-extracted dd { margin: 2px 0 0; font-weight: 500; }
 .driver-extracted-wide { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.driver-checks { list-style: none; display: grid; gap: 6px; margin: 10px 0 0; padding: 0; }
+.driver-checks li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; }
 .driver-advanced { margin-top: 18px; }
 .driver-notice { padding: 10px 14px; border-radius: var(--radius-md); background: var(--success-bg); color: var(--success-text); }
 .driver-reason-options { display: grid; gap: 8px; margin-bottom: 12px; }
