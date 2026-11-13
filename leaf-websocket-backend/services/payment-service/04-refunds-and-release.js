@@ -673,6 +673,14 @@ class PaymentServiceRefundsAndReleaseMethods {
       return refundResult;
     }
 
+    // O dinheiro voltou para o passageiro: avisa mesmo se o registro canônico falhar depois.
+    require('../transactional-push').notifyRefundProcessed({
+      passengerId: passengerId || paymentRecord.passengerId || null,
+      bookingId: canonicalRideId,
+      amountCents: refundAmount,
+      namespace: contextResult.context?.namespace || null
+    }).catch(() => null);
+
     const markResult = await this.markPaymentRefunded(canonicalRideId, {
       refundAmount,
       cancellationFee,

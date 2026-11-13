@@ -443,6 +443,11 @@ class SupportTicketService {
       updatedAt: now
     };
 
+    // Resposta da equipe avisa o dono do chamado por push (no máximo 1 a cada 5 min).
+    if (senderType === 'agent' && isInternal !== true) {
+      require('./transactional-push').notifySupportReply(ticket).catch(() => null);
+    }
+
     // Só mensagem do usuário acorda o bot, no máximo uma vez a cada 5 min por chamado.
     if (senderType === 'user' && isInternal !== true) {
       notifySupportBot('support.message_created', ticket, {
