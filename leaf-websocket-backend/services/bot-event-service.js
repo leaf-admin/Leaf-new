@@ -51,6 +51,8 @@ const ROUTES = Object.freeze({
   // Motorista concluiu o cadastro (primeira conclusão do perfil como motorista). Piloto:
   // avisa o onboarding com o link da ficha no painel; o detalhe fica no painel.
   'driver.registered': ['onboarding'],
+  // Resumo diário das filas do painel (ops-daily-digest, no worker de ride health).
+  'ops.daily_digest': ['operacao'],
 });
 
 const DEFAULT_DASHBOARD_BASE_URL = 'https://dashboard.leaf.app.br';
@@ -67,6 +69,9 @@ const DATA_FIELDS = Object.freeze([
   'driverId', 'staleSeconds', 'lastLocationAt',
   // Link da ficha do motorista no painel (só base + id técnico, sem dado pessoal).
   'dashboardUrl',
+  // Resumo diário: só contagens.
+  'reviewCount', 'readyToApprove', 'backgroundCertificates', 'documentsToReview', 'manualReview',
+  'waitingOver24h', 'oldestWaitingHours', 'cpfReviews', 'supportOpen',
 ]);
 
 // Link da ficha do motorista no painel (app/drivers/[id] do leaf-dashboard-js).

@@ -9,6 +9,7 @@ const { getAdminUser } = require('../utils/admin-user-cache');
 const { resolveJwtSecret } = require('../utils/jwt-secret-resolver');
 const { getDashboardLiveData } = require('./dashboard-live-data-service');
 const { getRideOperationsSnapshot } = require('./ride-health-monitor');
+const { OPS_ROOM, configureOpsPending } = require('./ops-pending-service');
 let firebaseConfig = null;
 try {
   firebaseConfig = require('../firebase-config');
@@ -46,6 +47,7 @@ class DashboardWebSocketService {
     this.lastH3RefreshAt = 0;
     this.pendingH3RefreshTimerId = null;
     this.pendingH3RefreshPayload = null;
+    configureOpsPending({ io, redis });
     this.setupDashboardEvents();
   }
 
@@ -240,7 +242,10 @@ class DashboardWebSocketService {
 
       // 🔐 Autenticação do dashboard via JWT ou Firebase Auth Token
       socket.on('authenticate', async (data) => {
-        const { firebaseToken, jwtToken } = data;
+        const { firebaseToken, jwtToken } = data || {};
+        // mode "ops": conexão leve só para avisos de pendências. Não entra na
+        // sala que liga os loops de métricas e mapa ao vivo.
+        const opsOnly = String(data?.mode || '').toLowerCase() === 'ops';
 
         // Prioridade 1: JWT Token (novo método)
         if (jwtToken) {
@@ -275,7 +280,10 @@ class DashboardWebSocketService {
             socket.userId = decoded.userId;
             socket.userRole = adminData.role || 'viewer';
             socket.userPermissions = Array.isArray(adminData.permissions) ? adminData.permissions : [];
-            this.markSocketAuthenticated(socket);
+            socket.join(OPS_ROOM);
+            if (!opsOnly) {
+              this.markSocketAuthenticated(socket);
+            }
 
             socket.emit('authenticated', {
               message: 'Dashboard autenticado com sucesso',
@@ -287,8 +295,10 @@ class DashboardWebSocketService {
               }
             });
 
-            logStructured('info', 'Dashboard autenticado (JWT)', { service: 'dashboard-websocket', socketId: socket.id, email: decoded.email || adminData.email, role: socket.userRole });
-            this.pushInitialSnapshot(socket).catch(() => {});
+            logStructured('info', 'Dashboard autenticado (JWT)', { service: 'dashboard-websocket', socketId: socket.id, email: decoded.email || adminData.email, role: socket.userRole, opsOnly });
+            if (!opsOnly) {
+              this.pushInitialSnapshot(socket).catch(() => {});
+            }
             return;
 
           } catch (error) {
@@ -341,6 +351,7 @@ class DashboardWebSocketService {
           socket.userId = decodedToken.uid;
           socket.userRole = adminData.role;
           socket.userPermissions = adminData.permissions || [];
+          socket.join(OPS_ROOM);
           this.markSocketAuthenticated(socket);
 
           socket.emit('authenticated', {

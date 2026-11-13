@@ -11,14 +11,22 @@ import Panel from "@/src/components/ui/Panel";
 import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
 import {
   DRIVER_TABS,
+  buildDriverFunnel,
   classifyDriver,
   countByTab,
   matchesSearch,
   resolveDriverHeadline,
   resolveDriverSteps,
+  REVIEW_QUEUE_STORAGE_KEY,
+  sortReviewQueue,
+  waitingSinceMs,
 } from "@/src/utils/driver-review";
+import { formatWaiting, subscribeOpsPending, waitingTone } from "@/src/services/ops-pending-store";
 
-const DRIVERS_REFRESH_MS = 60000;
+// A lista lê todos os cadastros do backend. Em vez de recarregar a cada
+// minuto, recarrega quando o backend avisa que alguma fila mudou e, como rede
+// de segurança, a cada 5 min com a aba visível.
+const DRIVERS_REFRESH_MS = 5 * 60 * 1000;
 const PAGE_LIMIT = 200;
 const TAB_TONES = { review: "warning", onboarding: "default", approved: "positive", rejected: "danger", all: "default" };
 const TAB_HINTS = {
@@ -61,6 +69,8 @@ function DriversPageContent() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [claims, setClaims] = useState({});
+  const [now, setNow] = useState(() => Date.now());
 
   const load = useCallback(async () => {
     setError("");
@@ -82,13 +92,50 @@ function DriversPageContent() {
     return () => clearInterval(timer);
   }, [load]);
 
+  // Recarrega quando o backend avisa que uma fila mudou (sem custo quando nada muda).
+  useEffect(() => {
+    let lastSeq = null;
+    return subscribeOpsPending((state) => {
+      if (lastSeq !== null && state.changeSeq !== lastSeq) load();
+      lastSeq = state.changeSeq;
+    });
+  }, [load]);
+
+  // Quem está revisando cada cadastro (Redis, sem Firestore).
+  useEffect(() => {
+    let active = true;
+    leafAPI.getReviewClaims()
+      .then((response) => { if (active) setClaims(response?.claims || {}); })
+      .catch(() => { if (active) setClaims({}); });
+    return () => { active = false; };
+  }, [applications]);
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 60000);
+    return () => clearInterval(timer);
+  }, []);
+
   const counts = useMemo(() => countByTab(applications), [applications]);
-  const rows = useMemo(
-    () => applications
+  const funnel = useMemo(() => buildDriverFunnel(applications), [applications]);
+  const rows = useMemo(() => {
+    const filtered = applications
       .filter((item) => tab === "all" || classifyDriver(item) === tab)
-      .filter((item) => matchesSearch(item, search)),
-    [applications, search, tab],
-  );
+      .filter((item) => matchesSearch(item, search));
+    return tab === "review" ? sortReviewQueue(filtered) : filtered;
+  }, [applications, search, tab]);
+
+  // Guarda a ordem da fila para o "próximo da fila" na ficha (só nesta aba do navegador).
+  useEffect(() => {
+    if (tab !== "review") return;
+    try {
+      window.sessionStorage.setItem(
+        REVIEW_QUEUE_STORAGE_KEY,
+        JSON.stringify(rows.map((item) => item.id || item.driver?.id).filter(Boolean)),
+      );
+    } catch {
+      // Sem armazenamento: a ficha só não mostra "próximo".
+    }
+  }, [rows, tab]);
 
   const scopeQuery = kycScope === "sandbox" ? "&kycScope=sandbox" : "";
   const selectTab = (nextTab) => router.replace(`/drivers?tab=${nextTab}${scopeQuery}`, { scroll: false });
@@ -161,8 +208,20 @@ function DriversPageContent() {
                           <span className="table-muted">{item.driver?.phone || "-"}{vehicle.activeVehiclePlate ? ` · ${vehicle.activeVehiclePlate}` : ""}</span>
                         </span>
                         <StepDots steps={steps} />
-                        <span className={`driver-headline driver-headline-${bucket}`}>{resolveDriverHeadline(item)}</span>
-                        <span className="table-muted driver-date">{formatDate(item.submissionDate)}</span>
+                        <span className={`driver-headline driver-headline-${bucket}`}>
+                          {resolveDriverHeadline(item)}
+                          {claims[id] ? <span className="driver-claim"> Em revisão por {claims[id].name}</span> : null}
+                        </span>
+                        {bucket === "review" && waitingSinceMs(item) ? (
+                          <span
+                            className={`driver-pill driver-pill-${waitingTone(now - waitingSinceMs(item))} driver-wait driver-date`}
+                            title={`Esperando desde ${new Date(waitingSinceMs(item)).toLocaleString("pt-BR")}`}
+                          >
+                            há {formatWaiting(now - waitingSinceMs(item))}
+                          </span>
+                        ) : (
+                          <span className="table-muted driver-date">{formatDate(item.submissionDate)}</span>
+                        )}
                         <span className="driver-open" aria-hidden="true">›</span>
                       </Link>
                     </li>
@@ -171,6 +230,24 @@ function DriversPageContent() {
               </ul>
             ) : null}
           </Panel>
+
+          {!loading && funnel.total > 0 ? (
+            <Panel
+              className="panel-span-full"
+              title="Funil do cadastro"
+              subtitle={`${funnel.total} cadastros ativos. ${funnel.medianApprovalMs ? `Do cadastro à aprovação: ${formatWaiting(funnel.medianApprovalMs)} (mediana de ${funnel.approvalSamples}).` : "Ainda sem aprovações com data para medir o tempo."}`}
+            >
+              <div className="ops-funnel" data-testid="driver-funnel">
+                {funnel.stages.map((stage) => (
+                  <div key={stage.key} className="ops-funnel-row">
+                    <span>{stage.label}</span>
+                    <span className="ops-funnel-bar" aria-hidden="true"><span style={{ width: `${stage.percent}%` }} /></span>
+                    <strong>{stage.count}</strong>
+                  </div>
+                ))}
+              </div>
+            </Panel>
+          ) : null}
         </section>
 
         <ErrorText message={error} />

@@ -8,6 +8,7 @@ import { leafAPI } from "@/src/services/api";
 import Panel from "@/src/components/ui/Panel";
 import RidesTrendChart from "@/src/components/ui/RidesTrendChart";
 import { ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
+import { formatWaiting, subscribeOpsPending, waitingTone } from "@/src/services/ops-pending-store";
 
 const DASHBOARD_REFRESH_MS = 60000;
 
@@ -600,15 +601,51 @@ function CommandStat({ label, value, detail, tone = "default" }) {
 }
 
 // Lista curta do que pede ação: só entra o que tem pendência.
-function buildTodoItems(snapshot, attentionItems = []) {
+const REVIEW_REASON_LABELS = {
+  ready_to_approve: ["pronto para aprovar", "prontos para aprovar"],
+  background_certificate: ["certidão de antecedentes", "certidões de antecedentes"],
+  documents: ["com documento para revisar", "com documentos para revisar"],
+  manual_review: ["em revisão manual", "em revisão manual"],
+};
+
+function describeReviewReasons(byReason = {}) {
+  return Object.entries(REVIEW_REASON_LABELS)
+    .map(([key, [one, many]]) => {
+      const count = toNumber(byReason[key]);
+      return count > 0 ? `${count} ${count === 1 ? one : many}` : null;
+    })
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function buildTodoItems(snapshot, attentionItems = [], pending = null) {
   const metrics = snapshot?.dailyMetrics || {};
   const support = snapshot?.support || {};
   const driverOnboarding = snapshot?.driverOnboarding || {};
   const supportBreaches = toNumber(support.overdueAckCount) + toNumber(support.overdueFirstResponseCount);
   const items = [];
-  const pendingDocs = toNumber(driverOnboarding.pendingDocuments);
-  if (pendingDocs > 0) {
-    items.push({ id: "drivers", tone: "warn", href: "/drivers?tab=review", title: `${pendingDocs} ${pendingDocs === 1 ? "documento de motorista" : "documentos de motorista"} para revisar`, detail: "Aprovar ou pedir reenvio" });
+  const reviewDrivers = toNumber(pending?.drivers?.review);
+  if (pending) {
+    if (reviewDrivers > 0) {
+      const oldestMs = pending.drivers?.oldestWaitingMs;
+      const reasons = describeReviewReasons(pending.drivers?.byReason);
+      items.push({
+        id: "drivers",
+        tone: waitingTone(oldestMs) === "bad" ? "bad" : "warn",
+        href: "/drivers?tab=review",
+        title: `${reviewDrivers} ${reviewDrivers === 1 ? "cadastro de motorista" : "cadastros de motorista"} para revisar`,
+        detail: [reasons, oldestMs ? `o mais antigo espera há ${formatWaiting(oldestMs)}` : null].filter(Boolean).join(" · "),
+      });
+    }
+    const cpfReviews = toNumber(pending.cpfReviews);
+    if (cpfReviews > 0) {
+      items.push({ id: "cpf", tone: "warn", href: "/users", title: `${cpfReviews} ${cpfReviews === 1 ? "conta com CPF em revisão" : "contas com CPF em revisão"}`, detail: "CPF repetido em outra conta" });
+    }
+  } else {
+    const pendingDocs = toNumber(driverOnboarding.pendingDocuments);
+    if (pendingDocs > 0) {
+      items.push({ id: "drivers", tone: "warn", href: "/drivers?tab=review", title: `${pendingDocs} ${pendingDocs === 1 ? "documento de motorista" : "documentos de motorista"} para revisar`, detail: "Aprovar ou pedir reenvio" });
+    }
   }
   const openTickets = toNumber(support.totalOpenTickets);
   if (openTickets > 0) {
@@ -685,7 +722,9 @@ export default function DashboardPage() {
   }, []);
 
   const attentionItems = useMemo(() => buildAttentionItems(snapshot), [snapshot]);
-  const todoItems = useMemo(() => buildTodoItems(snapshot, attentionItems), [snapshot, attentionItems]);
+  const [pending, setPending] = useState(null);
+  useEffect(() => subscribeOpsPending((state) => setPending(state.summary)), []);
+  const todoItems = useMemo(() => buildTodoItems(snapshot, attentionItems, pending), [snapshot, attentionItems, pending]);
   const metrics = snapshot?.dailyMetrics || {};
   const services = snapshot?.services || {};
   const costControls = snapshot?.costControls || {};

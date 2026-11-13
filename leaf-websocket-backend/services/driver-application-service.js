@@ -6,6 +6,11 @@ const ratingFirestoreStore = require('./rating-firestore-store');
 const userStore = require('./user-store');
 const vehicleStore = require('./vehicle-store');
 const driverDocumentStore = require('./driver-document-store');
+const {
+  buildReviewQueueFields,
+  estimateWaitingSince
+} = require('./driver-review-queue');
+const { notifyPendingChanged } = require('./ops-pending-service');
 
 const COLLECTION = 'driver_applications';
 const REVIEWABLE_DOCUMENT_TYPES = new Set(['cnh', 'crlv', 'antecedentes_criminais']);
@@ -683,12 +688,13 @@ class DriverApplicationService {
     if (!safeDriverId) return null;
 
     // Avaliações vivem no Firestore (`ratings`, por targetUserId).
-    const [ratingRows, canonicalProfileSnapshot, activation] = await Promise.all([
+    const [ratingRows, canonicalProfileSnapshot, activation, previousMirrorSnapshot] = await Promise.all([
       includeRatings
         ? ratingFirestoreStore.listByTarget(this.getFirestore(), resolvePersistenceScope({}, { allowLegacyOperational: true }), safeDriverId)
         : Promise.resolve(null),
       this.getFirestore().collection('users').doc(safeDriverId).get(),
-      driverDocumentStore.readActivation(this.getFirestore(), safeDriverId)
+      driverDocumentStore.readActivation(this.getFirestore(), safeDriverId),
+      this.collection().doc(safeDriverId).get()
     ]);
     const canonicalCnhNode = activation?.documents?.cnh || {};
     const application = await this.buildApplication(safeDriverId, {
@@ -700,12 +706,20 @@ class DriverApplicationService {
     });
     if (!application) return null;
 
+    const previousMirror = previousMirrorSnapshot?.exists ? previousMirrorSnapshot.data() || {} : {};
+    const { changed: reviewQueueChanged, ...reviewQueueFields } = buildReviewQueueFields(application, previousMirror);
+
     await this.collection().doc(safeDriverId).set({
       ...application,
+      ...reviewQueueFields,
       syncedAt: admin.firestore.FieldValue.serverTimestamp()
     }, { merge: true });
 
-    return application;
+    if (reviewQueueChanged) {
+      notifyPendingChanged('driver_application');
+    }
+
+    return { ...application, ...reviewQueueFields };
   }
 
   async syncAllDriverApplications() {
@@ -733,8 +747,13 @@ class DriverApplicationService {
     for (let index = 0; index < applications.length; index += 400) {
       const batch = firestore.batch();
       applications.slice(index, index + 400).forEach((application) => {
+        const { changed: _changed, ...reviewQueueFields } = buildReviewQueueFields(application, {});
         batch.set(this.collection().doc(application.id), {
           ...application,
+          ...reviewQueueFields,
+          reviewWaitingSince: reviewQueueFields.reviewWaitingSince
+            ? estimateWaitingSince(application) || reviewQueueFields.reviewWaitingSince
+            : null,
           syncedAt: admin.firestore.FieldValue.serverTimestamp()
         }, { merge: true });
       });
@@ -747,6 +766,38 @@ class DriverApplicationService {
     });
 
     return applications;
+  }
+
+  // Espelhos gravados antes da fila existir não têm reviewBucket. Esta tela
+  // já leu a coleção inteira; grava a fila só nos que faltam (uma vez).
+  async backfillReviewQueueFields(applications = []) {
+    const missing = applications.filter((application) => application?.id && !application.reviewBucket);
+    if (missing.length === 0) return applications;
+
+    const filled = new Map();
+    const firestore = this.getFirestore();
+    for (let index = 0; index < missing.length; index += 400) {
+      const batch = firestore.batch();
+      missing.slice(index, index + 400).forEach((application) => {
+        const { changed: _changed, ...fields } = buildReviewQueueFields(application, {});
+        if (fields.reviewWaitingSince) {
+          fields.reviewWaitingSince = estimateWaitingSince(application) || fields.reviewWaitingSince;
+        }
+        filled.set(application.id, fields);
+        batch.set(this.collection().doc(application.id), fields, { merge: true });
+      });
+      await batch.commit();
+    }
+
+    logStructured('info', 'Fila de revisão preenchida em espelhos antigos', {
+      service: 'driver-application-service',
+      total: missing.length
+    });
+    notifyPendingChanged('review_queue_backfill');
+
+    return applications.map((application) => (
+      filled.has(application.id) ? { ...application, ...filled.get(application.id) } : application
+    ));
   }
 
   async listApplications({
@@ -763,6 +814,8 @@ class DriverApplicationService {
 
     if (applications.length === 0) {
       applications = await this.syncAllDriverApplications();
+    } else {
+      applications = await this.backfillReviewQueueFields(applications);
     }
     const requestedPersistenceScope = String(persistenceScope || '').trim().toLowerCase();
     if (!['operational', 'sandbox'].includes(requestedPersistenceScope)) {
