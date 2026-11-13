@@ -1798,7 +1798,8 @@ router.post('/payment/withdrawals/:withdrawalId/process', authenticatePaymentAct
     }
 
     const { withdrawalId } = req.params;
-    const actorId = req.body?.actorId || 'system';
+    // Quem processou fica no saque (auditoria): o admin autenticado, nunca o corpo da requisição.
+    const actorId = req.paymentActor?.id || req.paymentActor?.uid || 'system';
 
     const result = await paymentService.processDriverWithdrawal(withdrawalId, actorId);
     if (result.success) {

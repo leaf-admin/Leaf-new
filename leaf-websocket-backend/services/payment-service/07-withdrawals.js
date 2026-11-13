@@ -9,6 +9,15 @@ const {
   logStructured,
   logError,
 } = require('./shared');
+const { toPendingWithdrawalAdminView } = require('../driver-withdrawal-view');
+
+function notifyWithdrawalQueueChanged() {
+  try {
+    require('../ops-pending-service').notifyPendingChanged('withdrawal');
+  } catch (_) {
+    // O contador expira sozinho pelo cache.
+  }
+}
 
 class PaymentServiceWithdrawalsMethods {
   /**
@@ -237,6 +246,11 @@ class PaymentServiceWithdrawalsMethods {
         };
       });
 
+      if (!transactionResult.idempotentReplay) {
+        // Contador de saques do painel (sem leitura: só invalida o cache e avisa).
+        notifyWithdrawalQueueChanged();
+      }
+
       if (transactionResult.idempotentReplay) {
         if (transactionResult.parameterConflict) {
           return {
@@ -464,21 +478,14 @@ class PaymentServiceWithdrawalsMethods {
         .get())
     );
 
+    // Visão do painel: chave Pix mascarada e datas em ISO (Timestamp não serializa).
     const withdrawals = [];
     snapshots.forEach((snapshot) => {
       snapshot.docs.forEach((doc) => {
-        const data = doc.data() || {};
-        withdrawals.push({
-          id: doc.id,
-          ...data
-        });
+        withdrawals.push(toPendingWithdrawalAdminView(doc.id, doc.data() || {}));
       });
     });
-    withdrawals.sort((a, b) => {
-      const aMs = Number(a?.createdAt?.toMillis?.() || 0);
-      const bMs = Number(b?.createdAt?.toMillis?.() || 0);
-      return aMs - bMs;
-    });
+    withdrawals.sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
 
     return {
       success: true,
@@ -646,6 +653,7 @@ class PaymentServiceWithdrawalsMethods {
           .catch(() => null);
       }
 
+      notifyWithdrawalQueueChanged();
       logStructured('warn', 'Falha ao processar saque na Woovi (mantido pendente)', {
         service: 'payment-service',
         withdrawalId,
@@ -670,6 +678,7 @@ class PaymentServiceWithdrawalsMethods {
       }
     });
 
+    notifyWithdrawalQueueChanged();
     // O Pix saiu: avisa o motorista mesmo se o ledger ainda for reconciliar.
     require('../transactional-push')
       .notifyWithdrawalProcessed({ driverId: withdrawal.driverId, withdrawalId, amountCents })

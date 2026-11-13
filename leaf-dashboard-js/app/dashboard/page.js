@@ -177,6 +177,10 @@ function buildTodoItems(snapshot, attentionItems = [], pending = null) {
         detail: [reasons, oldestMs ? `o mais antigo espera há ${formatWaiting(oldestMs)}` : null].filter(Boolean).join(" · "),
       });
     }
+    const withdrawalsPending = toNumber(pending.withdrawalsPending);
+    if (withdrawalsPending > 0) {
+      items.push({ id: "withdrawals", tone: "warn", href: "/financial-reconciliation#saques", title: `${withdrawalsPending} ${withdrawalsPending === 1 ? "saque para processar" : "saques para processar"}`, detail: "O Pix do motorista só sai depois do clique" });
+    }
     const cpfReviews = toNumber(pending.cpfReviews);
     if (cpfReviews > 0) {
       items.push({ id: "cpf", tone: "warn", href: "/users", title: `${cpfReviews} ${cpfReviews === 1 ? "conta com CPF em revisão" : "contas com CPF em revisão"}`, detail: "CPF repetido em outra conta" });

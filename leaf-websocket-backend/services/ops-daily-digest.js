@@ -32,6 +32,7 @@ function buildDigestData(summary = {}) {
     oldestWaitingHours: drivers.oldestWaitingMs ? Math.floor(drivers.oldestWaitingMs / 3600000) : 0,
     cpfReviews: Number(summary.cpfReviews || 0),
     supportOpen: Number(summary.supportOpen || 0),
+    withdrawalsPending: Number(summary.withdrawalsPending || 0),
     dashboardUrl: `${base}/drivers?tab=review`
   };
 }

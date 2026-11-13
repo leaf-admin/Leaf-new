@@ -8,6 +8,7 @@ import KpiCard from "@/src/components/ui/KpiCard";
 import Panel from "@/src/components/ui/Panel";
 import { EmptyState, ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
 import { KeyValueGrid, TechnicalDetails } from "@/src/components/ui/DataViews";
+import PendingWithdrawals from "@/src/components/finance/PendingWithdrawals";
 
 const severityTone = {
   critical: "status-bad",
@@ -249,6 +250,8 @@ export default function FinancialReconciliationPage() {
           <KpiCard title="Issues" value={issueCount} tone={issueCount > 0 ? "warning" : "positive"} />
           <KpiCard title="Relatórios" value={summary?.totalInPage || 0} />
         </section>
+
+        <PendingWithdrawals />
 
         <Panel
           title="Filtros"
