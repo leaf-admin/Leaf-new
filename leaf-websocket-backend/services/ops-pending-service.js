@@ -4,7 +4,7 @@
 //
 // Custo: o resumo fica em cache no Redis (compartilhado por todos os admins e
 // pelos dois gateways) por OPS_PENDING_CACHE_TTL_SECONDS. Cada recálculo lê só
-// os cadastros que estão na fila de revisão (select de 4 campos) e faz duas
+// os cadastros que estão na fila de revisão (select de 4 campos) e faz três
 // contagens agregadas (1 leitura cada por até 1000 entradas). Nenhum painel
 // lê a coleção inteira para montar o contador.
 //
@@ -23,6 +23,8 @@ const CACHE_TTL_SECONDS = Math.max(
 const REVIEW_LIST_LIMIT = 300;
 const NOTIFY_DEBOUNCE_MS = 1500;
 const SUPPORT_OPEN_STATUSES = ['open', 'assigned', 'in_progress', 'escalated'];
+// Saques esperando a conferência e o clique de processar no painel.
+const WITHDRAWAL_PENDING_STATUSES = ['pending', 'ledger_pending'];
 const REVIEW_REASONS = ['manual_review', 'ready_to_approve', 'background_certificate', 'documents'];
 
 let realtimeIo = null;
@@ -86,9 +88,10 @@ async function computePendingSummary(firestore, now = new Date()) {
     if (since && since <= dayAgoIso) waitingOver24h += 1;
   });
 
-  const [cpfReviews, supportOpen] = await Promise.all([
+  const [cpfReviews, supportOpen, withdrawalsPending] = await Promise.all([
     countQuery(firestore.collection('cpf_review_restrictions')),
-    countQuery(firestore.collection('support_tickets').where('status', 'in', SUPPORT_OPEN_STATUSES))
+    countQuery(firestore.collection('support_tickets').where('status', 'in', SUPPORT_OPEN_STATUSES)),
+    countQuery(firestore.collection('driver_withdrawals').where('status', 'in', WITHDRAWAL_PENDING_STATUSES))
   ]);
 
   const oldestWaitingMs = oldestWaitingSince ? Math.max(0, now.getTime() - Date.parse(oldestWaitingSince)) : null;
@@ -106,7 +109,8 @@ async function computePendingSummary(firestore, now = new Date()) {
     backgroundCertificates: byReason.background_certificate,
     cpfReviews,
     supportOpen,
-    total: total + (cpfReviews || 0) + (supportOpen || 0)
+    withdrawalsPending,
+    total: total + (cpfReviews || 0) + (supportOpen || 0) + (withdrawalsPending || 0)
   };
 }
 

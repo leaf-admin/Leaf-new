@@ -47,7 +47,7 @@ describe('buildReviewQueueFields', () => {
   });
 });
 
-function fakeFirestore({ reviewDocs = [], cpf = 2, support = 3 } = {}) {
+function fakeFirestore({ reviewDocs = [], cpf = 2, support = 3, withdrawals = 1 } = {}) {
   const calls = { select: null, limit: null };
   const countResult = (count) => ({ count: () => ({ get: async () => ({ data: () => ({ count }) }) }) });
   return {
@@ -70,6 +70,9 @@ function fakeFirestore({ reviewDocs = [], cpf = 2, support = 3 } = {}) {
       }
       if (name === 'cpf_review_restrictions') return countResult(cpf);
       if (name === 'support_tickets') return { where: () => countResult(support) };
+      if (name === 'driver_withdrawals') {
+        return { where: (field, op, value) => { calls.withdrawalStatuses = value; return countResult(withdrawals); } };
+      }
       throw new Error(`unexpected ${name}`);
     }
   };
@@ -91,7 +94,8 @@ describe('computePendingSummary', () => {
       oldestWaitingMs: 6 * 60 * 60 * 1000
     });
     expect(summary.drivers.byReason).toMatchObject({ documents: 1, background_certificate: 1 });
-    expect(summary).toMatchObject({ cpfReviews: 2, supportOpen: 3, total: 7, backgroundCertificates: 1 });
+    expect(summary).toMatchObject({ cpfReviews: 2, supportOpen: 3, withdrawalsPending: 1, total: 8, backgroundCertificates: 1 });
+    expect(firestore.calls.withdrawalStatuses).toEqual(['pending', 'ledger_pending']);
     // Lê só a fila de revisão, poucos campos e com limite.
     expect(firestore.calls.select).toEqual(['reviewReason', 'reviewWaitingSince', 'persistenceScope', 'driver']);
     expect(firestore.calls.limit).toBe(300);
@@ -192,5 +196,31 @@ describe('maybeRunOpsDailyDigest', () => {
     const now = new Date('2026-11-13T12:05:00Z');
     await maybeRunOpsDailyDigest(redis, { env: {}, now, loadSummary: async () => { throw new Error('x'); }, emitEvent: jest.fn() });
     expect(redis.del).toHaveBeenCalledWith('ops:daily_digest:2026-11-13');
+  });
+});
+
+describe('toPendingWithdrawalAdminView', () => {
+  const { toPendingWithdrawalAdminView } = require('../../../services/driver-withdrawal-view');
+  it('mascara a chave Pix, converte datas e corta o erro', () => {
+    const view = toPendingWithdrawalAdminView('w1', {
+      driverId: 'd1',
+      amountCents: 100,
+      feeCents: 100,
+      totalDebitCents: 200,
+      status: 'pending',
+      ledgerStatus: 'posted',
+      pixKey: 'motorista@email.com',
+      attempts: 2,
+      lastError: 'x'.repeat(500),
+      createdAt: { toDate: () => new Date('2026-11-13T12:00:00Z') }
+    });
+    expect(view).toMatchObject({
+      id: 'w1', driverId: 'd1', amountCents: 100, totalDebitCents: 200, attempts: 2,
+      createdAt: '2026-11-13T12:00:00.000Z'
+    });
+    expect(view.pixKeyMasked).not.toContain('motorista@');
+    expect(view.pixKeyMasked).toMatch(/@email\.com$/);
+    expect(view.lastError).toHaveLength(200);
+    expect(view).not.toHaveProperty('pixKey');
   });
 });

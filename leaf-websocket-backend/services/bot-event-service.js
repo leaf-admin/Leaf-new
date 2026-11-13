@@ -71,7 +71,7 @@ const DATA_FIELDS = Object.freeze([
   'dashboardUrl',
   // Resumo diário: só contagens.
   'reviewCount', 'readyToApprove', 'backgroundCertificates', 'documentsToReview', 'manualReview',
-  'waitingOver24h', 'oldestWaitingHours', 'cpfReviews', 'supportOpen',
+  'waitingOver24h', 'oldestWaitingHours', 'cpfReviews', 'supportOpen', 'withdrawalsPending',
 ]);
 
 // Link da ficha do motorista no painel (app/drivers/[id] do leaf-dashboard-js).

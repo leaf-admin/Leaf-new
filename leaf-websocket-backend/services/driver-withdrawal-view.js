@@ -75,6 +75,26 @@ function toDriverWithdrawalView(id, data = {}) {
   };
 }
 
+// Como a operação vê um saque na fila do painel: valores, tentativas e o último erro,
+// com a chave Pix mascarada (a conferência é pelo motorista e pelo valor).
+function toPendingWithdrawalAdminView(id, data = {}) {
+  return {
+    id: String(id || ''),
+    driverId: String(data.driverId || ''),
+    amountCents: toCents(data.amountCents),
+    feeCents: toCents(data.feeCents),
+    subscriptionSettlementCents: toCents(data.subscriptionSettlementCents),
+    totalDebitCents: toCents(data.totalDebitCents),
+    status: String(data.status || ''),
+    ledgerStatus: String(data.ledgerStatus || ''),
+    pixKeyMasked: maskPixKey(data.pixKey),
+    attempts: toCents(data.attempts),
+    lastError: data.lastError ? String(data.lastError).slice(0, 200) : null,
+    createdAt: toIso(data.createdAt),
+    lastAttemptAt: toIso(data.lastAttemptAt)
+  };
+}
+
 function sortDriverWithdrawals(views = []) {
   return [...views].sort((a, b) => {
     const aMs = a.requestedAt ? Date.parse(a.requestedAt) : 0;
@@ -87,5 +107,6 @@ module.exports = {
   DRIVER_WITHDRAWAL_STATUS,
   maskPixKey,
   sortDriverWithdrawals,
-  toDriverWithdrawalView
+  toDriverWithdrawalView,
+  toPendingWithdrawalAdminView
 };

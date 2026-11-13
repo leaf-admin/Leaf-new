@@ -24,6 +24,7 @@ function pendingCountFor(href, summary, canReview) {
   if (!summary) return 0;
   if (href === "/drivers?tab=review") return canReview ? Number(summary.drivers?.review || 0) : 0;
   if (href === "/support") return Number(summary.supportOpen || 0);
+  if (href === "/financial-reconciliation") return canReview ? Number(summary.withdrawalsPending || 0) : 0;
   return 0;
 }
 
@@ -132,7 +133,7 @@ export default function AppNav() {
   }, [toast]);
 
   const reviewCount = canReview ? Number(pending?.drivers?.review || 0) : 0;
-  const tabCount = reviewCount + Number(pending?.supportOpen || 0);
+  const tabCount = reviewCount + Number(pending?.supportOpen || 0) + (canReview ? Number(pending?.withdrawalsPending || 0) : 0);
   const oldestMs = pending?.drivers?.oldestWaitingMs;
 
   // Título da aba com o total, como no WhatsApp Web.

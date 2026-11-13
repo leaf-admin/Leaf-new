@@ -545,6 +545,17 @@ class LeafApiService {
   }
 
   // Pendências do painel: resumo em cache compartilhado no backend.
+  async getPendingWithdrawals(limit = 50) {
+    return this.request(`/payment/withdrawals/pending?limit=${encodeURIComponent(limit)}`);
+  }
+
+  async processWithdrawal(withdrawalId) {
+    return this.request(`/payment/withdrawals/${encodeURIComponent(withdrawalId)}/process`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  }
+
   async getOpsPendingSummary() {
     return this.request("/admin/ops/pending-summary");
   }

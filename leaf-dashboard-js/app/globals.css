@@ -3462,3 +3462,21 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--text); outline-
   .tech-health { padding: 0 0 12px; }
   .tech-summary, .tech-facts { grid-template-columns: 1fr; }
 }
+
+/* Saques para processar (Conciliação financeira) */
+.recon-withdrawal-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.recon-withdrawal-table td span + span {
+  margin-left: 6px;
+}
+.recon-withdrawal-results {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
