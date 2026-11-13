@@ -674,5 +674,6 @@ function buildStatePayload(state, meta = {}) {
 module.exports = {
   DRIVER_ACTIVATION_STATES,
   STATE_LABELS,
-  resolveDriverActivationState
+  resolveDriverActivationState,
+  resolveLivenessEvidence
 };
