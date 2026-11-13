@@ -3396,3 +3396,69 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--text); outline-
   .ops-funnel-row { grid-template-columns: 1fr 40px; }
   .ops-funnel-row .ops-funnel-bar { grid-column: 1 / -1; grid-row: 2; }
 }
+
+/* Saúde técnica e custos (home) */
+.tech-health { display: grid; gap: 16px; padding: 0 16px 16px; }
+.tech-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.tech-summary-tile {
+  display: grid; gap: 4px; text-align: left; padding: 14px 16px; border-radius: var(--radius-lg);
+  border: 1px solid var(--line); border-left-width: 4px; background: var(--surface); color: var(--text); cursor: pointer; font: inherit;
+}
+.tech-summary-tile:hover, .tech-summary-tile:focus, .tech-summary-tile:active { border-color: var(--line-strong); background: var(--surface); color: var(--text); }
+.tech-summary-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tech-summary-active { box-shadow: 0 0 0 2px var(--accent-soft); }
+.tech-summary-label { font-size: 12.5px; color: var(--text-muted); }
+.tech-summary-tile strong { font-size: 24px; font-weight: 600; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.tech-summary-tile small { font-size: 12.5px; color: var(--text-muted); line-height: 1.35; }
+.tech-summary-ok { border-left-color: var(--success-line); }
+.tech-summary-warn { border-left-color: var(--warn-line); }
+.tech-summary-bad { border-left-color: var(--danger-line); }
+.tech-summary-muted { border-left-color: var(--line-strong); }
+.tech-tabs { display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 1px solid var(--line); }
+.tech-tab {
+  display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; margin-bottom: -1px; border: 0;
+  border-bottom: 2px solid transparent; background: transparent; color: var(--text-soft); font: inherit; font-size: 13.5px; cursor: pointer;
+}
+.tech-tab:hover, .tech-tab:focus, .tech-tab:active { color: var(--text); background: transparent; box-shadow: none; }
+.tech-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tech-tab-active { color: var(--text); font-weight: 600; border-bottom-color: var(--accent); }
+.tech-tab-count { min-width: 18px; padding: 0 6px; border-radius: 999px; background: var(--warn-bg); color: var(--warn-text); font-size: 11px; font-weight: 600; text-align: center; }
+.tech-view { display: grid; gap: 16px; }
+.tech-problem-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.tech-problem-list li { display: flex; align-items: flex-start; gap: 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius-md); }
+.tech-problem-list p { margin: 2px 0 0; font-size: 13px; color: var(--text-soft); }
+.tech-all-good { margin: 0; padding: 12px 14px; border-radius: var(--radius-md); background: var(--success-bg); color: var(--success-text); font-weight: 500; }
+.tech-chip-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.tech-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px; font-size: 12.5px; color: var(--text-soft); }
+.tech-dot { width: 7px; height: 7px; border-radius: 999px; }
+.tech-dot-ok { background: var(--success-text); }
+.tech-more > summary { cursor: pointer; font-size: 13px; font-weight: 500; color: var(--text-soft); padding: 4px 0; }
+.tech-more[open] > summary { margin-bottom: 8px; }
+.tech-table td, .tech-table th { vertical-align: top; }
+.tech-table .table-muted { display: block; }
+.tech-table .tech-num, .tech-num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tech-footnote { margin: 8px 0 0; font-size: 13px; }
+.tech-equation { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 14px 16px; border-radius: var(--radius-lg); background: var(--bg-soft); }
+.tech-equation > div { display: grid; gap: 2px; }
+.tech-equation span { font-size: 12.5px; color: var(--text-muted); }
+.tech-equation strong { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.tech-equation .tech-op { font-size: 20px; color: var(--text-muted); }
+.tech-equation-result strong { font-size: 22px; }
+.tech-facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px 16px; margin: 0; }
+.tech-facts dt { font-size: 12.5px; color: var(--text-muted); }
+.tech-facts dd { margin: 2px 0 0; font-weight: 600; font-variant-numeric: tabular-nums; }
+.tech-facts dd small { display: block; font-weight: 400; color: var(--text-muted); font-size: 12px; }
+.tech-subtitle { margin: 0; font-size: 14px; font-weight: 600; }
+.tech-subtitle small { font-weight: 400; color: var(--text-muted); margin-left: 6px; }
+.tech-notes { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: 13px; color: var(--text-soft); }
+.tech-alert { display: grid; gap: 4px; padding: 12px 14px; border-radius: var(--radius-md); }
+.tech-alert-warn { background: var(--warn-bg); color: var(--warn-text); }
+.tech-alert-bad { background: var(--danger-bg); color: var(--danger-text); }
+.tech-alert small { opacity: 0.85; }
+@media (max-width: 900px) {
+  .tech-summary, .tech-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 520px) {
+  .tech-health { padding: 0 0 12px; }
+  .tech-summary, .tech-facts { grid-template-columns: 1fr; }
+}
