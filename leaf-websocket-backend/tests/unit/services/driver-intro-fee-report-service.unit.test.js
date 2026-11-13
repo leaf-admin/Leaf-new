@@ -61,7 +61,7 @@ describe('driver intro fee report', () => {
     expect(report.policy).toEqual({
       enabled: true,
       rideLimit: null,
-      eligibleUntil: '2026-12-01T03:00:00.000Z',
+      eligibleUntil: '2027-01-01T03:00:00.000Z',
       feeCents: 99,
       paymentFeeIncluded: true,
       pixExcessChargedToDriver: true
@@ -74,12 +74,12 @@ describe('driver intro fee report', () => {
     expect(report.drivers[1]).toMatchObject({ driverId: 'driver-2', name: 'Ana Lima', ridesUsed: 3, status: 'active' });
   });
 
-  it('marks every driver finished and the promotion off after 30/11 in Brasília', async () => {
+  it('marks every driver finished and the promotion off after 31/12 in Brasília', async () => {
     const { firestore } = setup([docFor(seed('driver-1', 3))]);
     const redis = { mget: jest.fn().mockResolvedValue([null]) };
 
     const report = await getDriverIntroFeeReport({
-      firestore, redis, env: { DRIVER_INTRO_FEE_ENABLED: 'true' }, nowMs: Date.parse('2026-12-01T03:00:00.000Z')
+      firestore, redis, env: { DRIVER_INTRO_FEE_ENABLED: 'true' }, nowMs: Date.parse('2027-01-01T03:00:00.000Z')
     });
 
     expect(report.policy.enabled).toBe(false);

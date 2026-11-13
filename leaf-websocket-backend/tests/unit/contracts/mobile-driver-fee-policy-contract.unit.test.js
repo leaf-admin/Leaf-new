@@ -40,7 +40,7 @@ describe('mobile driver fee policy matches the backend', () => {
     expect(numbersAfter('promoLeafFeeCents')).toBe(DRIVER_INTRO_FEE_POLICY.leafFeeCents);
     expect(numbersAfter('promoTotalFeeCents')).toBe(DRIVER_INTRO_FEE_POLICY.operationalFeeCents);
     expect(mobileSource).toContain(`promoEligibleUntil: '${DRIVER_INTRO_FEE_POLICY.eligibleUntil}'`);
-    expect(mobileSource).toContain("promoEndsOnLabel: '30/11/2026'");
+    expect(mobileSource).toContain("promoEndsOnLabel: '31/12/2026'");
   });
 
   test('withdrawal fee', () => {

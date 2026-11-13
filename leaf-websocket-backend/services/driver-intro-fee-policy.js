@@ -11,11 +11,11 @@ const DRIVER_INTRO_FEE_POLICY = Object.freeze({
   paymentFeeIncluded: true,
   pixExcessChargedToDriver: true,
   leafFeeCents: 49,
-  // Owner-approved on 2026-11-09: every ride offered until 30/11/2026 23:59:59 (Brasília,
+  // Owner-approved on 2026-11-09, extended to 31/12 on 2026-11-13: every ride offered until 31/12/2026 23:59:59 (Brasília,
   // UTC-3) gets the promotion, whatever the driver's ride count. The offer time decides,
-  // so a ride offered on 30/11 and finished on 01/12 keeps it. Never shorten this
+  // so a ride offered on 31/12 and finished on 01/01 keeps it. Never shorten this
   // retroactively: stored contexts are recomputed against it at settlement.
-  eligibleUntil: '2026-12-01T03:00:00.000Z'
+  eligibleUntil: '2027-01-01T03:00:00.000Z'
 });
 // Sandbox (QA) rides count on their own counter, never on the operational one.
 const DRIVER_INTRO_FEE_NAMESPACES = Object.freeze(['operational', 'sandbox']);
