@@ -91,10 +91,18 @@ function buildReviewQueueFields(application = {}, previous = {}, nowIso = new Da
       ? firstValidIso(previous?.reviewWaitingSince, nowIso)
       : nowIso;
   }
+  // Desde quando o cadastro está parado com o motorista (lembrete de cadastro parado).
+  let onboardingSince = null;
+  if (bucket === 'onboarding') {
+    onboardingSince = previousBucket === 'onboarding'
+      ? firstValidIso(previous?.onboardingSince, nowIso)
+      : nowIso;
+  }
   return {
     reviewBucket: bucket,
     reviewReason: reason,
     reviewWaitingSince: waitingSince,
+    onboardingSince,
     changed: previousBucket !== bucket || normalize(previous?.reviewReason) !== normalize(reason)
   };
 }

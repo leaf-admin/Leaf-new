@@ -754,6 +754,9 @@ class DriverApplicationService {
           reviewWaitingSince: reviewQueueFields.reviewWaitingSince
             ? estimateWaitingSince(application) || reviewQueueFields.reviewWaitingSince
             : null,
+          onboardingSince: reviewQueueFields.onboardingSince
+            ? estimateWaitingSince(application) || reviewQueueFields.onboardingSince
+            : null,
           syncedAt: admin.firestore.FieldValue.serverTimestamp()
         }, { merge: true });
       });
@@ -782,6 +785,9 @@ class DriverApplicationService {
         const { changed: _changed, ...fields } = buildReviewQueueFields(application, {});
         if (fields.reviewWaitingSince) {
           fields.reviewWaitingSince = estimateWaitingSince(application) || fields.reviewWaitingSince;
+        }
+        if (fields.onboardingSince) {
+          fields.onboardingSince = estimateWaitingSince(application) || fields.onboardingSince;
         }
         filled.set(application.id, fields);
         batch.set(this.collection().doc(application.id), fields, { merge: true });

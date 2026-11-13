@@ -630,13 +630,21 @@ class PaymentServiceWithdrawalsMethods {
     );
 
     if (!transferResult.success) {
+      // Avisa o motorista uma vez só, na primeira falha; as novas tentativas não repetem.
+      const notifyDelay = !withdrawal.delayNotifiedAt;
       await withdrawalRef.set({
         status: 'pending',
         lastAttemptAt: admin.firestore.FieldValue.serverTimestamp(),
         attempts: admin.firestore.FieldValue.increment(1),
         lastError: transferResult.error || transferResult.details || 'Falha na transferência Woovi',
+        ...(notifyDelay ? { delayNotifiedAt: admin.firestore.FieldValue.serverTimestamp() } : {}),
         updatedAt: admin.firestore.FieldValue.serverTimestamp()
       }, { merge: true });
+      if (notifyDelay) {
+        require('../transactional-push')
+          .notifyWithdrawalDelayed({ driverId: withdrawal.driverId, withdrawalId })
+          .catch(() => null);
+      }
 
       logStructured('warn', 'Falha ao processar saque na Woovi (mantido pendente)', {
         service: 'payment-service',
@@ -661,6 +669,11 @@ class PaymentServiceWithdrawalsMethods {
         source: 'processDriverWithdrawal'
       }
     });
+
+    // O Pix saiu: avisa o motorista mesmo se o ledger ainda for reconciliar.
+    require('../transactional-push')
+      .notifyWithdrawalProcessed({ driverId: withdrawal.driverId, withdrawalId, amountCents })
+      .catch(() => null);
 
     if (!processedLedgerResult.success) {
       await withdrawalRef.set({
