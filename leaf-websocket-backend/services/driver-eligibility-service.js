@@ -149,7 +149,8 @@ class DriverEligibilityService {
         const driverDocumentsReady =
             checklist.cnhEar === true &&
             checklist.inssOrMei === true &&
-            checklist.backgroundCheckConsent === true;
+            checklist.backgroundCheckConsent === true &&
+            checklist.awaitingBackgroundCertificate !== true;
         if (
             activationState.state === DRIVER_ACTIVATION_STATES.DRIVER_DOCS_IN_REVIEW &&
             driverDocumentsReady &&

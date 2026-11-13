@@ -195,7 +195,8 @@ describe('driver-eligibility-service', () => {
                 model: 'Leaf Plus',
                 color: 'PRETO'
               }
-            }
+            },
+            antecedentes_criminais: { status: 'approved' }
           },
           consent: {
             backgroundCheck: { acceptedAt: '2026-06-24T12:00:00.000Z' }
@@ -420,7 +421,8 @@ describe('driver-eligibility-service', () => {
                 model: 'Leaf Plus',
                 color: 'Branco'
               }
-            }
+            },
+            antecedentes_criminais: { status: 'approved' }
           },
           consent: {
             backgroundCheck: { acceptedAt: '2026-07-25T12:00:00.000Z' }
@@ -474,6 +476,21 @@ describe('driver-eligibility-service', () => {
       })
     );
     expect(eligibility.profile).toBeNull();
+  });
+
+  it('reports documents in review, not KYC pre-registration, while the background certificate is missing', () => {
+    const code = driverEligibilityService._getActivationBlockCode({
+      state: 'DRIVER_DOCS_IN_REVIEW',
+      checklist: {
+        cnhEar: true,
+        inssOrMei: true,
+        backgroundCheckConsent: true,
+        awaitingBackgroundCertificate: true
+      },
+      kyc: { pending: true, blocked: false }
+    });
+
+    expect(code).toBe('DRIVER_ACTIVATION_DRIVER_DOCS_IN_REVIEW');
   });
 
   it('blocks ride eligibility when an activation document is rejected', async () => {

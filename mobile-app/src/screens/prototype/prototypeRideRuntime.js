@@ -17494,6 +17494,36 @@ async function reportPrototypeIncident(profile, payload = {}) {
   }
 }
 
+// Alerta de emergência (botão 190): abre o incidente de emergência com a localização atual e a
+// corrida, para a equipe Leaf e, quando houver termo de cooperação, a força de segurança.
+// Não mexe no estado de carregamento da tela: a ligação para o 190 nunca espera por isto.
+async function sendPrototypeEmergencyAlert(profile, payload = {}) {
+  const socket = await getRealtimeSocket(
+    profile,
+    "Serviço de segurança indisponível.",
+  );
+  const coordinate = runtimeState.currentCoordinate;
+  const location = coordinate
+    ? {
+        lat: coordinate.latitude,
+        lng: coordinate.longitude,
+        ...(Number.isFinite(coordinate.accuracy) ? { accuracy: coordinate.accuracy } : {}),
+        capturedAt: new Date().toISOString(),
+      }
+    : null;
+  const scope = buildRuntimeSupportScope({
+    ...payload,
+    subject: "emergency",
+    source: payload.source || "prototype-emergency-190",
+  });
+  return socket.emergencyContact(
+    sanitizeText(payload.contactType, "police"),
+    location,
+    sanitizeText(payload.message, "Pedido de ajuda pelo botão 190"),
+    scope,
+  );
+}
+
 function normalizeDriverActivationDocumentStatus(status) {
   const normalized = String(status || "")
     .trim()
@@ -22532,6 +22562,13 @@ export function usePrototypeRideRuntime(options = null) {
     [profile],
   );
 
+  const sendEmergencyAlert = useCallback(
+    async (payload) => {
+      return sendPrototypeEmergencyAlert(profile, payload);
+    },
+    [profile],
+  );
+
   const setDriverOnline = useCallback(
     async (isOnline) => {
       return setPrototypeDriverOnline(profile, isOnline);
@@ -22805,6 +22842,7 @@ export function usePrototypeRideRuntime(options = null) {
     dismissIncomingChatNotice,
     openSupportTicket,
     reportIncident,
+    sendEmergencyAlert,
     setDriverOnline,
     setDriverDestinationMode,
     acceptDriverOffer,

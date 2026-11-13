@@ -646,6 +646,47 @@ describe('prototype new surfaces', () => {
     );
   });
 
+  it('liga para o 190 na hora e abre o alerta de emergência com a corrida', async () => {
+    const { Linking } = require('react-native');
+    const openURL = jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
+    const sendEmergencyAlert = jest.fn().mockResolvedValue({ success: true, incidentId: 'INC-190' });
+    usePrototypeRideRuntime.mockReturnValue(buildRuntime({ sendEmergencyAlert }));
+    const screen = render(
+      <RobotaxiSupportScreen
+        navigation={buildNavigation()}
+        route={{ key: 'support-safety', params: { bookingId: 'booking_1', initialTopicId: 'safety' } }}
+      />
+    );
+
+    fireEvent.press(screen.getByTestId('robotaxi-support-call-190'));
+
+    expect(openURL).toHaveBeenCalledWith('tel:190');
+    await waitFor(() => expect(sendEmergencyAlert).toHaveBeenCalledWith(expect.objectContaining({
+      bookingId: 'booking_1',
+      source: 'support-call-190',
+    })));
+    openURL.mockRestore();
+  });
+
+  it('liga para o 190 mesmo se o alerta de emergência falhar', async () => {
+    const { Linking } = require('react-native');
+    const openURL = jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
+    const sendEmergencyAlert = jest.fn().mockRejectedValue(new Error('offline'));
+    usePrototypeRideRuntime.mockReturnValue(buildRuntime({ sendEmergencyAlert }));
+    const screen = render(
+      <RobotaxiSupportScreen
+        navigation={buildNavigation()}
+        route={{ key: 'support-safety-offline', params: { initialTopicId: 'safety' } }}
+      />
+    );
+
+    fireEvent.press(screen.getByTestId('robotaxi-support-call-190'));
+
+    expect(openURL).toHaveBeenCalledWith('tel:190');
+    await waitFor(() => expect(sendEmergencyAlert).toHaveBeenCalled());
+    openURL.mockRestore();
+  });
+
   it('keeps receipt support scoped with billing priority and canonical return route', async () => {
     const runtime = buildRuntime({
       activeBookingId: null,

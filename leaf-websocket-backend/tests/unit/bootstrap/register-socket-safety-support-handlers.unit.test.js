@@ -7,6 +7,13 @@ jest.mock('../../../services/safety-incident-service', () => ({
   createIncident: jest.fn()
 }));
 
+const mockHandleEmergencyIncident = jest.fn();
+jest.mock('../../../services/emergency-response-service', () => ({
+  getDefaultEmergencyResponseService: () => ({
+    handleEmergencyIncident: (...args) => mockHandleEmergencyIncident(...args)
+  })
+}));
+
 jest.mock('../../../services/support-queue-service', () => ({
   createSupportTicket: jest.fn()
 }));
@@ -365,6 +372,48 @@ describe('registerSocketSafetySupportHandlers support chat scope', () => {
         ticketId: 'ticket_1'
       })
     );
+  });
+
+  it('confirma a emergência ao app e depois registra o pacote da ocorrência', async () => {
+    mockHandleEmergencyIncident.mockReset().mockResolvedValue({ status: 'stored' });
+    const activeBookings = new Map([
+      ['booking_1', { bookingId: 'booking_1', customerId: 'user_1', driverId: 'driver_1', status: 'STARTED' }]
+    ]);
+    const { handlers, socket } = createHarness({}, { activeBookings });
+    const location = { lat: -22.97, lng: -43.18, accuracy: 10 };
+
+    await handlers.emergencyContact({ bookingId: 'booking_1', contactType: 'police', location });
+
+    expect(safetyIncidentService.createIncident).toHaveBeenCalledWith(expect.objectContaining({
+      bookingId: 'booking_1',
+      category: 'emergency',
+      severity: 'critical'
+    }));
+    expect(socket.emit).toHaveBeenCalledWith('emergencyContacted', expect.objectContaining({
+      success: true,
+      incidentId: 'incident_1'
+    }));
+    expect(mockHandleEmergencyIncident).toHaveBeenCalledWith(expect.objectContaining({
+      incident: expect.objectContaining({ incidentId: 'incident_1' }),
+      reporterId: 'user_1',
+      reporterType: 'passenger',
+      location
+    }));
+    const contactedOrder = socket.emit.mock.invocationCallOrder[
+      socket.emit.mock.calls.findIndex(([event]) => event === 'emergencyContacted')
+    ];
+    expect(contactedOrder).toBeLessThan(mockHandleEmergencyIncident.mock.invocationCallOrder[0]);
+  });
+
+  it('não desfaz a emergência quando o pacote falha', async () => {
+    mockHandleEmergencyIncident.mockReset().mockRejectedValue(new Error('firestore down'));
+    const { handlers, socket } = createHarness();
+
+    await handlers.emergencyContact({ contactType: 'police' });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(socket.emit).toHaveBeenCalledWith('emergencyContacted', expect.objectContaining({ success: true }));
+    expect(socket.emit).not.toHaveBeenCalledWith('emergencyError', expect.anything());
   });
 
   it('propagates the sealed sandbox ride scope into incident persistence', async () => {
