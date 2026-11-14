@@ -556,6 +556,13 @@ class LeafApiService {
     });
   }
 
+  async reconcileWithdrawal(withdrawalId) {
+    return this.request(`/payment/withdrawals/${encodeURIComponent(withdrawalId)}/reconcile`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  }
+
   async getOpsPendingSummary() {
     return this.request("/admin/ops/pending-summary");
   }

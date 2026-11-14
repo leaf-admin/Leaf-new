@@ -95,7 +95,7 @@ describe('computePendingSummary', () => {
     });
     expect(summary.drivers.byReason).toMatchObject({ documents: 1, background_certificate: 1 });
     expect(summary).toMatchObject({ cpfReviews: 2, supportOpen: 3, withdrawalsPending: 1, total: 8, backgroundCertificates: 1 });
-    expect(firestore.calls.withdrawalStatuses).toEqual(['pending', 'ledger_pending']);
+    expect(firestore.calls.withdrawalStatuses).toEqual(['pending', 'ledger_pending', 'processing']);
     // Lê só a fila de revisão, poucos campos e com limite.
     expect(firestore.calls.select).toEqual(['reviewReason', 'reviewWaitingSince', 'persistenceScope', 'driver']);
     expect(firestore.calls.limit).toBe(300);

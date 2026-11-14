@@ -85,6 +85,30 @@ export default function PendingWithdrawals() {
     }
   }
 
+  // Só lê o status na Woovi pelo id do saque; nunca envia outro Pix.
+  async function verify(item) {
+    setBusyId(item.id);
+    const labels = {
+      sent: { tone: "ok", text: "Pix confirmado na Woovi; saque concluído" },
+      not_found: { tone: "warn", text: "Pix não chegou à Woovi; voltou para a fila" },
+      created: { tone: "warn", text: "Pix criado e não aprovado; voltou para a fila" },
+      failed: { tone: "warn", text: "Woovi recusou o Pix; voltou para a fila" },
+    };
+    try {
+      const response = await leafAPI.reconcileWithdrawal(item.id);
+      setResults((current) => ({ ...current, [item.id]: labels[response?.resolution] || { tone: "ok", text: "Conferido" } }));
+    } catch (verifyError) {
+      setResults((current) => ({
+        ...current,
+        [item.id]: { tone: "bad", text: verifyError?.payload?.error || verifyError?.message || "Status ainda incerto na Woovi" },
+      }));
+    } finally {
+      setBusyId("");
+      load();
+      refreshOpsPending();
+    }
+  }
+
   const sentRows = Object.entries(results).filter(([id]) => !items.some((row) => row.id === id));
 
   return (
@@ -119,7 +143,8 @@ export default function PendingWithdrawals() {
             <tbody>
               {items.map((item) => {
                 const result = results[item.id];
-                const ledgerNotPosted = item.status === "ledger_pending" || (item.ledgerStatus && item.ledgerStatus !== "posted");
+                const stuck = item.status === "processing";
+                const ledgerNotPosted = !stuck && (item.status === "ledger_pending" || (item.ledgerStatus && item.ledgerStatus !== "posted"));
                 return (
                   <tr key={item.id}>
                     <td title={item.createdAt || ""}>{since(item.createdAt)}</td>
@@ -134,19 +159,30 @@ export default function PendingWithdrawals() {
                       {brl(item.totalDebitCents)}
                     </td>
                     <td>
+                      {stuck ? (
+                        <span className="status-bad" title={item.lastError || "Enviando Pix ou travado no meio do envio"}>
+                          {item.pixOutUncertain ? "Travado: Pix incerto" : `Enviando ${since(item.processingStartedAt)}`}
+                        </span>
+                      ) : null}
                       {ledgerNotPosted ? <span className="status-warn">Ledger pendente</span> : null}
-                      {item.attempts > 0 ? (
+                      {!stuck && item.attempts > 0 ? (
                         <span className="status-bad" title={item.lastError || ""}>
                           {item.attempts} {item.attempts === 1 ? "tentativa falhou" : "tentativas falharam"}
                         </span>
                       ) : null}
-                      {!ledgerNotPosted && !item.attempts ? <span className="status-ok">Pronto</span> : null}
+                      {!stuck && !ledgerNotPosted && !item.attempts ? <span className="status-ok">Pronto</span> : null}
                       {result ? <small className={`status-${result.tone}`}> {result.text}</small> : null}
                     </td>
                     <td>
-                      <button type="button" onClick={() => process(item)} disabled={Boolean(busyId)}>
-                        {busyId === item.id ? "Enviando..." : "Processar"}
-                      </button>
+                      {stuck ? (
+                        <button type="button" className="button-secondary" onClick={() => verify(item)} disabled={Boolean(busyId)}>
+                          {busyId === item.id ? "Conferindo..." : "Verificar na Woovi"}
+                        </button>
+                      ) : (
+                        <button type="button" onClick={() => process(item)} disabled={Boolean(busyId)}>
+                          {busyId === item.id ? "Enviando..." : "Processar"}
+                        </button>
+                      )}
                     </td>
                   </tr>
                 );

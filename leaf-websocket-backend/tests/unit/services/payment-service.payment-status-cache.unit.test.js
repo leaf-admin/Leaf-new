@@ -1394,11 +1394,9 @@ describe('PaymentService financial rules', () => {
       ledgerStatus: 'posted'
     });
     firebaseConfig.getFirestore.mockReturnValue(firestore);
-    mockTransferDirectToDriver.mockResolvedValue({
-      success: true,
-      transferId: 'transfer_wd_1'
-    });
+    const mockSendPixOut = jest.fn().mockResolvedValue({ outcome: 'sent', status: 'APPROVED', endToEndId: 'transfer_wd_1' });
     const service = new PaymentService();
+    service.pixOutClient = { sendPixOut: mockSendPixOut, lookupPixOut: jest.fn() };
 
     const first = await service.processDriverWithdrawal('wd_1', 'admin_1');
     const second = await service.processDriverWithdrawal('wd_1', 'admin_2');
@@ -1413,7 +1411,7 @@ describe('PaymentService financial rules', () => {
       alreadyProcessed: true,
       status: 'processed'
     });
-    expect(mockTransferDirectToDriver).toHaveBeenCalledTimes(1);
+    expect(mockSendPixOut).toHaveBeenCalledTimes(1);
     expect(firestore.docs.get('driver_withdrawals/wd_1')).toMatchObject({
       status: 'processed',
       processedBy: 'admin_1',
@@ -1459,11 +1457,9 @@ describe('PaymentService financial rules', () => {
       ledgerStatus: 'pending_retry'
     });
     firebaseConfig.getFirestore.mockReturnValue(firestore);
-    mockTransferDirectToDriver.mockResolvedValue({
-      success: true,
-      transferId: 'transfer_repaired_withdrawal'
-    });
+    const mockSendPixOut = jest.fn().mockResolvedValue({ outcome: 'sent', status: 'APPROVED', endToEndId: 'transfer_repaired_withdrawal' });
     const service = new PaymentService();
+    service.pixOutClient = { sendPixOut: mockSendPixOut, lookupPixOut: jest.fn() };
     service.financialLedgerService.recordWithdrawalRequested = jest.fn().mockResolvedValue({
       success: true,
       eventId: 'withdrawal_requested_repaired_before_pixout'
@@ -1476,7 +1472,7 @@ describe('PaymentService financial rules', () => {
       withdrawalId: 'wd_repair_before_pixout',
       transferId: 'transfer_repaired_withdrawal'
     });
-    expect(mockTransferDirectToDriver).toHaveBeenCalledTimes(1);
+    expect(mockSendPixOut).toHaveBeenCalledTimes(1);
     expect(firestore.docs.get('driver_withdrawals/wd_repair_before_pixout')).toMatchObject({
       status: 'processed',
       ledgerStatus: 'posted',
@@ -1518,11 +1514,9 @@ describe('PaymentService financial rules', () => {
       ledgerStatus: 'posted'
     });
     firebaseConfig.getFirestore.mockReturnValue(firestore);
-    mockTransferDirectToDriver.mockResolvedValue({
-      success: true,
-      transferId: 'transfer_wd_ledger_pending'
-    });
+    const mockSendPixOut = jest.fn().mockResolvedValue({ outcome: 'sent', status: 'APPROVED', endToEndId: 'transfer_wd_ledger_pending' });
     const service = new PaymentService();
+    service.pixOutClient = { sendPixOut: mockSendPixOut, lookupPixOut: jest.fn() };
     service.financialLedgerService.recordWithdrawalProcessed = jest.fn().mockResolvedValue({
       success: false,
       code: 'LEDGER_WRITE_FAILED',
@@ -1536,7 +1530,7 @@ describe('PaymentService financial rules', () => {
       status: 'processed_ledger_pending',
       ledgerProcessedStatus: 'pending_retry'
     });
-    expect(mockTransferDirectToDriver).toHaveBeenCalledTimes(1);
+    expect(mockSendPixOut).toHaveBeenCalledTimes(1);
     expect(firestore.docs.get('driver_withdrawals/wd_processed_ledger_pending')).toMatchObject({
       status: 'processed_ledger_pending',
       ledgerProcessedStatus: 'pending_retry',
@@ -1556,26 +1550,19 @@ describe('PaymentService financial rules', () => {
       ledgerStatus: 'posted'
     });
     firebaseConfig.getFirestore.mockReturnValue(firestore);
-    mockTransferDirectToDriver.mockResolvedValue({
-      success: true,
-      transferId: 'transfer_gateway_1'
-    });
+    const mockSendPixOut = jest.fn().mockResolvedValue({ outcome: 'sent', status: 'APPROVED', endToEndId: 'transfer_gateway_1' });
     const service = new PaymentService();
+    service.pixOutClient = { sendPixOut: mockSendPixOut, lookupPixOut: jest.fn() };
 
     const result = await service.processDriverWithdrawal('wd_gateway_1', 'admin_1');
 
     expect(result.success).toBe(true);
-    expect(mockTransferDirectToDriver).toHaveBeenCalledWith(
-      'driver_gateway',
-      4500,
-      'Saque motorista driver_gateway - wd_gateway_1',
-      'withdraw_wd_gateway_1',
-      'driver@pix.test',
-      'leaf@pix.test',
-      {
-        correlationID: 'leaf_withdrawal_wd_gateway_1'
-      }
-    );
+    expect(mockSendPixOut).toHaveBeenCalledWith({
+      value: 4500,
+      pixKey: 'driver@pix.test',
+      correlationID: 'leaf_withdrawal_wd_gateway_1',
+      comment: 'Saque Leaf'
+    });
   });
 
   it('settles completed ride into internal ledger without Woovi account or Pix key', async () => {
