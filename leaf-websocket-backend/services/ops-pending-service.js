@@ -24,7 +24,7 @@ const REVIEW_LIST_LIMIT = 300;
 const NOTIFY_DEBOUNCE_MS = 1500;
 const SUPPORT_OPEN_STATUSES = ['open', 'assigned', 'in_progress', 'escalated'];
 // Saques esperando a conferência e o clique de processar no painel.
-const WITHDRAWAL_PENDING_STATUSES = ['pending', 'ledger_pending'];
+const WITHDRAWAL_PENDING_STATUSES = ['pending', 'ledger_pending', 'processing'];
 const REVIEW_REASONS = ['manual_review', 'ready_to_approve', 'background_certificate', 'documents'];
 
 let realtimeIo = null;

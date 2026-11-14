@@ -91,7 +91,9 @@ function toPendingWithdrawalAdminView(id, data = {}) {
     attempts: toCents(data.attempts),
     lastError: data.lastError ? String(data.lastError).slice(0, 200) : null,
     createdAt: toIso(data.createdAt),
-    lastAttemptAt: toIso(data.lastAttemptAt)
+    lastAttemptAt: toIso(data.lastAttemptAt),
+    processingStartedAt: toIso(data.processingStartedAt),
+    pixOutUncertain: data.pixOutUncertain === true
   };
 }
 

@@ -12,6 +12,21 @@ const { maybeRunOpsDailyDigest } = require('../services/ops-daily-digest');
 const { maybeRunDriverReadyReminders } = require('../services/driver-ready-online-notify');
 const { maybeRunDriverOnboardingReminders } = require('../services/driver-onboarding-stalled-notify');
 
+// Saque travado em "processing" (queda no meio do Pix Out): confere na Woovi a cada 5 min.
+const STUCK_WITHDRAWAL_CHECK_MS = 5 * 60 * 1000;
+let lastStuckWithdrawalCheckAt = 0;
+let withdrawalPaymentService = null;
+async function maybeReconcileStuckWithdrawals(nowMs = Date.now()) {
+  if (String(process.env.WITHDRAWAL_STUCK_RECONCILE_ENABLED || 'true') === 'false') return null;
+  if (nowMs - lastStuckWithdrawalCheckAt < STUCK_WITHDRAWAL_CHECK_MS) return null;
+  lastStuckWithdrawalCheckAt = nowMs;
+  if (!withdrawalPaymentService) {
+    const PaymentService = require('../services/payment-service');
+    withdrawalPaymentService = new PaymentService();
+  }
+  return withdrawalPaymentService.reconcileStuckWithdrawals();
+}
+
 const DEFAULT_INTERVAL_MS = Number.parseInt(process.env.RIDE_HEALTH_MONITOR_INTERVAL_MS || '60000', 10);
 
 function getWorkerConfig(env = process.env, argv = process.argv.slice(2)) {
@@ -122,6 +137,7 @@ async function runRideHealthMonitorCycle(reason = 'interval') {
       await maybeRunOpsDailyDigest(redis).catch(() => null);
       await maybeRunDriverReadyReminders().catch(() => null);
       await maybeRunDriverOnboardingReminders().catch(() => null);
+      await maybeReconcileStuckWithdrawals().catch(() => null);
 
       logStructured('info', 'Ciclo de ride health concluído', {
         service: 'ride-health-monitor-worker',
