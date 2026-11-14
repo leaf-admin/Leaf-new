@@ -102,10 +102,12 @@ else
   bad "isReview em release está true"
 fi
 
-if [[ "$WITHDRAWALS_ENABLED" == "false" ]]; then
-  ok "driverWithdrawalsEnabled em release: false"
+# Saque ligado em release por decisão do responsável (2026-10-13): o motorista pede no
+# app e o Pix só sai depois da conferência e do clique em Processar no painel.
+if [[ "$WITHDRAWALS_ENABLED" == "true" ]]; then
+  ok "driverWithdrawalsEnabled em release: true (aprovação manual no painel)"
 else
-  bad "driverWithdrawalsEnabled em release está true"
+  bad "driverWithdrawalsEnabled em release está false: motoristas não conseguem pedir saque"
 fi
 
 section "Links legais públicos"
