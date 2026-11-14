@@ -1818,6 +1818,25 @@ router.post('/payment/withdrawals/:withdrawalId/process', authenticatePaymentAct
 });
 
 /**
+ * POST /api/payment/withdrawals/:withdrawalId/reconcile
+ * Confere na Woovi um saque travado em "processing" (Pix saiu? volta para a fila?).
+ * Nunca envia Pix: só lê o status pelo correlationID do saque.
+ */
+router.post('/payment/withdrawals/:withdrawalId/reconcile', authenticatePaymentActor, requirePaymentAdmin(), async (req, res) => {
+  try {
+    if (!isLaunchFeatureEnabled('driverWithdrawalsEnabled', false)) {
+      return respondWithdrawalsDisabled(res);
+    }
+    const actorId = req.paymentActor?.id || req.paymentActor?.uid || 'system';
+    const result = await paymentService.reconcileProcessingWithdrawal(req.params.withdrawalId, { actorId });
+    return res.status(result.success ? 200 : 409).json(result);
+  } catch (error) {
+    logError(error, '❌ Erro ao conferir saque travado', { service: 'payment-routes' });
+    return res.status(500).json({ success: false, error: 'Erro interno do servidor' });
+  }
+});
+
+/**
  * GET /api/payment/calculate-net
  * Calcula valor líquido para uma corrida
  */
