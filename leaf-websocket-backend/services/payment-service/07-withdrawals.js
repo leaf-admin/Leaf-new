@@ -10,6 +10,11 @@ const {
   logError,
 } = require('./shared');
 const { toPendingWithdrawalAdminView } = require('../driver-withdrawal-view');
+const { createPixOutClient } = require('../woovi-pix-out');
+
+function pixOutCorrelationId(withdrawalId) {
+  return `leaf_withdrawal_${withdrawalId}`;
+}
 
 // Avisa a rotina Operação que um saque espera conferência. Nunca lança nem atrasa o pedido.
 function notifyWithdrawalRequested({ withdrawalId, driverId, amountCents }) {
@@ -487,7 +492,8 @@ class PaymentServiceWithdrawalsMethods {
 
     const safeLimit = Math.max(1, Math.min(Number(limit) || 50, 200));
     const snapshots = await Promise.all(
-      ['pending', 'ledger_pending'].map((status) => firestore
+      // "processing" entra para o painel mostrar saque travado (Verificar na Woovi).
+      ['pending', 'ledger_pending', 'processing'].map((status) => firestore
         .collection('driver_withdrawals')
         .where('status', '==', status)
         .limit(safeLimit)
@@ -617,18 +623,6 @@ class PaymentServiceWithdrawalsMethods {
 
     const withdrawal = claimResult.withdrawal;
 
-    if (!this.LEAF_PIX_KEY || this.LEAF_PIX_KEY === 'test@leaf.app.br') {
-      await withdrawalRef.set({
-        status: 'pending',
-        lastError: 'LEAF_PIX_KEY não configurada para processamento automático',
-        updatedAt: admin.firestore.FieldValue.serverTimestamp()
-      }, { merge: true });
-      return {
-        success: false,
-        error: 'LEAF_PIX_KEY não configurada para processamento automático'
-      };
-    }
-
     const amountCents = Number(withdrawal.amountCents || 0);
     const driverPixKey = String(withdrawal.pixKey || '').trim();
     if (!amountCents || !driverPixKey) {
@@ -640,59 +634,96 @@ class PaymentServiceWithdrawalsMethods {
       return { success: false, error: 'Dados do saque inválidos' };
     }
 
-    const transferResult = await this.wooviDriverService.transferDirectToDriver(
-      withdrawal.wooviAccountId || withdrawal.wooviClientId || withdrawal.driverId,
-      amountCents,
-      `Saque motorista ${withdrawal.driverId} - ${withdrawalId}`,
-      withdrawal.rideId || `withdraw_${withdrawalId}`,
-      driverPixKey,
-      this.LEAF_PIX_KEY,
-      {
-        correlationID: `leaf_withdrawal_${withdrawalId}`
-      }
-    );
+    // Pix Out da Woovi com correlationID fixo por saque: nunca paga em dobro.
+    const correlationID = pixOutCorrelationId(withdrawalId);
+    const pixOut = await this.getPixOutClient().sendPixOut({
+      value: amountCents,
+      pixKey: driverPixKey,
+      correlationID,
+      comment: 'Saque Leaf'
+    });
 
-    if (!transferResult.success) {
-      // Avisa o motorista uma vez só, na primeira falha; as novas tentativas não repetem.
-      const notifyDelay = !withdrawal.delayNotifiedAt;
+    if (pixOut.outcome === 'sent') {
+      return this.completeWithdrawalAfterPixOut({ withdrawalRef, withdrawalId, withdrawal, actorId, pixOut });
+    }
+
+    if (pixOut.outcome === 'unknown') {
+      // Não dá para saber se o Pix saiu: o saque fica em "processing" e só a
+      // conferência na Woovi (worker ou botão do painel) decide. Nunca reenvia às cegas.
       await withdrawalRef.set({
-        status: 'pending',
+        pixOutCorrelationId: correlationID,
+        pixOutUncertain: true,
         lastAttemptAt: admin.firestore.FieldValue.serverTimestamp(),
-        attempts: admin.firestore.FieldValue.increment(1),
-        lastError: transferResult.error || transferResult.details || 'Falha na transferência Woovi',
-        ...(notifyDelay ? { delayNotifiedAt: admin.firestore.FieldValue.serverTimestamp() } : {}),
+        lastError: pixOut.error || 'Status do Pix Out incerto',
         updatedAt: admin.firestore.FieldValue.serverTimestamp()
       }, { merge: true });
-      if (notifyDelay) {
-        require('../transactional-push')
-          .notifyWithdrawalDelayed({ driverId: withdrawal.driverId, withdrawalId })
-          .catch(() => null);
-      }
-
       notifyWithdrawalQueueChanged();
-      logStructured('warn', 'Falha ao processar saque na Woovi (mantido pendente)', {
+      logStructured('warn', 'Pix Out do saque com status incerto (mantido em processamento)', {
         service: 'payment-service',
         withdrawalId,
         driverId: withdrawal.driverId,
-        error: transferResult.error || transferResult.details
+        error: pixOut.error || null
       });
-
       return {
         success: false,
-        error: transferResult.error || 'Falha ao transferir saque'
+        code: 'WITHDRAWAL_PIX_OUT_UNCERTAIN',
+        status: 'processing',
+        error: 'Não foi possível confirmar o Pix na Woovi. Use "Verificar na Woovi" antes de qualquer nova tentativa.'
       };
     }
 
-    const processedLedgerResult = await this.financialLedgerService.recordWithdrawalProcessed({
+    // failed / not_found: nada foi pago, o saque volta para a fila.
+    return this.returnWithdrawalToQueue({
+      withdrawalRef,
+      withdrawalId,
+      withdrawal,
+      error: pixOut.error || `Pix Out recusado (${pixOut.status || pixOut.outcome})`
+    });
+  }
+
+  getPixOutClient() {
+    if (!this.pixOutClient) {
+      this.pixOutClient = createPixOutClient(this.wooviDriverService.api);
+    }
+    return this.pixOutClient;
+  }
+
+  async returnWithdrawalToQueue({ withdrawalRef, withdrawalId, withdrawal, error }) {
+    // Avisa o motorista uma vez só, na primeira falha; as novas tentativas não repetem.
+    const notifyDelay = !withdrawal.delayNotifiedAt;
+    await withdrawalRef.set({
+      status: 'pending',
+      pixOutUncertain: false,
+      lastAttemptAt: admin.firestore.FieldValue.serverTimestamp(),
+      attempts: admin.firestore.FieldValue.increment(1),
+      lastError: String(error || 'Falha no Pix Out').slice(0, 300),
+      ...(notifyDelay ? { delayNotifiedAt: admin.firestore.FieldValue.serverTimestamp() } : {}),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+    if (notifyDelay) {
+      require('../transactional-push')
+        .notifyWithdrawalDelayed({ driverId: withdrawal.driverId, withdrawalId })
+        .catch(() => null);
+    }
+    notifyWithdrawalQueueChanged();
+    logStructured('warn', 'Pix Out do saque não concluído (mantido pendente)', {
+      service: 'payment-service',
       withdrawalId,
       driverId: withdrawal.driverId,
-      amountCents,
-      transferId: transferResult.transferId || transferResult.transactionId || null,
-      metadata: {
-        actorId,
-        source: 'processDriverWithdrawal'
-      }
+      error
     });
+    return { success: false, error: String(error || 'Falha ao enviar o Pix do saque') };
+  }
+
+  async completeWithdrawalAfterPixOut({ withdrawalRef, withdrawalId, withdrawal, actorId, pixOut }) {
+    const amountCents = Number(withdrawal.amountCents || 0);
+    const transferId = pixOut.endToEndId || pixOutCorrelationId(withdrawalId);
+    const pixOutFields = {
+      pixOutCorrelationId: pixOutCorrelationId(withdrawalId),
+      pixOutStatus: pixOut.status || null,
+      pixOutEndToEndId: pixOut.endToEndId || null,
+      pixOutUncertain: false
+    };
 
     notifyWithdrawalQueueChanged();
     // O Pix saiu: avisa o motorista mesmo se o ledger ainda for reconciliar.
@@ -700,12 +731,25 @@ class PaymentServiceWithdrawalsMethods {
       .notifyWithdrawalProcessed({ driverId: withdrawal.driverId, withdrawalId, amountCents })
       .catch(() => null);
 
+    const processedLedgerResult = await this.financialLedgerService.recordWithdrawalProcessed({
+      withdrawalId,
+      driverId: withdrawal.driverId,
+      amountCents,
+      transferId,
+      metadata: {
+        actorId,
+        source: 'processDriverWithdrawal',
+        provider: 'woovi_pix_out'
+      }
+    });
+
     if (!processedLedgerResult.success) {
       await withdrawalRef.set({
+        ...pixOutFields,
         status: 'processed_ledger_pending',
         processedAt: admin.firestore.FieldValue.serverTimestamp(),
         processedBy: actorId,
-        transferId: transferResult.transferId || transferResult.transactionId || null,
+        transferId,
         ledgerProcessedStatus: 'pending_retry',
         ledgerProcessedError: processedLedgerResult.error || processedLedgerResult.code || 'Falha ao registrar ledger de Pix Out',
         ledgerRetryable: true,
@@ -731,7 +775,7 @@ class PaymentServiceWithdrawalsMethods {
       return {
         success: true,
         withdrawalId,
-        transferId: transferResult.transferId || transferResult.transactionId || null,
+        transferId,
         status: 'processed_ledger_pending',
         ledgerProcessedStatus: 'pending_retry',
         ledgerError: processedLedgerResult.error || processedLedgerResult.code || null
@@ -739,10 +783,11 @@ class PaymentServiceWithdrawalsMethods {
     }
 
     await withdrawalRef.set({
+      ...pixOutFields,
       status: 'processed',
       processedAt: admin.firestore.FieldValue.serverTimestamp(),
       processedBy: actorId,
-      transferId: transferResult.transferId || transferResult.transactionId || null,
+      transferId,
       ledgerProcessedStatus: 'posted',
       ledgerProcessedEventId: processedLedgerResult.eventId || null,
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
@@ -767,10 +812,82 @@ class PaymentServiceWithdrawalsMethods {
     return {
       success: true,
       withdrawalId,
-      transferId: transferResult.transferId || transferResult.transactionId || null,
+      transferId,
       ledgerProcessedStatus: 'posted',
       ledgerProcessedEventId: processedLedgerResult.eventId || null
     };
+  }
+
+  /**
+   * Confere na Woovi um saque parado em "processing" e resolve sem pagar em dobro:
+   * Pix saiu → finaliza; não existe/criado/recusado → volta para a fila;
+   * incerto → continua travado para conferência manual.
+   */
+  async reconcileProcessingWithdrawal(withdrawalId, { actorId = 'system:withdrawal_reconcile' } = {}) {
+    const firestore = firebaseConfig.getFirestore();
+    if (!firestore) return { success: false, error: 'Firestore não disponível' };
+    const withdrawalRef = firestore.collection('driver_withdrawals').doc(String(withdrawalId || ''));
+    const snapshot = await withdrawalRef.get();
+    if (!snapshot.exists) return { success: false, error: 'Saque não encontrado' };
+    const withdrawal = snapshot.data() || {};
+    if (withdrawal.status !== 'processing') {
+      return { success: true, unchanged: true, status: withdrawal.status };
+    }
+
+    const lookup = await this.getPixOutClient().lookupPixOut(pixOutCorrelationId(withdrawalId));
+    if (lookup.outcome === 'sent') {
+      const result = await this.completeWithdrawalAfterPixOut({ withdrawalRef, withdrawalId, withdrawal, actorId, pixOut: lookup });
+      return { ...result, resolution: 'sent' };
+    }
+    if (lookup.outcome === 'not_found' || lookup.outcome === 'created' || lookup.outcome === 'failed') {
+      // "created" volta para a fila sem risco: o próximo Processar aprova o mesmo pagamento.
+      await this.returnWithdrawalToQueue({
+        withdrawalRef,
+        withdrawalId,
+        withdrawal,
+        error: lookup.outcome === 'failed'
+          ? `Pix Out recusado (${lookup.status || 'falha'})`
+          : lookup.outcome === 'created'
+            ? 'Pix Out criado e não aprovado; aprovar no próximo Processar'
+            : 'Pix Out não chegou à Woovi'
+      });
+      return { success: true, resolution: lookup.outcome, status: 'pending' };
+    }
+
+    await withdrawalRef.set({
+      pixOutUncertain: true,
+      lastError: lookup.error || 'Status do Pix Out incerto na conferência',
+      lastReconcileAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+    return { success: false, resolution: 'unknown', status: 'processing', error: lookup.error || 'Status incerto na Woovi' };
+  }
+
+  /**
+   * Varredura do worker: saques em "processing" há mais de olderThanMs.
+   */
+  async reconcileStuckWithdrawals({ olderThanMs = 10 * 60 * 1000, limit = 20, nowMs = Date.now() } = {}) {
+    const firestore = firebaseConfig.getFirestore();
+    if (!firestore) return { checked: 0, resolved: 0 };
+    const snapshot = await firestore
+      .collection('driver_withdrawals')
+      .where('status', '==', 'processing')
+      .limit(Math.max(1, Math.min(Number(limit) || 20, 50)))
+      .get();
+    const summary = { checked: 0, resolved: 0, uncertain: 0 };
+    for (const doc of snapshot.docs) {
+      const data = doc.data() || {};
+      const startedMs = Number(data.processingStartedAt?.toMillis?.() || Date.parse(data.processingStartedAt || '') || 0);
+      if (startedMs && nowMs - startedMs < olderThanMs) continue;
+      summary.checked += 1;
+      const result = await this.reconcileProcessingWithdrawal(doc.id).catch((error) => ({ resolution: 'unknown', error: error.message }));
+      if (result.resolution === 'unknown') summary.uncertain += 1;
+      else summary.resolved += 1;
+    }
+    if (summary.checked > 0) {
+      logStructured(summary.uncertain > 0 ? 'warn' : 'info', 'Saques travados conferidos na Woovi', { service: 'payment-service', ...summary });
+    }
+    return summary;
   }
 }
 
