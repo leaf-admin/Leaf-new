@@ -38,7 +38,7 @@ const introFeeSubtitle = (report) => {
   const pixTerms = paymentFeeIncluded
     ? (pixExcessChargedToDriver ? ", Pix incluído até R$ 62,50 (acima, o motorista paga a diferença)" : ", Pix incluído")
     : "";
-  // Desde 09/11/2026 a promoção vale por data (todas as corridas oferecidas até o fim do dia 30/11).
+  // Desde 09/11/2026 a promoção vale por data (todas as corridas oferecidas até o fim do dia 31/12).
   const lastDay = eligibleUntil
     ? new Date(Date.parse(eligibleUntil) - 1).toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" })
     : null;

@@ -16,7 +16,7 @@ describe('DriverIntroStep', () => {
 
     expect(screen.getByText('Como funciona dirigir na Leaf')).toBeTruthy();
     expect(screen.getByText('você fica com R$ 28,01')).toBeTruthy();
-    expect(screen.getByText(/Até 30\/11\/2026, você fica com R\$ 29,01/)).toBeTruthy();
+    expect(screen.getByText(/Até 31\/12\/2026, você fica com R\$ 29,01/)).toBeTruthy();
     ['promo', 'service', 'processing', 'toll', 'withdrawal', 'subscription', 'cancel'].forEach((key) => {
       expect(screen.getByTestId(`auth-driver-intro-fee-${key}`)).toBeTruthy();
     });

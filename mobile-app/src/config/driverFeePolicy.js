@@ -13,10 +13,10 @@ export const DRIVER_FEE_POLICY = Object.freeze({
   // do mínimo e o motorista paga a diferença; a parte da Leaf fica em R$ 0,49.
   promoTotalFeeCents: 99,
   promoLeafFeeCents: 49,
-  // Vale para toda corrida oferecida até 30/11/2026 23:59 de Brasília
+  // Vale para toda corrida oferecida até 31/12/2026 23:59 de Brasília
   // (DRIVER_INTRO_FEE_POLICY.eligibleUntil no backend). Aprovado em 09/11/2026.
-  promoEndsOnLabel: '30/11/2026',
-  promoEligibleUntil: '2026-12-01T03:00:00.000Z',
+  promoEndsOnLabel: '31/12/2026',
+  promoEligibleUntil: '2027-01-01T03:00:00.000Z',
   serviceFeeBands: Object.freeze([
     Object.freeze({ upToCents: 1000, feeCents: 79 }),
     Object.freeze({ upToCents: 2500, feeCents: 99 }),
