@@ -92,7 +92,7 @@ describe('introductory fee service boundaries', () => {
     await expect(service.resolveOfferContext(redis, 'driver-1', {})).resolves.toMatchObject({ eligible: true, operationalFeeCents: 99 });
     expect(redis.eval).not.toHaveBeenCalled();
   });
-  it('grants every offer until 30/11 in Brasília, whatever the ride count', async () => {
+  it('grants every offer until 31/12 in Brasília, whatever the ride count', async () => {
     const { service, redis } = setup();
     const capped = { ...buildSeedState({ driverId: 'driver-1', qualifiedCompletedRides: 25, historySnapshotId: 'history-1', historyThrough: env.DRIVER_INTRO_FEE_HISTORY_CUTOFF }), approvedGeneration: generation };
     redis.get.mockImplementation(key => Promise.resolve(key.includes('generation') ? generation : JSON.stringify({ ...capped, generation })));
@@ -101,13 +101,13 @@ describe('introductory fee service boundaries', () => {
       qualifiedCompletedRides: 25,
       operationalFeeCents: 99,
       offeredAt: '2026-11-20T12:00:00.000Z',
-      eligibleUntil: '2026-12-01T03:00:00.000Z'
+      eligibleUntil: '2027-01-01T03:00:00.000Z'
     });
   });
-  it('stops offering the promotion at 01/12 00:00 in Brasília', async () => {
-    const lastSecond = setup({}, () => Date.parse('2026-12-01T02:59:59.999Z'));
+  it('stops offering the promotion at 01/01 00:00 in Brasília', async () => {
+    const lastSecond = setup({}, () => Date.parse('2027-01-01T02:59:59.999Z'));
     expect(lastSecond.service.enabled()).toBe(true);
-    const { service, redis, firestore } = setup({}, () => Date.parse('2026-12-01T03:00:00.000Z'));
+    const { service, redis, firestore } = setup({}, () => Date.parse('2027-01-01T03:00:00.000Z'));
     expect(service.enabled()).toBe(false);
     expect(await service.resolveOfferContext(redis, 'driver-1', {})).toBe(null);
     expect(redis.get).not.toHaveBeenCalled();

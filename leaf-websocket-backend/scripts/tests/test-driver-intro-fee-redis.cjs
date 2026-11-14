@@ -51,7 +51,7 @@ const firestore = {
     return task;
   }
 };
-// Clock inside the promotion window (it runs until 30/11/2026 in Brasília); checks may move it.
+// Clock inside the promotion window (it runs until 31/12/2026 in Brasília); checks may move it.
 const DURING_PROMO = Date.parse('2026-11-20T12:00:00.000Z');
 let clock = DURING_PROMO;
 const service = new DriverIntroFeeService({ getFirestore: () => firestore, env: () => runtime, now: () => clock });
@@ -262,11 +262,11 @@ async function main() {
     await service.flushPendingCheckpoints(redis);
     assert.equal(storedDoc('driver-1').reviewRequiredBookingId, 'unverified');
   });
-  await check('an offer made on 30/11 keeps the promotion when accepted after midnight; new offers stop', async () => {
-    clock = Date.parse('2026-12-01T02:59:59.000Z');
+  await check('an offer made on 31/12 keeps the promotion when accepted after midnight; new offers stop', async () => {
+    clock = Date.parse('2027-01-01T02:59:59.000Z');
     const lastOffer = await seed(3);
     assert.equal(lastOffer.eligible, true);
-    clock = Date.parse('2026-12-01T03:00:01.000Z');
+    clock = Date.parse('2027-01-01T03:00:01.000Z');
     assert.equal(service.enabled(), false);
     assert.equal(await service.resolveOfferContext(redis, 'driver-1', {}), null);
     assert.equal(await accept('midnight', { context: lastOffer }), 'OK');

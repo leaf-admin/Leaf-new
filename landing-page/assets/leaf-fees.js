@@ -16,7 +16,7 @@
     </div>
     <div class="fees-dialog-content">
       <section><h3>R$ 0,99 por corrida, com o Pix incluso até R$ 62,50.</h3>
-        <p>Em todas as corridas até 30/11/2026, esse é o total que você paga em corridas de até R$ 62,50. Acima disso, o Pix passa do mínimo de R$ 0,50 e você paga só a diferença. É uma condição promocional e pode ser alterada.</p></section>
+        <p>Em todas as corridas até 31/12/2026, esse é o total que você paga em corridas de até R$ 62,50. Acima disso, o Pix passa do mínimo de R$ 0,50 e você paga só a diferença. É uma condição promocional e pode ser alterada.</p></section>
       <section><h3>Depois da promoção, o Pix é cobrado à parte.</h3>
         <p>Vale a tabela regular da Leaf, mais o custo do operador do Pix: <strong>0,8% do valor da transação, com mínimo de R$ 0,50</strong>.</p></section>
       <div class="fee-example"><p>Exemplo: corrida de <strong>R$ 100,00</strong></p>
