@@ -321,20 +321,49 @@ function sendSupport(req, res) {
   );
 }
 
-router.get(['/privacy-policy', '/privacy'], sendPrivacyPolicy);
-router.get(['/terms-of-service', '/terms'], sendTermsOfService);
-router.get('/refund-policy', sendRefundPolicy);
-router.get(['/account-deletion', '/delete-account'], sendAccountDeletion);
-router.get('/support', sendSupport);
+// Fonte única dos textos legais: o site (leaf.app.br), que o app e as lojas já usam.
+// As cópias abaixo ficaram desatualizadas (sem a checagem de segurança do motorista),
+// então a API só redireciona. LEGAL_PAGES_REDIRECT=false volta a servir as cópias.
+const SITE_LEGAL_PATHS = Object.freeze({
+  privacy: '/privacy-policy',
+  terms: '/terms-of-service',
+  refund: '/refund-policy',
+  deletion: '/delete-account',
+  support: '/support'
+});
+
+function legalSiteBaseUrl(env = process.env) {
+  return String(env.LEAF_LEGAL_SITE_URL || 'https://leaf.app.br').trim().replace(/\/+$/, '');
+}
+
+function redirectsEnabled(env = process.env) {
+  return String(env.LEGAL_PAGES_REDIRECT || 'true').trim().toLowerCase() !== 'false';
+}
+
+function legalPage(key, fallback) {
+  return (req, res) => {
+    if (!redirectsEnabled()) return fallback(req, res);
+    return res.redirect(302, `${legalSiteBaseUrl()}${SITE_LEGAL_PATHS[key]}`);
+  };
+}
+
+router.get(['/privacy-policy', '/privacy'], legalPage('privacy', sendPrivacyPolicy));
+router.get(['/terms-of-service', '/terms'], legalPage('terms', sendTermsOfService));
+router.get('/refund-policy', legalPage('refund', sendRefundPolicy));
+router.get(['/account-deletion', '/delete-account'], legalPage('deletion', sendAccountDeletion));
+router.get('/support', legalPage('support', sendSupport));
 
 router.get('/api/legal/links', (req, res) => {
-  const baseUrl = getBaseUrl(req);
+  const baseUrl = redirectsEnabled() ? legalSiteBaseUrl() : getBaseUrl(req);
+  const paths = redirectsEnabled()
+    ? SITE_LEGAL_PATHS
+    : { privacy: '/privacy', terms: '/terms', refund: '/refund-policy', deletion: '/delete-account', support: '/support' };
   res.json({
-    privacyPolicyUrl: `${baseUrl}/privacy`,
-    termsOfServiceUrl: `${baseUrl}/terms`,
-    refundPolicyUrl: `${baseUrl}/refund-policy`,
-    accountDeletionUrl: `${baseUrl}/delete-account`,
-    supportUrl: `${baseUrl}/support`
+    privacyPolicyUrl: `${baseUrl}${paths.privacy}`,
+    termsOfServiceUrl: `${baseUrl}${paths.terms}`,
+    refundPolicyUrl: `${baseUrl}${paths.refund}`,
+    accountDeletionUrl: `${baseUrl}${paths.deletion}`,
+    supportUrl: `${baseUrl}${paths.support}`
   });
 });
 
