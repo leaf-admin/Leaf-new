@@ -28,7 +28,7 @@
     const pixExcessCents = Math.max(0, pixFeeCents - pixMinimumCents);
     const format = cents => money.format(cents / 100);
     const warning = document.getElementById('value-warning');
-    const belowMinimum = validNumber && rideCents < 850;
+    const belowMinimum = validNumber && rideCents < 1000;
     warning.hidden = !belowMinimum;
     warning.style.display = belowMinimum ? 'block' : 'none';
     input.setAttribute('aria-invalid', String(!validNumber || belowMinimum));
