@@ -56,6 +56,9 @@ const ROUTES = Object.freeze({
   // Motorista pediu saque: o Pix só sai depois de alguém conferir e clicar em Processar
   // no painel (Reconciliação). Avisa na hora para o saque não ficar parado.
   'withdrawal.requested': ['operacao'],
+  // Corrida com repasse em conferência (billing): o crédito do motorista espera a resposta do
+  // passageiro ou 24 h. Só ids e o código técnico do motivo; o detalhe fica no painel.
+  'payout.held': ['operacao'],
 });
 
 const DEFAULT_DASHBOARD_BASE_URL = 'https://dashboard.leaf.app.br';

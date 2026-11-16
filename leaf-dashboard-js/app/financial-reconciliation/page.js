@@ -9,6 +9,7 @@ import Panel from "@/src/components/ui/Panel";
 import { EmptyState, ErrorText, LoadingState } from "@/src/components/ui/PageFeedback";
 import { KeyValueGrid, TechnicalDetails } from "@/src/components/ui/DataViews";
 import PendingWithdrawals from "@/src/components/finance/PendingWithdrawals";
+import PayoutHolds from "@/src/components/finance/PayoutHolds";
 
 const severityTone = {
   critical: "status-bad",
@@ -252,6 +253,8 @@ export default function FinancialReconciliationPage() {
         </section>
 
         <PendingWithdrawals />
+
+        <PayoutHolds />
 
         <Panel
           title="Filtros"

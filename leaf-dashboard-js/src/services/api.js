@@ -556,6 +556,18 @@ class LeafApiService {
     });
   }
 
+  // Repasses em conferência: o crédito do motorista espera o passageiro ou a decisão da operação.
+  async getPayoutHolds() {
+    return this.request("/ops/payout-holds");
+  }
+
+  async decidePayoutHold(bookingId, { release, note = "" } = {}) {
+    return this.request(`/ops/payout-holds/${encodeURIComponent(bookingId)}/decision`, {
+      method: "POST",
+      body: JSON.stringify({ release: release === true, note }),
+    });
+  }
+
   async reconcileWithdrawal(withdrawalId) {
     return this.request(`/payment/withdrawals/${encodeURIComponent(withdrawalId)}/reconcile`, {
       method: "POST",
