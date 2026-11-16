@@ -22,7 +22,8 @@ const CANONICAL_RATE_CARDS = Object.freeze({
     taxa_fixa: 1.10,
     valor_km: 1.53,
     valor_min: 0.26,
-    valor_minimo: 8.50,
+    // Mínimo da corrida curta: o dobro da passagem de ônibus municipal do Rio (R$ 5,00 desde 04/01/2026).
+    valor_minimo: 10.00,
     ...DYNAMIC_PRICING_DEFAULTS
   }),
   leaf_elite: Object.freeze({
