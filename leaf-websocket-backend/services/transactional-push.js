@@ -102,6 +102,39 @@ function buildRefundProcessedPush({ bookingId, amountCents }) {
   };
 }
 
+// Repasse em conferência: tom neutro, sem motivo e sem citar o passageiro.
+function buildPayoutUnderReviewPush({ bookingId }) {
+  return {
+    title: 'Valor em conferência',
+    body: 'O valor da sua última corrida passa por uma conferência de rotina e costuma ser liberado em até 24 horas. Você não precisa fazer nada.',
+    collapseKey: `leaf-payout-review-${bookingId}`,
+    data: {
+      type: 'payout_under_review',
+      bookingId: String(bookingId || ''),
+      userType: 'driver',
+      screen: HISTORY_SCREEN
+    },
+    channelId: 'driver_updates',
+    priority: 'high'
+  };
+}
+
+function buildRideConfirmationRequestedPush({ bookingId }) {
+  return {
+    title: 'Confirme sua corrida',
+    body: 'Você fez a corrida que acabou de terminar? Toque para responder, leva um segundo.',
+    collapseKey: `leaf-ride-confirmation-${bookingId}`,
+    data: {
+      type: 'ride_confirmation_requested',
+      bookingId: String(bookingId || ''),
+      userType: 'passenger',
+      screen: 'RobotaxiPrototype'
+    },
+    channelId: 'payments',
+    priority: 'high'
+  };
+}
+
 async function send(userId, push, context = {}, { fcmService = null, env = process.env } = {}) {
   if (!isEnabled(env) || !userId) return { success: false, skipped: true };
   // Testes de outros módulos não abrem o Firebase de verdade.
@@ -155,6 +188,14 @@ function notifyWithdrawalDelayed({ driverId, withdrawalId }, options = {}) {
   return send(driverId, buildWithdrawalDelayedPush({ withdrawalId }), { withdrawalId }, options);
 }
 
+function notifyPayoutUnderReview({ driverId, bookingId }, options = {}) {
+  return send(driverId, buildPayoutUnderReviewPush({ bookingId }), { bookingId }, options);
+}
+
+function notifyRideConfirmationRequested({ passengerId, bookingId }, options = {}) {
+  return send(passengerId, buildRideConfirmationRequestedPush({ bookingId }), { bookingId }, options);
+}
+
 function notifyRefundProcessed({ passengerId, bookingId, amountCents, namespace = null }, options = {}) {
   if (namespace === 'sandbox') return Promise.resolve({ success: false, skipped: true });
   return send(passengerId, buildRefundProcessedPush({ bookingId, amountCents }), { bookingId }, options);
@@ -167,8 +208,12 @@ module.exports = {
   buildWithdrawalProcessedPush,
   buildWithdrawalDelayedPush,
   buildRefundProcessedPush,
+  buildPayoutUnderReviewPush,
+  buildRideConfirmationRequestedPush,
   notifySupportReply,
   notifyWithdrawalProcessed,
   notifyWithdrawalDelayed,
-  notifyRefundProcessed
+  notifyRefundProcessed,
+  notifyPayoutUnderReview,
+  notifyRideConfirmationRequested
 };

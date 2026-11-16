@@ -142,6 +142,32 @@ async function materializeDemandHeat(redis, { now = new Date() } = {}) {
   return { cells: cells.length, sources: sources.length };
 }
 
+// Prévia de cenário simulado para contas de QA (DEMAND_HEAT_PREVIEW_UIDS). Fica numa chave
+// própria com prazo curto e nunca substitui o calor real dos outros motoristas.
+const PREVIEW_HEAT_KEY = 'leaf:h3:demand-heat:preview';
+const PREVIEW_TTL_SECONDS = 2 * 3600;
+
+function isPreviewUid(uid, env = process.env) {
+  const id = String(uid || '').trim();
+  if (!id) return false;
+  return String(env.DEMAND_HEAT_PREVIEW_UIDS || '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .includes(id);
+}
+
+async function getPreviewHeat(redis) {
+  if (!redis) return null;
+  const value = await redis.get(PREVIEW_HEAT_KEY);
+  if (!value) return null;
+  try {
+    return JSON.parse(value);
+  } catch (_error) {
+    return null;
+  }
+}
+
 async function getDemandHeat(redis) {
   if (!redis) return null;
   const value = await redis.get(HEAT_KEY);
@@ -157,7 +183,11 @@ module.exports = {
   recordRideRequest,
   materializeDemandHeat,
   getDemandHeat,
+  getPreviewHeat,
+  isPreviewUid,
   helpers: {
+    PREVIEW_HEAT_KEY,
+    PREVIEW_TTL_SECONDS,
     localParts,
     buildSourceBuckets,
     bucketKey,

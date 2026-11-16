@@ -13,5 +13,6 @@ describe('ops mutation role boundary', () => {
     expect(source).toContain("router.post('/passengers/:userId/block', requireSupportRoles(MUTATION_ROLES)");
     expect(source).toContain("router.post('/areas/policies', requireSupportRoles(MUTATION_ROLES)");
     expect(source).toContain("router.post('/disputes/:disputeId/decision', requireSupportRoles(MUTATION_ROLES)");
+    expect(source).toContain("router.post('/payout-holds/:bookingId/decision', requireSupportRoles(MUTATION_ROLES)");
   });
 });

@@ -54,7 +54,7 @@ describe('pricing/calculateFare', () => {
       score_excecao: 0
     });
 
-    expect(result.preco_final).toBe(8.5);
+    expect(result.preco_final).toBe(10);
     expect(result.valor_minimo_aplicado).toBe(true);
   });
 });

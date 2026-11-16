@@ -24,6 +24,8 @@ const {
     listDuePendingCancellationCredits,
     registerPendingAttempt
 } = require('../services/cancellation-credit-pending-service');
+const payoutHoldService = require('../services/payout-hold-service');
+const transactionalPush = require('../services/transactional-push');
 
 const driverApprovalService = typeof DriverApprovalService === 'function'
     ? new DriverApprovalService()
@@ -111,7 +113,66 @@ const workerManager = new WorkerManager({
     retryBackoff: [1000, 5000, 15000, 30000, 60000] // Backoff longo
 });
 
-workerManager.registerListener(EVENT_TYPES.RIDE_COMPLETED, async (event) => {
+async function getBillingRedis() {
+    await redisPool.ensureConnection?.();
+    return redisPool.getConnection();
+}
+
+/**
+ * Repasse em conferência: se a corrida tem sinais de que talvez não aconteceu como registrada,
+ * guarda o evento e não credita agora. Devolve true quando a corrida ficou retida.
+ * Qualquer erro aqui segue o crédito normal (nunca retém por falha técnica).
+ */
+async function holdPayoutIfNeeded({ event, rideCompleted, idempotencyKey, financialContext }) {
+    if (!payoutHoldService.isEnabled()) return false;
+    const { bookingId, driverId, customerId } = rideCompleted;
+    try {
+        const redis = await getBillingRedis();
+        const { reasons, summary } = await payoutHoldService.evaluateRideHold(redis, { bookingId, driverId });
+        if (reasons.length === 0) return false;
+
+        const { created, hold } = await payoutHoldService.recordHold(redis, {
+            bookingId,
+            driverId,
+            customerId,
+            reasons,
+            summary,
+            event
+        });
+        // O crédito vai acontecer depois, pelo mesmo caminho: libera a chave para a liberação usar.
+        await idempotencyService.releaseInflight?.(idempotencyKey);
+
+        logStructured('warn', 'Repasse da corrida em conferência', {
+            service: 'billing-worker',
+            bookingId,
+            driverId,
+            reasons,
+            created
+        });
+
+        if (created && financialContext?.namespace !== 'sandbox') {
+            await transactionalPush.notifyPayoutUnderReview({ driverId, bookingId });
+            await transactionalPush.notifyRideConfirmationRequested({ passengerId: customerId, bookingId });
+            await require('../services/bot-event-service').emit('payout.held', {
+                bookingId,
+                driverId,
+                reasonCode: reasons.join(','),
+                status: hold?.status,
+                source: 'billing'
+            }, { dedupeKey: `payout_held:${bookingId}` }).catch(() => null);
+        }
+        return true;
+    } catch (error) {
+        logStructured('error', 'Falha ao avaliar repasse em conferência; crédito segue normal', {
+            service: 'billing-worker',
+            bookingId,
+            error: error.message
+        });
+        return false;
+    }
+}
+
+async function processRideCompletedBilling(event, { skipPayoutHold = false } = {}) {
     const rideCompleted = unwrapCanonicalEventPayload(event);
     const { bookingId, driverId, finalFare, tollFee } = rideCompleted;
     const financialContextResult = resolveFinancialContext(rideCompleted, { allowLegacyOperational: true });
@@ -202,6 +263,10 @@ workerManager.registerListener(EVENT_TYPES.RIDE_COMPLETED, async (event) => {
             success: true,
             data: distributionSummary
         };
+    }
+
+    if (!skipPayoutHold && await holdPayoutIfNeeded({ event, rideCompleted, idempotencyKey, financialContext })) {
+        return { success: true, held: true, bookingId };
     }
 
     if (rideLegSettlements.length > 1) {
@@ -394,7 +459,47 @@ workerManager.registerListener(EVENT_TYPES.RIDE_COMPLETED, async (event) => {
     await idempotencyService.cacheResult(idempotencyKey, distributionResult, 604800);
 
     return distributionResult;
-});
+}
+
+workerManager.registerListener(EVENT_TYPES.RIDE_COMPLETED, (event) => processRideCompletedBilling(event));
+
+/**
+ * Credita as corridas em conferência que podem sair: passageiro confirmou, operação liberou
+ * ou o prazo de 24 h venceu sem resposta. Usa o mesmo caminho do evento original.
+ */
+async function sweepPayoutHolds({ now = Date.now() } = {}) {
+    const redis = await getBillingRedis();
+    const due = await payoutHoldService.listDueForRelease(redis, { now });
+    let released = 0;
+    for (const hold of due) {
+        if ((Number(hold.releaseAttempts) || 0) >= payoutHoldService.MAX_AUTOMATIC_RELEASE_ATTEMPTS) {
+            continue;
+        }
+        try {
+            const result = await processRideCompletedBilling(hold.event, { skipPayoutHold: true });
+            if (result?.success === false) {
+                throw new Error(result.error || 'release_failed');
+            }
+            await payoutHoldService.markReleased(redis, hold.bookingId, { now });
+            released += 1;
+            logStructured('info', 'Repasse em conferência liberado', {
+                service: 'billing-worker',
+                bookingId: hold.bookingId,
+                driverId: hold.driverId,
+                previousStatus: hold.status
+            });
+        } catch (error) {
+            await payoutHoldService.registerReleaseAttempt(redis, hold.bookingId, error.message, { now });
+            logStructured('error', 'Falha ao liberar repasse em conferência', {
+                service: 'billing-worker',
+                bookingId: hold.bookingId,
+                error: error.message
+            });
+        }
+    }
+    await payoutHoldService.pruneReleased(redis, { now }).catch(() => 0);
+    return { due: due.length, released };
+}
 
 // ✅ CAOS SCENARIO: Processamento de Payout do Motorista em Cancelamentos
 async function clearCancellationCreditPending(bookingId) {
@@ -591,6 +696,16 @@ if (require.main === module) {
         });
     }, 60000);
 
+    // Repasses em conferência que já podem ser creditados
+    setInterval(() => {
+        sweepPayoutHolds().catch(error => {
+            logStructured('error', 'Erro na varredura de repasses em conferência', {
+                service: 'billing-worker',
+                error: error.message
+            });
+        });
+    }, 60000);
+
     // Log de estatísticas a cada 60 segundos
     setInterval(() => {
         const stats = workerManager.getStats();
@@ -607,5 +722,7 @@ module.exports = {
     buildRideBillingIdempotencyScope,
     buildCancellationBillingIdempotencyScope,
     processCancellationCredit,
-    sweepPendingCancellationCredits
+    sweepPendingCancellationCredits,
+    processRideCompletedBilling,
+    sweepPayoutHolds
 };
