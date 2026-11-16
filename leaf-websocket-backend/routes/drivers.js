@@ -372,12 +372,18 @@ router.get('/api/drivers/me/demand-heat', requireFirebaseUser, async (req, res) 
     if (String(process.env.ENABLE_DEMAND_HISTORY_HEAT || 'true') === 'false') {
       return res.json({ success: true, enabled: false, cells: [] });
     }
-    const heat = await demandHistoryService.getDemandHeat(redisPool.getConnection());
+    const redis = redisPool.getConnection();
+    // Conta de QA com prévia publicada vê o cenário simulado; o resto vê o calor real.
+    const preview = demandHistoryService.isPreviewUid(req.authenticatedUser?.uid)
+      ? await demandHistoryService.getPreviewHeat(redis)
+      : null;
+    const heat = preview || await demandHistoryService.getDemandHeat(redis);
     res.set('Cache-Control', 'private, max-age=120');
     return res.json({
       success: true,
       enabled: true,
       generatedAt: heat?.generatedAt || null,
+      ...(preview ? { preview: true, scenario: preview.scenario || null } : {}),
       cells: Array.isArray(heat?.cells) ? heat.cells : []
     });
   } catch (error) {
