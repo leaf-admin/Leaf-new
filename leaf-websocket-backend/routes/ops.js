@@ -3,6 +3,7 @@ const { authenticateSupport, requireSupportRoles } = require('../middleware/supp
 const safetyIncidentService = require('../services/safety-incident-service');
 const { getDefaultEmergencyPackageService } = require('../services/emergency-package-service');
 const safetySignalService = require('../services/safety-signal-service');
+const payoutHoldService = require('../services/payout-hold-service');
 const passengerTrustService = require('../services/passenger-trust-service');
 const operationalAreaPolicyService = require('../services/operational-area-policy-service');
 const disputeReviewService = require('../services/dispute-review-service');
@@ -319,6 +320,45 @@ router.get('/safety/signals/:signalId', async (req, res) => {
   } catch (error) {
     logError(error, { service: 'ops-routes', operation: 'getSafetySignal' });
     return res.status(500).json({ success: false, error: 'Erro ao buscar sinal de segurança' });
+  }
+});
+
+// Repasses em conferência (payout-hold-service). Lista sem o evento bruto; a decisão só muda o
+// status: o crédito em si é feito pelo billing-worker na varredura seguinte.
+router.get('/payout-holds', async (req, res) => {
+  try {
+    const redisPool = require('../utils/redis-pool');
+    await redisPool.ensureConnection?.();
+    const holds = await payoutHoldService.listHolds(redisPool.getConnection());
+    res.json({ success: true, holds: holds.map((hold) => payoutHoldService.toPublicView(hold)) });
+  } catch (error) {
+    logError(error, { service: 'ops-routes', operation: 'listPayoutHolds' });
+    res.status(500).json({ success: false, error: 'Erro ao listar repasses em conferência' });
+  }
+});
+
+router.post('/payout-holds/:bookingId/decision', requireSupportRoles(MUTATION_ROLES), async (req, res) => {
+  const release = req.body?.release;
+  if (typeof release !== 'boolean') {
+    return res.status(400).json({ success: false, error: 'release deve ser true ou false' });
+  }
+  try {
+    const redisPool = require('../utils/redis-pool');
+    await redisPool.ensureConnection?.();
+    const result = await payoutHoldService.recordReviewDecision(redisPool.getConnection(), {
+      bookingId: req.params.bookingId,
+      release,
+      note: req.body?.note || '',
+      reviewedBy: req.user?.uid || req.user?.id || req.user?.email || 'ops'
+    });
+    if (!result.ok) {
+      const status = result.code === 'HOLD_NOT_FOUND' ? 404 : 409;
+      return res.status(status).json({ success: false, code: result.code });
+    }
+    return res.json({ success: true, hold: payoutHoldService.toPublicView(result.hold) });
+  } catch (error) {
+    logError(error, { service: 'ops-routes', operation: 'decidePayoutHold' });
+    return res.status(500).json({ success: false, error: 'Erro ao registrar a decisão' });
   }
 });
 

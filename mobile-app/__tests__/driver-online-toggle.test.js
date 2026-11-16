@@ -100,6 +100,11 @@ jest.mock('../src/components/prototype/PrototypeScaffold', () => {
   };
 });
 
+// A pergunta "Você fez esta corrida?" faz a própria chamada à API; aqui só interessa a home.
+jest.mock('../src/screens/prototype/home/passengerRideConfirmation', () => ({
+  usePassengerRideConfirmation: jest.fn(),
+}));
+
 jest.mock('../src/screens/prototype/home/LeafPassengerLanding', () => {
   const React = require('react');
   const { Text, TouchableOpacity, View } = require('react-native');

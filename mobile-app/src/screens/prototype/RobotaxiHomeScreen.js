@@ -150,6 +150,7 @@ import {
 } from '../../services/runtime/locationRouteBridge';
 import { fetchDynamicPricingQuote } from '../../services/runtime/pricingQuoteService';
 import { confirmDriverEarlyEnd } from './home/driverEarlyEndConfirm';
+import { usePassengerRideConfirmation } from './home/passengerRideConfirmation';
 import Logger from '../../utils/Logger';
 import { resolveHomeQuoteFailurePresentation } from './home/homeQuoteFailurePresentation';
 import { checkServiceAreaCoverage, coverageCacheKey } from '../../services/serviceAreaCoverage';
@@ -5221,6 +5222,10 @@ export default function RobotaxiHomeScreen({ navigation, route }) {
         ].includes(normalizedBookingStatus)
       )
   );
+  // Repasse em conferência: pergunta ao passageiro se ele fez a corrida (fora de corrida ativa).
+  usePassengerRideConfirmation({
+    enabled: Boolean(!isDriverRole && !isPassengerRideLifecycleLocked && (profile?.uid || profileUid)),
+  });
   // Camada de trânsito do Google desligada no motorista (2026-10-14): poluía o mapa e
   // brigava com a linha da rota. O trânsito da própria rota continua nas cores dela.
   const shouldShowTrafficLayer = false;

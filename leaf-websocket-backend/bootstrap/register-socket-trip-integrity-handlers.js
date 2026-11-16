@@ -20,6 +20,29 @@ const TRIP_INTEGRITY_CONFIRM_TIMEOUT_MS = Math.max(
   5000,
   Number.parseInt(process.env.TRIP_INTEGRITY_CONFIRM_TIMEOUT_MS || '20000', 10) || 20000
 );
+// Divergência sem confirmação não cancela mais a corrida: GPS ruim ou celular no bolso
+// derrubavam corridas legítimas. A corrida segue e o repasse fica em conferência no billing
+// (payout-hold-service), que pergunta ao passageiro ao final. true volta ao comportamento antigo.
+const TRIP_INTEGRITY_AUTO_CANCEL_ENABLED =
+  String(process.env.TRIP_INTEGRITY_AUTO_CANCEL_ENABLED || 'false').toLowerCase() === 'true';
+
+async function markTripIntegrityForPayoutReview(redis, bookingId, reasonCode, logStructured) {
+  const nowTs = Date.now();
+  const integrityKey = `trip_integrity:${bookingId}`;
+  const current = await redis.hgetall(integrityKey);
+  if (current?.holdRecommendedAt) return;
+  await redis.hset(integrityKey, {
+    holdRecommendedAt: String(nowTs),
+    holdRecommendedReason: String(reasonCode || 'TRIP_INTEGRITY_UNRESOLVED')
+  });
+  await redis.expire(integrityKey, 6 * 60 * 60);
+  logStructured?.('warn', 'Divergência de localização sem confirmação: repasse irá para conferência', {
+    service: 'trip-integrity',
+    bookingId,
+    reasonCode
+  });
+}
+
 const TRIP_INTEGRITY_SOFT_BAN_SECONDS = Math.max(
   60,
   Number.parseInt(process.env.TRIP_INTEGRITY_SOFT_BAN_SECONDS || '300', 10) || 300
@@ -105,6 +128,10 @@ function scheduleTripIntegrityConfirmationTimeout({
       }
 
       if (snapshot.alertOpenAt && !snapshot.alertResolvedAt && !snapshot.boardingConfirmedAt) {
+        if (!TRIP_INTEGRITY_AUTO_CANCEL_ENABLED) {
+          await markTripIntegrityForPayoutReview(redis, bookingId, 'TRIP_INTEGRITY_CONFIRMATION_TIMEOUT', logStructured);
+          return;
+        }
         const bookingData = await redis.hgetall(`booking:${bookingId}`);
         await cancelRideForTripIntegrityViolation({
           redis,
@@ -371,6 +398,10 @@ function registerSocketTripIntegrityHandlers({
     }
 
     if ((nowTs - alertOpenAt) >= TRIP_INTEGRITY_CONFIRM_TIMEOUT_MS) {
+      if (!TRIP_INTEGRITY_AUTO_CANCEL_ENABLED) {
+        await markTripIntegrityForPayoutReview(redis, bookingId, 'TRIP_INTEGRITY_DISTANCE_TIMEOUT', logStructured);
+        return;
+      }
       await cancelRideForTripIntegrityViolation({
         redis,
         bookingId,

@@ -113,6 +113,42 @@ describe('registerSocketTripIntegrityHandlers', () => {
     );
   });
 
+  it('marks the ride for payout review instead of cancelling when the divergence stays unresolved', async () => {
+    const alertOpenAt = Date.now() - 60 * 1000;
+    const { listeners, redis, CancelRideCommand } = buildHarness({
+      integritySnapshot: {
+        driverId: 'driver-1',
+        customerId: 'customer-1',
+        driverLat: '-22.9700',
+        driverLng: '-43.1800',
+        driverAt: String(Date.now()),
+        passengerLat: '-22.9970',
+        passengerLng: '-43.1800',
+        passengerAt: String(Date.now()),
+        divergenceCount: '5',
+        alertOpenAt: String(alertOpenAt)
+      }
+    });
+
+    // Passageiro a ~3 km do carro, alerta aberto há 1 minuto sem confirmação.
+    await listeners.passengerLocationUpdate({
+      bookingId: 'booking-1',
+      lat: -22.9970,
+      lng: -43.1800,
+      timestamp: Date.now()
+    });
+
+    expect(CancelRideCommand).not.toHaveBeenCalled();
+    expect(redis.set).not.toHaveBeenCalledWith(expect.stringContaining('driver_soft_ban'), expect.anything(), 'EX', expect.anything());
+    expect(redis.hset).toHaveBeenCalledWith(
+      'trip_integrity:booking-1',
+      expect.objectContaining({
+        holdRecommendedAt: expect.any(String),
+        holdRecommendedReason: 'TRIP_INTEGRITY_DISTANCE_TIMEOUT'
+      })
+    );
+  });
+
   it('confirms boarding for both passenger and driver rooms', async () => {
     const { listeners, io, roomEmit, redis } = buildHarness();
 
