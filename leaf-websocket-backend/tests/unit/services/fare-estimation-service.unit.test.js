@@ -108,7 +108,7 @@ describe('fare-estimation-service', () => {
     expect(result.routeMetrics.source).toBe('fallback_haversine');
     expect(result.routeMetrics.distanceKm).toBeGreaterThan(0);
     expect(result.routeMetrics.durationSecs).toBeGreaterThan(0);
-    expect(result.estimatedFare).toBeGreaterThanOrEqual(8.5);
+    expect(result.estimatedFare).toBeGreaterThanOrEqual(10);
     expect(result.pricingPayload.final_price).toBe(result.estimatedFare);
   });
 
