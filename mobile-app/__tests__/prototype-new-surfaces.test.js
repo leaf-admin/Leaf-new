@@ -32,6 +32,11 @@ jest.mock('../src/services/MobileVehicleService', () => ({
   },
 }));
 
+const mockRequestTripShareLink = jest.fn();
+jest.mock('../src/services/tripShareLinkService', () => ({
+  requestTripShareLink: (...args) => mockRequestTripShareLink(...args),
+}));
+
 jest.mock('../src/screens/prototype/prototypeRideRuntime', () => ({
   usePrototypeRideRuntime: jest.fn(),
 }));
@@ -177,42 +182,70 @@ describe('prototype new surfaces', () => {
     ]);
   });
 
-  it('renders the dedicated share trip surface and opens the public preview', () => {
+  it('renders the dedicated share trip surface with the real link and opens the public page', async () => {
+    const { Linking } = require('react-native');
+    const openUrl = jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
+    mockRequestTripShareLink.mockResolvedValue({ ok: true, url: 'https://leaf.app.br/viagem/tok_abcdefghijklmnop' });
     const navigation = buildNavigation();
     const screen = render(
       <RobotaxiShareTripScreen
         navigation={navigation}
-        route={{ key: 'share-trip', params: { tripId: 'trip_1' } }}
+        route={{ key: 'share-trip', params: { bookingId: 'booking_1' } }}
       />
     );
 
     expect(screen.getByText('Acompanhar viagem')).toBeTruthy();
+    expect(await screen.findByText('https://leaf.app.br/viagem/tok_abcdefghijklmnop')).toBeTruthy();
+    expect(mockRequestTripShareLink).toHaveBeenCalledWith('booking_1');
     expect(screen.getByText('Copiar link')).toBeTruthy();
     expect(screen.queryByText('WhatsApp')).toBeNull();
     expect(screen.getByTestId('robotaxi-share-trip-close-button').props.accessibilityLabel)
       .toBe('Fechar compartilhamento da viagem');
     expect(screen.getByTestId('robotaxi-share-copy-link').props.accessibilityLabel)
       .toBe('Copiar link da viagem');
+    expect(screen.getByText('Contatos de confiança')).toBeTruthy();
 
     fireEvent.press(screen.getByTestId('robotaxi-share-more-actions'));
     expect(screen.getByText('WhatsApp')).toBeTruthy();
-    expect(screen.getByTestId('robotaxi-share-more-actions').props.accessibilityLabel)
-      .toBe('Ocultar opções de compartilhamento');
     expect(screen.getByTestId('robotaxi-share-whatsapp').props.accessibilityLabel)
       .toBe('Compartilhar link pelo WhatsApp');
-    expect(screen.getByTestId('robotaxi-share-preview').props.accessibilityLabel)
-      .toBe('Visualizar prévia do link da viagem');
 
     fireEvent.press(screen.getByText('Prévia'));
+    expect(openUrl).toHaveBeenCalledWith('https://leaf.app.br/viagem/tok_abcdefghijklmnop');
+    openUrl.mockRestore();
+  });
 
-    expect(navigation.navigate).toHaveBeenCalledWith(
-      'RobotaxiPrototypePublicTracking',
-      expect.objectContaining({
-        tripId: 'trip_1',
-        destination: 'Shopping Leblon',
-        driverName: 'Motorista Leaf',
-      })
+  it('explains when there is no ride to share instead of showing a fake link', async () => {
+    mockRequestTripShareLink.mockResolvedValue({ ok: false, code: 'NO_ACTIVE_RIDE' });
+    const screen = render(
+      <RobotaxiShareTripScreen navigation={buildNavigation()} route={{ key: 'share-trip', params: {} }} />
     );
+    expect(await screen.findByText('O link fica disponível durante uma corrida.')).toBeTruthy();
+  });
+
+  it('saves a trusted contact and sends the link through WhatsApp', async () => {
+    const { Linking } = require('react-native');
+    const openUrl = jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
+    mockRequestTripShareLink.mockResolvedValue({ ok: true, url: 'https://leaf.app.br/viagem/tok_abcdefghijklmnop' });
+    const screen = render(
+      <RobotaxiShareTripScreen navigation={buildNavigation()} route={{ key: 'share-trip', params: { bookingId: 'booking_1' } }} />
+    );
+    await screen.findByText('https://leaf.app.br/viagem/tok_abcdefghijklmnop');
+
+    fireEvent.press(screen.getByTestId('robotaxi-share-contact-add'));
+    fireEvent.changeText(screen.getByTestId('robotaxi-share-contact-name'), 'Ana Paula');
+    fireEvent.changeText(screen.getByTestId('robotaxi-share-contact-phone'), '(21) 98888-7777');
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('robotaxi-share-contact-save'));
+    });
+
+    expect(await screen.findByText('Ana Paula')).toBeTruthy();
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('robotaxi-share-contact-send-5521988887777'));
+    });
+    expect(openUrl).toHaveBeenCalledWith(expect.stringMatching(/^https:\/\/wa\.me\/5521988887777\?text=/));
+    expect(decodeURIComponent(openUrl.mock.calls[0][0])).toContain('https://leaf.app.br/viagem/tok_abcdefghijklmnop');
+    openUrl.mockRestore();
   });
 
   it('renders the public trip tracking surface with driver and route essentials', () => {

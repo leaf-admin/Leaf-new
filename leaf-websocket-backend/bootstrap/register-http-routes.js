@@ -31,6 +31,7 @@ function registerHttpRoutes({ app, logStructured, io = null }) {
 
     // Importar rotas de drivers
     const driversRoutes = require('../routes/drivers');
+    const tripShareRoutes = require('../routes/trip-share');
     const driverActivationRoutes = require('../routes/driver-activation');
 
     // Importar rotas de Notificações
@@ -177,6 +178,8 @@ function registerHttpRoutes({ app, logStructured, io = null }) {
 
     // Rotas de drivers (inclui /api/drivers/nearby)
     app.use('/', driversRoutes);
+    // Link de acompanhamento da viagem (passageiro gera; página pública lê)
+    app.use('/', tripShareRoutes);
     app.use('/', driverActivationRoutes);
     logStructured('info', 'Rotas de Drivers registradas', { service: 'server' });
     logStructured('info', 'Rotas de Ativação de Motorista registradas', { service: 'server' });

@@ -17,6 +17,7 @@ import { resolveRegisteredVehicleColor } from '../../components/prototype/vehicl
 import PrototypeConnectionStatusPill from '../../components/prototype/PrototypeConnectionStatusPill';
 import PassengerRideMomentBanner, { PASSENGER_ON_MY_WAY_MESSAGE } from './home/PassengerRideMomentBanner';
 import RideChatMessageBanner from './home/RideChatMessageBanner';
+import { useNightTripShareReminder } from './home/nightTripShareReminder';
 import WooviPaymentModal from '../../components/payment/WooviPaymentModal';
 import SecurePaymentBadge from '../../components/payment/SecurePaymentBadge';
 import robotaxiPrototypeTokens from '../../components/design-system/robotaxiPrototypeTokens';
@@ -1487,6 +1488,9 @@ export default function RobotaxiTripScreen({ navigation, route }) {
   // the card stayed up with empty driver data ("Placa não informada").
   // A plain idle is not enough (state also passes through idle while the app
   // reloads): the runtime must have recorded this ride as cancelled.
+  // À noite, ao começar a viagem, oferece mandar o link para um contato de confiança.
+  useNightTripShareReminder({ bookingId: activeBookingId, bookingStatus, destination });
+
   const watchedBookingIdRef = useRef('');
   useEffect(() => {
     const status = String(bookingStatus || '').trim().toLowerCase();
