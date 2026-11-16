@@ -1,5 +1,5 @@
 import leafTypography from '../../components/prototype/LeafTypography';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Linking,
@@ -8,6 +8,7 @@ import {
   StatusBar,
   StyleSheet,
   Text,
+  TextInput,
   View,
   useWindowDimensions,
 } from 'react-native';
@@ -22,40 +23,39 @@ import {
   PrototypeMenuSection,
   PrototypeMenuSurface,
 } from '../../components/prototype/PrototypeMenuSurface';
-import { LeafButton, LeafEmptyState, leafRideColors } from '../../components/prototype/LeafRideUI';
+import { LeafButton, leafRideColors } from '../../components/prototype/LeafRideUI';
 import { usePrototypeMapOcclusion } from './prototypeMapOcclusion';
 import { usePrototypeRideRuntime } from './prototypeRideRuntime';
+import { requestTripShareLink } from '../../services/tripShareLinkService';
+import {
+  MAX_TRUSTED_CONTACTS,
+  addTrustedContact,
+  buildTrustedContactMessage,
+  buildWhatsAppUrl,
+  formatBrazilPhone,
+  loadTrustedContacts,
+  removeTrustedContact,
+} from '../../services/trustedContactsStore';
 
 const SURFACE_TOP_PADDING = 20;
 const SURFACE_BOTTOM_PADDING = 18;
 const BACKDROP_COLOR = 'transparent';
-const DEFAULT_PUBLIC_TRIP_BASE_URL = 'https://leaf.app.br/viagem';
-
-function normalizeBaseUrl(rawValue) {
-  const value = String(rawValue || '').trim();
-  if (!value) {
-    return DEFAULT_PUBLIC_TRIP_BASE_URL;
-  }
-  return value.replace(/\/+$/, '');
-}
-
-function resolveTripId(route, runtime) {
+// Só a corrida em andamento tem link: o backend recusa corrida encerrada.
+function resolveBookingId(route, runtime) {
   return (
-    route?.params?.tripId ||
     route?.params?.bookingId ||
+    route?.params?.tripId ||
     runtime.activeBookingId ||
     runtime.activeBooking?.bookingId ||
     runtime.activeBooking?.id ||
-    runtime.lastReceipt?.bookingId ||
-    runtime.lastReceipt?.id ||
-    `leaf-${Date.now()}`
+    ''
   );
 }
 
-function buildPublicTripLink(tripId) {
-  const baseUrl = normalizeBaseUrl(process.env.EXPO_PUBLIC_PUBLIC_TRIP_BASE_URL);
-  return `${baseUrl}/${encodeURIComponent(String(tripId || 'preview'))}`;
-}
+const SHARE_LINK_ERRORS = {
+  NO_ACTIVE_RIDE: 'O link fica disponível durante uma corrida.',
+  BOOKING_ENDED: 'Esta corrida já terminou. O link só funciona durante a viagem.',
+};
 
 function resolveDriver(runtime, route) {
   const driver = runtime.driverInfo || {};
@@ -91,23 +91,51 @@ export default function RobotaxiShareTripScreen({ navigation, route }) {
     occludedBottom: panelHeight,
   });
 
-  const tripId = useMemo(() => resolveTripId(route, runtime), [route, runtime]);
-  const publicLink = useMemo(() => buildPublicTripLink(tripId), [tripId]);
+  const bookingId = useMemo(() => resolveBookingId(route, runtime), [route, runtime]);
+  const [publicLink, setPublicLink] = useState('');
+  const [linkError, setLinkError] = useState('');
+  const [contacts, setContacts] = useState([]);
+  const [newContactName, setNewContactName] = useState('');
+  const [newContactPhone, setNewContactPhone] = useState('');
+  const [contactError, setContactError] = useState('');
+  const [showContactForm, setShowContactForm] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setPublicLink('');
+    setLinkError('');
+    requestTripShareLink(bookingId).then((result) => {
+      if (cancelled) return;
+      if (result.ok) {
+        setPublicLink(result.url);
+      } else {
+        setLinkError(SHARE_LINK_ERRORS[result.code] || 'Não foi possível gerar o link agora. Tente de novo em instantes.');
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [bookingId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadTrustedContacts().then((list) => {
+      if (!cancelled) setContacts(list);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const driver = useMemo(() => resolveDriver(runtime, route), [route, runtime]);
   const destination =
     route?.params?.destination ||
     runtime.selectedDestination?.name ||
     runtime.selectedDestination?.address ||
     'Destino da viagem';
-  const eta =
-    runtime.tripArrivalText ||
-    route?.params?.tripArrivalText ||
-    (runtime.tripDurationMin ? `Chega em ${runtime.tripDurationMin} min` : 'ETA em atualização');
-
   const shareMessage = useMemo(
     () =>
-      `Acompanhe minha viagem Leaf em tempo real: ${publicLink}\nDestino: ${destination}\n${eta}`,
-    [destination, eta, publicLink],
+      `Acompanhe minha viagem Leaf em tempo real: ${publicLink}\nDestino: ${destination}`,
+    [destination, publicLink],
   );
 
   const handleDismiss = useCallback(() => {
@@ -126,6 +154,7 @@ export default function RobotaxiShareTripScreen({ navigation, route }) {
   }, []);
 
   const handleCopy = useCallback(async () => {
+    if (!publicLink) return;
     await Clipboard.setStringAsync(publicLink);
     setCopied(true);
   }, [publicLink]);
@@ -153,17 +182,45 @@ export default function RobotaxiShareTripScreen({ navigation, route }) {
     }
   }, [publicLink, shareMessage]);
 
+  // Abre a mesma página que a pessoa vai ver.
   const handlePreview = useCallback(() => {
-    navigation.navigate('RobotaxiPrototypePublicTracking', {
-      tripId,
-      publicLink,
-      destination,
-      eta,
-      driverName: driver.name,
-      vehicleModel: driver.vehicle,
-      vehiclePlate: driver.plate,
-    });
-  }, [destination, driver.name, driver.plate, driver.vehicle, eta, navigation, publicLink, tripId]);
+    if (!publicLink) return;
+    Linking.openURL(publicLink).catch(() => null);
+  }, [publicLink]);
+
+  const handleSendToContact = useCallback(async (contact) => {
+    if (!publicLink) return;
+    const message = buildTrustedContactMessage({ contactName: contact.name, shareUrl: publicLink, destination });
+    try {
+      await Linking.openURL(buildWhatsAppUrl({ phone: contact.phone, message }));
+    } catch (error) {
+      await Share.share({ message }).catch(() => null);
+    }
+  }, [destination, publicLink]);
+
+  const handleAddContact = useCallback(async () => {
+    const result = await addTrustedContact({ name: newContactName, phone: newContactPhone });
+    if (!result.ok) {
+      setContactError(result.error);
+      return;
+    }
+    setContacts(result.contacts);
+    setNewContactName('');
+    setNewContactPhone('');
+    setContactError('');
+    setShowContactForm(false);
+  }, [newContactName, newContactPhone]);
+
+  const handleRemoveContact = useCallback((contact) => {
+    Alert.alert('Remover contato?', `${contact.name} sai da sua lista de contatos de confiança.`, [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Remover',
+        style: 'destructive',
+        onPress: async () => setContacts(await removeTrustedContact(contact.phone)),
+      },
+    ]);
+  }, []);
 
   return (
     <PrototypeScreenTransition direction="up">
@@ -179,7 +236,7 @@ export default function RobotaxiShareTripScreen({ navigation, route }) {
             onLayout={handlePanelLayout}
             eyebrow="Compartilhar"
             title="Acompanhar viagem"
-            subtitle="Envie o link para alguém que tenha o app Leaf acompanhar sua viagem."
+            subtitle="Quem recebe o link vê o carro, a placa e a posição até o fim da viagem, sem precisar do app."
             fullScreen
             style={{
               paddingTop: insets.top + SURFACE_TOP_PADDING,
@@ -197,7 +254,7 @@ export default function RobotaxiShareTripScreen({ navigation, route }) {
               <View style={styles.linkCard}>
                 <Text style={styles.linkLabel}>Link da viagem</Text>
                 <Text style={styles.linkText} numberOfLines={2}>
-                  {publicLink}
+                  {publicLink || linkError || 'Gerando link…'}
                 </Text>
               </View>
 
@@ -207,6 +264,7 @@ export default function RobotaxiShareTripScreen({ navigation, route }) {
                   icon={copied ? 'checkmark-outline' : 'copy-outline'}
                   tone="primary"
                   onPress={handleCopy}
+                  disabled={!publicLink}
                   style={styles.primaryActionButton}
                   testID="robotaxi-share-copy-link"
                   accessibilityLabel={copied ? 'Link da viagem copiado' : 'Copiar link da viagem'}
@@ -257,19 +315,91 @@ export default function RobotaxiShareTripScreen({ navigation, route }) {
                 </View>
               ) : null}
 
+              <PrototypeMenuSection title="Contatos de confiança">
+                {contacts.length === 0 ? (
+                  <Text style={styles.contactHint}>
+                    Salve até {MAX_TRUSTED_CONTACTS} pessoas para mandar o link com um toque. Os números ficam só neste celular.
+                  </Text>
+                ) : null}
+                {contacts.map((contact) => (
+                  <View key={contact.phone} style={styles.contactRow}>
+                    <View style={styles.contactInfo}>
+                      <Text style={styles.contactName} numberOfLines={1}>{contact.name}</Text>
+                      <Text style={styles.contactPhone}>{formatBrazilPhone(contact.phone)}</Text>
+                    </View>
+                    <LeafButton
+                      label="Enviar"
+                      icon="logo-whatsapp"
+                      tone="leaf"
+                      onPress={() => handleSendToContact(contact)}
+                      disabled={!publicLink}
+                      style={styles.contactSendButton}
+                      testID={`robotaxi-share-contact-send-${contact.phone}`}
+                      accessibilityLabel={`Enviar o link da viagem para ${contact.name} pelo WhatsApp`}
+                    />
+                    <LeafButton
+                      label=""
+                      icon="close-outline"
+                      tone="ghost"
+                      onPress={() => handleRemoveContact(contact)}
+                      style={styles.contactRemoveButton}
+                      accessibilityLabel={`Remover ${contact.name} dos contatos de confiança`}
+                    />
+                  </View>
+                ))}
+                {showContactForm ? (
+                  <View style={styles.contactForm}>
+                    <TextInput
+                      value={newContactName}
+                      onChangeText={setNewContactName}
+                      placeholder="Nome"
+                      placeholderTextColor={leafRideColors.secondary}
+                      style={styles.contactInput}
+                      maxLength={40}
+                      autoCapitalize="words"
+                      testID="robotaxi-share-contact-name"
+                    />
+                    <TextInput
+                      value={newContactPhone}
+                      onChangeText={setNewContactPhone}
+                      placeholder="Celular com DDD"
+                      placeholderTextColor={leafRideColors.secondary}
+                      style={styles.contactInput}
+                      keyboardType="phone-pad"
+                      maxLength={20}
+                      testID="robotaxi-share-contact-phone"
+                    />
+                    {contactError ? <Text style={styles.contactError}>{contactError}</Text> : null}
+                    <LeafButton
+                      label="Salvar contato"
+                      icon="checkmark-outline"
+                      tone="primary"
+                      onPress={handleAddContact}
+                      style={styles.primaryActionButton}
+                      testID="robotaxi-share-contact-save"
+                    />
+                  </View>
+                ) : contacts.length < MAX_TRUSTED_CONTACTS ? (
+                  <LeafButton
+                    label="Adicionar contato"
+                    icon="person-add-outline"
+                    tone="ghost"
+                    onPress={() => setShowContactForm(true)}
+                    style={styles.primaryActionButton}
+                    testID="robotaxi-share-contact-add"
+                  />
+                ) : null}
+              </PrototypeMenuSection>
+
               <PrototypeMenuSection title="O que aparece para a pessoa">
                 <PrototypeMenuInfoRow label="Destino" value={destination} />
-                <PrototypeMenuInfoRow label="Previsão" value={eta} />
-                <PrototypeMenuInfoRow label="Motorista" value={driver.name} />
+                <PrototypeMenuInfoRow label="Motorista" value={String(driver.name || '').split(' ')[0]} />
                 <PrototypeMenuInfoRow label="Veículo" value={driver.plate ? `${driver.vehicle} · ${driver.plate}` : driver.vehicle} last />
               </PrototypeMenuSection>
 
-              <LeafEmptyState
-                icon="people-outline"
-                title="Aberturas do link"
-                message="A tela já reserva o espaço para mostrar quem abriu o acompanhamento. O backend público tokenizado ainda precisa emitir esse evento."
-                testID="robotaxi-share-opened-empty-state"
-              />
+              <Text style={styles.contactHint}>
+                O link mostra a posição do carro e expira quando a viagem termina. Não mostra o seu endereço de embarque.
+              </Text>
             </ScrollView>
           </PrototypeMenuSurface>
         </PrototypeDismissibleSheet>
@@ -329,5 +459,62 @@ const styles = StyleSheet.create({
   actionButton: {
     width: '48%',
     minWidth: 142,
+  },
+  contactHint: {
+    color: leafRideColors.secondary,
+    ...leafTypography.regular,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  contactRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#E5E5E5',
+  },
+  contactInfo: {
+    flex: 1,
+    minWidth: 0,
+  },
+  contactName: {
+    color: leafRideColors.text,
+    ...leafTypography.semiBold,
+    fontSize: 15,
+    lineHeight: 20,
+  },
+  contactPhone: {
+    color: leafRideColors.secondary,
+    ...leafTypography.regular,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  contactSendButton: {
+    minWidth: 104,
+  },
+  contactRemoveButton: {
+    width: 44,
+    minWidth: 44,
+  },
+  contactForm: {
+    gap: 10,
+    paddingTop: 6,
+  },
+  contactInput: {
+    minHeight: 48,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#D9D9D9',
+    paddingHorizontal: 14,
+    color: leafRideColors.text,
+    ...leafTypography.medium,
+    fontSize: 15,
+  },
+  contactError: {
+    color: '#B42318',
+    ...leafTypography.medium,
+    fontSize: 13,
+    lineHeight: 18,
   },
 });

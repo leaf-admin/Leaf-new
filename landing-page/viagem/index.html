@@ -3,8 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="referrer" content="no-referrer">
   <title>Acompanhar viagem | Leaf</title>
-  <meta name="description" content="Abra este link no app Leaf para acompanhar a viagem compartilhada com dados seguros.">
+  <meta name="description" content="Acompanhe uma viagem Leaf compartilhada com você.">
   <style>
     :root { color-scheme: light; }
     * { box-sizing: border-box; }
@@ -13,22 +15,30 @@
       min-height: 100vh;
       display: grid;
       place-items: center;
-      padding: 28px;
+      padding: 24px 16px;
       background: #f6f7f4;
       color: #101510;
       font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
     }
     main {
       width: min(100%, 440px);
-      padding: 28px;
+      padding: 26px;
       border: 1px solid rgba(16, 21, 16, 0.1);
       border-radius: 28px;
-      background: rgba(255, 255, 255, 0.92);
+      background: rgba(255, 255, 255, 0.94);
       box-shadow: 0 18px 48px rgba(16, 21, 16, 0.12);
     }
-    h1 { margin: 0 0 10px; font-size: 30px; line-height: 1.08; }
-    p { margin: 0 0 22px; color: #5f675f; font-size: 16px; line-height: 1.5; }
-    a {
+    .eyebrow { margin: 0 0 6px; color: #5f675f; font-size: 13px; font-weight: 600; letter-spacing: .02em; }
+    h1 { margin: 0 0 8px; font-size: 28px; line-height: 1.1; }
+    p { margin: 0 0 18px; color: #5f675f; font-size: 16px; line-height: 1.5; }
+    .status-dot { display: inline-block; width: 9px; height: 9px; margin-right: 8px; border-radius: 50%; background: #3f8f2a; vertical-align: middle; }
+    .ended .status-dot { background: #8a918a; }
+    dl { margin: 0 0 20px; padding: 0; }
+    .row { display: flex; justify-content: space-between; gap: 16px; padding: 12px 0; border-top: 1px solid #ecefe9; }
+    dt { color: #5f675f; font-size: 14px; }
+    dd { margin: 0; text-align: right; font-size: 15px; font-weight: 600; }
+    .plate { font-size: 22px; letter-spacing: .08em; font-variant-numeric: tabular-nums; }
+    a.button {
       display: inline-flex;
       width: 100%;
       min-height: 52px;
@@ -40,19 +50,109 @@
       font-weight: 700;
       text-decoration: none;
     }
+    a.button[aria-disabled="true"] { background: #c9cec7; pointer-events: none; }
+    small { display: block; margin-top: 14px; color: #8a918a; font-size: 13px; line-height: 1.4; }
+    [hidden] { display: none !important; }
   </style>
 </head>
 <body>
-  <main>
-    <h1>Acompanhar viagem</h1>
-    <p>Abra este link no app Leaf para acompanhar a viagem compartilhada com dados seguros.</p>
-    <a id="open-app" href="leafapp://viagem">Abrir no app</a>
+  <main id="card" aria-live="polite">
+    <p class="eyebrow">Leaf · viagem compartilhada</p>
+    <h1 id="title">Carregando viagem…</h1>
+    <p id="subtitle"></p>
+    <dl id="details" hidden>
+      <div class="row" id="row-driver" hidden><dt>Motorista</dt><dd id="driver"></dd></div>
+      <div class="row" id="row-vehicle" hidden><dt>Carro</dt><dd id="vehicle"></dd></div>
+      <div class="row" id="row-plate" hidden><dt>Placa</dt><dd id="plate" class="plate"></dd></div>
+      <div class="row" id="row-destination" hidden><dt>Destino</dt><dd id="destination"></dd></div>
+    </dl>
+    <a id="map" class="button" href="#" target="_blank" rel="noopener noreferrer" aria-disabled="true" hidden>Ver o carro no mapa</a>
+    <small id="updated"></small>
   </main>
   <script>
-    const tripId = window.location.pathname.split('/').filter(Boolean)[1];
-    if (tripId) {
-      document.getElementById('open-app').href = `leafapp://viagem/${encodeURIComponent(tripId)}`;
-    }
+    (function () {
+      var API_BASE = 'https://api.leaf.app.br';
+      var POLL_MS = 15000;
+      var token = window.location.pathname.split('/').filter(Boolean)[1] || '';
+      var timer = null;
+
+      var STATUS = {
+        searching: { title: 'Procurando motorista', text: 'A viagem ainda está procurando um motorista.' },
+        driver_on_the_way: { title: 'Motorista a caminho', text: 'O motorista está indo buscar quem compartilhou a viagem.' },
+        driver_arrived: { title: 'Motorista chegou', text: 'O carro está no local de embarque.' },
+        in_progress: { title: 'Viagem em andamento', text: 'Acompanhe a posição do carro até o destino.' },
+        completed: { title: 'Viagem encerrada', text: 'Esta viagem já terminou. O acompanhamento foi encerrado.' },
+        cancelled: { title: 'Viagem cancelada', text: 'Esta viagem foi cancelada. O acompanhamento foi encerrado.' }
+      };
+
+      function el(id) { return document.getElementById(id); }
+
+      function setRow(id, value) {
+        el('row-' + id).hidden = !value;
+        el(id).textContent = value || '';
+      }
+
+      function showNotFound() {
+        el('title').textContent = 'Link indisponível';
+        el('subtitle').textContent = 'Este link expirou ou não existe. Peça um novo link para quem compartilhou a viagem.';
+        el('details').hidden = true;
+        el('map').hidden = true;
+        el('updated').textContent = '';
+        if (timer) { clearInterval(timer); timer = null; }
+      }
+
+      function render(trip) {
+        var status = STATUS[trip.status] || STATUS.searching;
+        var ended = trip.status === 'completed' || trip.status === 'cancelled';
+        el('card').className = ended ? 'ended' : '';
+        el('title').textContent = '';
+        var dot = document.createElement('span');
+        dot.className = 'status-dot';
+        el('title').appendChild(dot);
+        el('title').appendChild(document.createTextNode(status.title));
+        el('subtitle').textContent = status.text;
+
+        var vehicle = trip.vehicle || {};
+        setRow('driver', trip.driver && trip.driver.firstName);
+        setRow('vehicle', [vehicle.model, vehicle.color].filter(Boolean).join(' · '));
+        setRow('plate', vehicle.plate);
+        setRow('destination', trip.destination && trip.destination.address);
+        el('details').hidden = ended;
+
+        var map = el('map');
+        if (!ended && trip.location) {
+          map.hidden = false;
+          map.setAttribute('aria-disabled', 'false');
+          map.href = 'https://www.google.com/maps/search/?api=1&query=' + Number(trip.location.lat) + ',' + Number(trip.location.lng);
+          var at = new Date(trip.location.at);
+          el('updated').textContent = 'Posição do carro às ' + at.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) + '. Atualiza sozinho a cada 15 segundos.';
+        } else {
+          map.hidden = ended;
+          map.setAttribute('aria-disabled', 'true');
+          map.href = '#';
+          el('updated').textContent = ended ? '' : 'Posição do carro ainda não disponível. Atualiza sozinho a cada 15 segundos.';
+        }
+
+        if (ended && timer) { clearInterval(timer); timer = null; }
+      }
+
+      function load() {
+        if (!/^[A-Za-z0-9_-]{16,64}$/.test(token)) { showNotFound(); return; }
+        fetch(API_BASE + '/api/public/trip-share/' + encodeURIComponent(token), { cache: 'no-store', credentials: 'omit' })
+          .then(function (response) {
+            if (response.status === 404) { showNotFound(); return null; }
+            if (!response.ok) { throw new Error('status ' + response.status); }
+            return response.json();
+          })
+          .then(function (body) { if (body && body.trip) { render(body.trip); } })
+          .catch(function () {
+            el('updated').textContent = 'Sem conexão agora. Tentando de novo…';
+          });
+      }
+
+      load();
+      timer = setInterval(load, POLL_MS);
+    })();
   </script>
 </body>
 </html>
