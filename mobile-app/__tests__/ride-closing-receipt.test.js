@@ -156,6 +156,29 @@ describe("end of ride on the receipt screen", () => {
     expect(screen.getByTestId("closing-details-stage")).toBeTruthy();
   });
 
+  it("shows the seguro APP as its own driver debit, apart from the Leaf fees", async () => {
+    const insuredReceipt = { ...receipt, rideInsuranceFee: 0.13, totalFees: 3.79, driverNetAmount: 21.21 };
+    const { screen } = renderScreen({ role: "driver", routeReceipt: insuredReceipt });
+
+    fireEvent.press(screen.getByTestId("closing-view-receipt-button"));
+    await waitFor(() => expect(screen.getByTestId("closing-details-stage")).toBeTruthy());
+    expect(screen.getByTestId("driver-closing-fees-row")).toHaveTextContent(/R\$\s?3,66/);
+    expect(screen.getByTestId("driver-closing-insurance-row")).toHaveTextContent(/Seguro APP.*R\$\s?0,13/);
+
+    fireEvent.press(screen.getByTestId("closing-full-receipt-button"));
+    expect(screen.getByTestId("driver-receipt-insurance-amount")).toHaveTextContent(/R\$\s?0,13/);
+    expect(screen.getByTestId("driver-receipt-fees-amount")).toHaveTextContent(/R\$\s?3,66/);
+  });
+
+  it("keeps the passenger receipt closing on the amount paid when the ride is insured", async () => {
+    const insuredReceipt = { ...receipt, rideInsuranceFee: 0.13, totalFees: 3.79, driverNetAmount: 21.21 };
+    const { screen } = renderScreen({ role: "passenger", routeReceipt: insuredReceipt });
+
+    expect(screen.queryByTestId("driver-closing-insurance-row")).toBeNull();
+    fireEvent.press(screen.getByTestId("closing-air-conditioning-yes"));
+    await waitFor(() => expect(screen.getByTestId("closing-rate-stage")).toBeTruthy());
+  });
+
   it("does not offer stars while the final financial receipt is missing", () => {
     const { screen } = renderScreen({
       role: "driver",

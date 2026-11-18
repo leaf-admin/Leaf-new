@@ -277,6 +277,26 @@ class ReceiptService {
             financialBreakdown.driverNetAmount,
             financialBreakdown.netAmount
         );
+        const snapshotForInsurance = (() => {
+            const raw = rideData.financialSnapshot || fareBreakdown.financialSnapshot || null;
+            if (raw && typeof raw === 'string') {
+                try { return JSON.parse(raw); } catch (_) { return null; }
+            }
+            return raw && typeof raw === 'object' ? raw : null;
+        })();
+        // Seguro APP: corridas anteriores ao seguro não têm o campo e valem zero.
+        const rideInsuranceFee = this.firstPresentMoney(
+            rideData.rideInsuranceFee,
+            fareBreakdown.rideInsuranceFee,
+            paymentBreakdown.rideInsuranceFee,
+            financialBreakdown.rideInsuranceFee,
+            financialBreakdown.retainedFees?.rideInsuranceFee !== undefined
+                ? Number(financialBreakdown.retainedFees.rideInsuranceFee) / 100
+                : null,
+            Number.isFinite(Number(snapshotForInsurance?.rideInsuranceFeeCents))
+                ? Number(snapshotForInsurance.rideInsuranceFeeCents) / 100
+                : null
+        ) ?? 0;
         const tollFee = this.firstPresentMoney(
             rideData.tollFee,
             rideData.toll_fee,
@@ -344,6 +364,7 @@ class ReceiptService {
             driverTollPassThrough: tollFee,
             operationalFee,
             paymentIntermediationFee,
+            rideInsuranceFee,
             driverNetAmount,
             ...(totalFees !== null ? { totalFees } : {}),
             authoritativeSnapshot: true,
@@ -602,17 +623,23 @@ class ReceiptService {
             breakdown?.paymentIntermediationFee,
             0
         );
+        const rideInsuranceFee = firstFinite(
+            rideData.rideInsuranceFee,
+            explicitBreakdown.rideInsuranceFee,
+            breakdown?.rideInsuranceFee,
+            0
+        );
         const totalFees = firstFinite(
             rideData.totalFees,
             explicitBreakdown.totalFees,
-            Number(operationalFee || 0) + Number(wooviFee || 0)
+            Number(operationalFee || 0) + Number(wooviFee || 0) + Number(rideInsuranceFee || 0)
         );
         const driverAmount = firstFinite(
             rideData.driverNetAmount,
             explicitBreakdown.driverNetAmount,
             totalFees !== null ? Math.max(0, totalFare - totalFees) : null,
             breakdown?.driverNetAmount,
-            Math.max(0, totalFare - operationalFee - wooviFee)
+            Math.max(0, totalFare - operationalFee - wooviFee - rideInsuranceFee)
         );
 
         return {
@@ -639,6 +666,13 @@ class ReceiptService {
                     formatted: `R$ ${wooviFee.toFixed(2).replace('.', ',')}`
                 },
 
+                // Seguro APP (acidentes pessoais), descontado do repasse do motorista.
+                rideInsurance: {
+                    amount: rideInsuranceFee,
+                    formatted: `R$ ${rideInsuranceFee.toFixed(2).replace('.', ',')}`,
+                    label: 'Seguro APP (acidentes pessoais)'
+                },
+
                 tollPassThrough: {
                     amount: tollFee,
                     formatted: `R$ ${tollFee.toFixed(2).replace('.', ',')}`,
@@ -663,6 +697,7 @@ class ReceiptService {
                 driverReceived: driverAmount,
                 leafOperational: operationalFee,
                 wooviFee: wooviFee,
+                rideInsurance: rideInsuranceFee,
                 tollPassThrough: tollFee,
                 driverTollPassThrough: tollFee,
                 retainedFees: totalFees

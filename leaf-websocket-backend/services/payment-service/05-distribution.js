@@ -36,7 +36,8 @@ class PaymentServiceDistributionMethods {
         threshold25Cents: this.THRESHOLD_25,
         threshold50Cents: this.THRESHOLD_50,
         paymentIntermediationPercentage: this.WOOVI_FEE_PERCENTAGE,
-        paymentIntermediationMinimumCents: this.WOOVI_FEE_MINIMUM
+        paymentIntermediationMinimumCents: this.WOOVI_FEE_MINIMUM,
+        rideInsuranceFeeCents: this.RIDE_INSURANCE_FEE_CENTS || 0
       }
     });
   }
@@ -60,11 +61,14 @@ class PaymentServiceDistributionMethods {
     const netAmount = financialContract.driverNetAmountCents;
     const tollFeeCents = financialContract.tollFeeCents;
 
+    const rideInsuranceFee = financialContract.rideInsuranceFeeCents || 0;
+
     return {
       totalAmount: totalAmountCents,
       tollFee: tollFeeCents,
       operationalFee: operationalFee,
       wooviFee: wooviFee,
+      rideInsuranceFee,
       netAmount: netAmount, // Não pode ser negativo
       financialContract,
       breakdown: {
@@ -73,6 +77,7 @@ class PaymentServiceDistributionMethods {
         operationalFeeType: financialContract.feePolicy.operationalFeeType,
         operationalFee: (operationalFee / 100).toFixed(2),
         wooviFee: (wooviFee / 100).toFixed(2),
+        rideInsuranceFee: (rideInsuranceFee / 100).toFixed(2),
         net: (netAmount / 100).toFixed(2)
       }
     };
@@ -99,9 +104,11 @@ class PaymentServiceDistributionMethods {
     const subscriptionRetainedFee = this.toReais(
       calculation.financialContract.subscriptionRetainedFeeCents || 0
     );
+    const rideInsuranceFee = this.toReais(calculation.rideInsuranceFee || 0);
     const totalFees = this.toReais(
       calculation.operationalFee +
         calculation.wooviFee +
+        (calculation.rideInsuranceFee || 0) +
         (calculation.financialContract.subscriptionRetainedFeeCents || 0)
     );
     const driverNetAmount = this.toReais(calculation.netAmount);
@@ -112,6 +119,7 @@ class PaymentServiceDistributionMethods {
       tollFee,
       operationalFee,
       paymentIntermediationFee,
+      rideInsuranceFee,
       subscriptionRetainedFee,
       totalFees,
       driverNetAmount,
@@ -137,6 +145,7 @@ class PaymentServiceDistributionMethods {
         tollFee: snapshot.tollFeeCents,
         operationalFee: snapshot.operationalFeeCents,
         wooviFee: snapshot.paymentIntermediationFeeCents,
+        rideInsuranceFee: snapshot.rideInsuranceFeeCents || 0,
         netAmount: snapshot.driverNetAmountCents,
         financialContract: snapshot,
         breakdown: {
@@ -145,6 +154,7 @@ class PaymentServiceDistributionMethods {
           operationalFeeType: 'locked_backend_final',
           operationalFee: (snapshot.operationalFeeCents / 100).toFixed(2),
           wooviFee: (snapshot.paymentIntermediationFeeCents / 100).toFixed(2),
+          rideInsuranceFee: ((snapshot.rideInsuranceFeeCents || 0) / 100).toFixed(2),
           net: (snapshot.driverNetAmountCents / 100).toFixed(2)
         }
       }
@@ -605,6 +615,7 @@ class PaymentServiceDistributionMethods {
         });
         netCalculation.operationalFee = finalContract.leafOperationalFeeCents;
         netCalculation.wooviFee = finalContract.paymentIntermediationFeeCents;
+        netCalculation.rideInsuranceFee = finalContract.rideInsuranceFeeCents || 0;
         netCalculation.netAmount = finalContract.driverNetAmountCents;
         netCalculation.financialContract = finalContract;
         netCalculation.breakdown.net = (finalContract.driverNetAmountCents / 100).toFixed(2);
@@ -705,6 +716,7 @@ class PaymentServiceDistributionMethods {
         netAmountCents: netCalculation.netAmount,
         operationalFeeCents: netCalculation.operationalFee,
         wooviFeeCents: netCalculation.wooviFee,
+        rideInsuranceFeeCents: netCalculation.rideInsuranceFee || 0,
         retainedFeeCents: retainedFees,
         financialContext,
         metadata: {
@@ -777,8 +789,10 @@ class PaymentServiceDistributionMethods {
         retainedFees: {
           operationalFee: netCalculation.operationalFee,
           wooviFee: netCalculation.wooviFee,
+          rideInsuranceFee: netCalculation.rideInsuranceFee || 0,
           subscriptionRetainedFee: retainedFees,
-          totalRetained: netCalculation.operationalFee + netCalculation.wooviFee + retainedFees
+          totalRetained:
+            netCalculation.operationalFee + netCalculation.wooviFee + (netCalculation.rideInsuranceFee || 0) + retainedFees
         }
       };
 

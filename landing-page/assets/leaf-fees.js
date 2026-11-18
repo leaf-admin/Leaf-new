@@ -20,8 +20,8 @@
       <section><h3>Depois da promoção, o Pix é cobrado à parte.</h3>
         <p>Vale a tabela regular da Leaf, mais o custo do operador do Pix: <strong>0,8% do valor da transação, com mínimo de R$ 0,50</strong>.</p></section>
       <div class="fee-example"><p>Exemplo: corrida de <strong>R$ 100,00</strong></p>
-        <dl><div><dt>Taxa na promoção</dt><dd>R$ 1,29</dd></div><div><dt>Repasse na promoção</dt><dd>R$ 98,71</dd></div><div><dt>Taxas na tabela regular</dt><dd>R$ 3,80</dd></div><div><dt>Repasse na tabela regular</dt><dd>R$ 96,20</dd></div></dl></div>
-      <p class="fees-small-print">O operador do Pix é responsável por processar o pagamento digital. Os exemplos não incluem pedágios ou outros repasses.</p>
+        <dl><div><dt>Taxa na promoção</dt><dd>R$ 1,29</dd></div><div><dt>Repasse na promoção</dt><dd>R$ 98,58</dd></div><div><dt>Taxas na tabela regular</dt><dd>R$ 3,80</dd></div><div><dt>Repasse na tabela regular</dt><dd>R$ 96,07</dd></div></dl></div>
+      <p class="fees-small-print">O repasse já desconta o Seguro APP de R$ 0,13 por corrida (acidentes pessoais do motorista e do passageiro). O operador do Pix é responsável por processar o pagamento digital. Os exemplos não incluem pedágios.</p>
       <a class="fees-detail-link" href="/taxas">Ver todos os detalhes e as faixas regulares →</a>
     </div>`;
   document.body.append(dialog);

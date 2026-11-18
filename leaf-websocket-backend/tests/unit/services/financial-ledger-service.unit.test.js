@@ -256,6 +256,32 @@ describe('FinancialLedgerService', () => {
     ]));
   });
 
+  it('records the seguro APP as a payable to the insurer, not as Leaf revenue', async () => {
+    const firestore = createInMemoryFirestore();
+    firebaseConfig.getFirestore.mockReturnValue(firestore);
+    const service = new FinancialLedgerService();
+
+    const result = await service.recordRideSettlement({
+      rideId: 'ride_insured_1',
+      driverId: 'driver_1',
+      totalAmountCents: 3000,
+      netAmountCents: 2788,
+      operationalFeeCents: 149,
+      wooviFeeCents: 50,
+      rideInsuranceFeeCents: 13
+    });
+
+    const event = firestore.docs.get(`financial_ledger_events/${result.eventId}`);
+    expect(result).toMatchObject({ success: true, totalDebitCents: 3000, totalCreditCents: 3000 });
+    expect(event.lines).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        account: 'liability:ride_insurance_premium_payable',
+        direction: 'credit',
+        amountCents: 13
+      })
+    ]));
+  });
+
   it('records a balanced settlement without zero-value ledger lines', async () => {
     const firestore = createInMemoryFirestore();
     firebaseConfig.getFirestore.mockReturnValue(firestore);

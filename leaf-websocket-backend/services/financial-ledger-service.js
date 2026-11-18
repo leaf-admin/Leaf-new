@@ -311,12 +311,13 @@ class FinancialLedgerService {
     });
   }
 
-  recordRideSettlement({ rideId, driverId, totalAmountCents, netAmountCents, operationalFeeCents, wooviFeeCents, retainedFeeCents = 0, metadata = {}, financialContext = null }) {
+  recordRideSettlement({ rideId, driverId, totalAmountCents, netAmountCents, operationalFeeCents, wooviFeeCents, rideInsuranceFeeCents = 0, retainedFeeCents = 0, metadata = {}, financialContext = null }) {
     const totalAmount = this.toCents(totalAmountCents);
     const netAmount = this.toCents(netAmountCents);
     const operationalFee = this.toCents(operationalFeeCents);
     const wooviFee = this.toCents(wooviFeeCents);
     const retainedFee = Math.max(0, this.toCents(retainedFeeCents));
+    const rideInsuranceFee = Math.max(0, this.toCents(rideInsuranceFeeCents));
     const lines = [
       {
         account: 'liability:ride_payment_holding',
@@ -358,6 +359,19 @@ class FinancialLedgerService {
         entityType: 'ride',
         entityId: rideId,
         memo: 'Custo/intermediação de pagamento retido no settlement'
+      });
+    }
+
+    if (rideInsuranceFee > 0) {
+      // Prêmio do seguro APP descontado do motorista: a Leaf repassa à seguradora
+      // na fatura mensal, então é passivo, não receita.
+      lines.push({
+        account: 'liability:ride_insurance_premium_payable',
+        direction: 'credit',
+        amountCents: rideInsuranceFee,
+        entityType: 'ride',
+        entityId: rideId,
+        memo: 'Seguro APP (acidentes pessoais) descontado do repasse'
       });
     }
 
@@ -862,6 +876,8 @@ class FinancialLedgerService {
           const distributionOperationalFee = this.toCents(distribution?.retainedFees?.operationalFee);
           const distributionWooviFee = this.toCents(distribution?.retainedFees?.wooviFee);
           const distributionSubscriptionFee = this.toCents(distribution?.subscriptionRetainedFee);
+          const distributionRideInsuranceFee = this.toCents(distribution?.retainedFees?.rideInsuranceFee);
+          const snapshotRideInsuranceFee = financialSnapshot.rideInsuranceFeeCents || 0;
 
           if (distributionNetAmount !== financialSnapshot.driverNetAmountCents) {
             issues.push({
@@ -875,7 +891,8 @@ class FinancialLedgerService {
           if (
             distributionOperationalFee !== financialSnapshot.operationalFeeCents ||
             distributionWooviFee !== financialSnapshot.paymentIntermediationFeeCents ||
-            distributionSubscriptionFee !== financialSnapshot.subscriptionRetainedFeeCents
+            distributionSubscriptionFee !== financialSnapshot.subscriptionRetainedFeeCents ||
+            distributionRideInsuranceFee !== snapshotRideInsuranceFee
           ) {
             issues.push({
               code: 'DISTRIBUTION_RETAINED_FEES_MISMATCH',
@@ -884,6 +901,8 @@ class FinancialLedgerService {
               distributionOperationalFeeCents: distributionOperationalFee,
               distributionWooviFeeCents: distributionWooviFee,
               distributionSubscriptionFeeCents: distributionSubscriptionFee,
+              distributionRideInsuranceFeeCents: distributionRideInsuranceFee,
+              snapshotRideInsuranceFeeCents: snapshotRideInsuranceFee,
               snapshotOperationalFeeCents: financialSnapshot.operationalFeeCents,
               snapshotWooviFeeCents: financialSnapshot.paymentIntermediationFeeCents,
               snapshotSubscriptionFeeCents: financialSnapshot.subscriptionRetainedFeeCents
@@ -906,6 +925,10 @@ class FinancialLedgerService {
               settlementEvent,
               'revenue:driver_subscription_settlement'
             );
+            const ledgerRideInsuranceFee = this.sumLedgerLineAmounts(
+              settlementEvent,
+              'liability:ride_insurance_premium_payable'
+            );
 
             if (ledgerDriverNetAmount !== financialSnapshot.driverNetAmountCents) {
               issues.push({
@@ -919,7 +942,8 @@ class FinancialLedgerService {
             if (
               ledgerOperationalFee !== financialSnapshot.operationalFeeCents ||
               ledgerWooviFee !== financialSnapshot.paymentIntermediationFeeCents ||
-              ledgerSubscriptionFee !== financialSnapshot.subscriptionRetainedFeeCents
+              ledgerSubscriptionFee !== financialSnapshot.subscriptionRetainedFeeCents ||
+              ledgerRideInsuranceFee !== snapshotRideInsuranceFee
             ) {
               issues.push({
                 code: 'SETTLEMENT_RETAINED_FEES_MISMATCH',
@@ -928,6 +952,8 @@ class FinancialLedgerService {
                 ledgerOperationalFeeCents: ledgerOperationalFee,
                 ledgerWooviFeeCents: ledgerWooviFee,
                 ledgerSubscriptionFeeCents: ledgerSubscriptionFee,
+                ledgerRideInsuranceFeeCents: ledgerRideInsuranceFee,
+                snapshotRideInsuranceFeeCents: snapshotRideInsuranceFee,
                 snapshotOperationalFeeCents: financialSnapshot.operationalFeeCents,
                 snapshotWooviFeeCents: financialSnapshot.paymentIntermediationFeeCents,
                 snapshotSubscriptionFeeCents: financialSnapshot.subscriptionRetainedFeeCents
@@ -953,7 +979,8 @@ class FinancialLedgerService {
           driverNetAmountCents: financialSnapshot?.driverNetAmountCents || null,
           operationalFeeCents: financialSnapshot?.operationalFeeCents || null,
           wooviFeeCents: financialSnapshot?.paymentIntermediationFeeCents || null,
-          subscriptionRetainedFeeCents: financialSnapshot?.subscriptionRetainedFeeCents || null
+          subscriptionRetainedFeeCents: financialSnapshot?.subscriptionRetainedFeeCents || null,
+          rideInsuranceFeeCents: financialSnapshot?.rideInsuranceFeeCents || null
         },
         references: {
           ledgerRideIds,

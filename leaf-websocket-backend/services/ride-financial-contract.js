@@ -10,7 +10,10 @@ const DEFAULT_POLICY = Object.freeze({
   threshold25Cents: 2500,
   threshold50Cents: 5000,
   paymentIntermediationPercentage: 0.008,
-  paymentIntermediationMinimumCents: 50
+  paymentIntermediationMinimumCents: 50,
+  // Seguro APP (acidentes pessoais de motorista e passageiro), cobrado por corrida
+  // realizada e descontado do repasse. Fica em 0 até a apólice estar ativa.
+  rideInsuranceFeeCents: 0
 });
 
 function toCents(value) {
@@ -131,6 +134,9 @@ function describeFinancialPolicy(policy = DEFAULT_POLICY) {
     paymentIntermediation: {
       percentage: Number(policy.paymentIntermediationPercentage),
       minimumCents: toCents(policy.paymentIntermediationMinimumCents)
+    },
+    rideInsurance: {
+      perRideCents: toCents(policy.rideInsuranceFeeCents)
     }
   };
 }
@@ -170,10 +176,17 @@ function buildRideFinancialContract({
   const paymentIntermediationFeeCents = promotionIncludesPaymentFee
     ? includedPaymentFeeCents
     : clampCents(requestedPaymentIntermediationFeeCents, remainingAfterOperationalFeeCents);
+  // Seguro APP: valor fixo por corrida, descontado do repasse depois das taxas e
+  // nunca do pedágio, que é repasse integral ao motorista.
+  const requestedRideInsuranceFeeCents = toCents(policy.rideInsuranceFeeCents);
+  const rideInsuranceFeeCents = clampCents(
+    requestedRideInsuranceFeeCents,
+    grossFareCents - leafOperationalFeeCents - paymentIntermediationFeeCents
+  );
   const requestedSubscriptionRetainedFeeCents = toCents(subscriptionRetainedFeeCents);
   const remainingBeforeSubscriptionCents = Math.max(
     0,
-    grossFareCents - leafOperationalFeeCents - paymentIntermediationFeeCents
+    grossFareCents - leafOperationalFeeCents - paymentIntermediationFeeCents - rideInsuranceFeeCents
   );
   const subscriptionRetainedCents = clampCents(
     requestedSubscriptionRetainedFeeCents,
@@ -183,13 +196,15 @@ function buildRideFinancialContract({
     0,
     grossFareCents -
       leafOperationalFeeCents -
-      paymentIntermediationFeeCents +
+      paymentIntermediationFeeCents -
+      rideInsuranceFeeCents +
       tollPassThroughCents -
       subscriptionRetainedCents
   );
   const retainedTotalCents =
     leafOperationalFeeCents +
     paymentIntermediationFeeCents +
+    rideInsuranceFeeCents +
     subscriptionRetainedCents;
   const allocatedTotalCents = driverNetAmountCents + retainedTotalCents;
 
@@ -202,6 +217,7 @@ function buildRideFinancialContract({
     driverTollPassThroughCents: tollPassThroughCents,
     leafOperationalFeeCents,
     paymentIntermediationFeeCents,
+    rideInsuranceFeeCents,
     subscriptionRetainedFeeCents: subscriptionRetainedCents,
     retainedTotalCents,
     driverNetAmountCents,
@@ -213,9 +229,11 @@ function buildRideFinancialContract({
       requestedOperationalFeeCents,
       requestedPaymentIntermediationFeeCents,
       requestedSubscriptionRetainedFeeCents,
+      requestedRideInsuranceFeeCents,
       operationalFeeClamped: leafOperationalFeeCents !== requestedOperationalFeeCents,
       paymentIntermediationFeeClamped: paymentIntermediationFeeCents !== requestedPaymentIntermediationFeeCents,
-      subscriptionRetainedFeeClamped: subscriptionRetainedCents !== requestedSubscriptionRetainedFeeCents
+      subscriptionRetainedFeeClamped: subscriptionRetainedCents !== requestedSubscriptionRetainedFeeCents,
+      rideInsuranceFeeClamped: rideInsuranceFeeCents !== requestedRideInsuranceFeeCents
     }
   };
 }
@@ -241,6 +259,7 @@ function buildAuthoritativeFinancialSnapshot({
   operationalFeeCents,
   paymentIntermediationFeeCents,
   subscriptionRetainedFeeCents = 0,
+  rideInsuranceFeeCents = 0,
   driverNetAmountCents,
   driverIntroFee = null
 } = {}) {
@@ -255,6 +274,8 @@ function buildAuthoritativeFinancialSnapshot({
     subscriptionRetainedFeeCents,
     'subscriptionRetainedFeeCents'
   );
+  // Snapshots anteriores ao seguro APP não têm o campo e valem como zero.
+  const rideInsuranceFee = resolveRequiredCents(rideInsuranceFeeCents ?? 0, 'rideInsuranceFeeCents');
   const driverNetAmount = resolveRequiredCents(driverNetAmountCents, 'driverNetAmountCents');
   const introFeeContext = normalizeDriverIntroFeeContext(driverIntroFee);
   const introFeeRetainedCents = operationalFee + (introFeeContext?.paymentFeeIncluded ? paymentIntermediationFee : 0);
@@ -267,7 +288,7 @@ function buildAuthoritativeFinancialSnapshot({
     error.code = 'DRIVER_INTRO_FEE_SNAPSHOT_MISMATCH';
     throw error;
   }
-  const retainedTotalCents = operationalFee + paymentIntermediationFee + subscriptionRetainedFee;
+  const retainedTotalCents = operationalFee + paymentIntermediationFee + rideInsuranceFee + subscriptionRetainedFee;
   const allocatedTotalCents = driverNetAmount + retainedTotalCents;
 
   if (tollPassThrough > passengerPaid || allocatedTotalCents !== passengerPaid) {
@@ -288,6 +309,7 @@ function buildAuthoritativeFinancialSnapshot({
     driverTollPassThroughCents: tollPassThrough,
     operationalFeeCents: operationalFee,
     paymentIntermediationFeeCents: paymentIntermediationFee,
+    rideInsuranceFeeCents: rideInsuranceFee,
     subscriptionRetainedFeeCents: subscriptionRetainedFee,
     retainedTotalCents,
     driverNetAmountCents: driverNetAmount,

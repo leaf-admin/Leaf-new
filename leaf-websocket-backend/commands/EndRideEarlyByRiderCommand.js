@@ -56,6 +56,7 @@ function buildExecutedFareFinancialSnapshot(settlement = {}, booking = {}) {
     operationalFeeCents: Math.round(Number(breakdown.operationalFee || 0) * 100),
     paymentIntermediationFeeCents: Math.round(Number(breakdown.paymentIntermediationFee || 0) * 100),
     subscriptionRetainedFeeCents: Math.round(Number(breakdown.subscriptionRetainedFee || 0) * 100),
+    rideInsuranceFeeCents: Math.round(Number(breakdown.rideInsuranceFee || 0) * 100),
     driverNetAmountCents: Math.round(Number(breakdown.driverNetAmount || 0) * 100),
     driverIntroFee
   });

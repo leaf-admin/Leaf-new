@@ -150,9 +150,14 @@ function buildStoredReceiptSummary(receipt = {}, role = 'customer') {
         financial.totals?.wooviFee ||
         0
     );
+    const rideInsuranceFee = Number(
+        breakdown.rideInsurance?.amount ||
+        financial.totals?.rideInsurance ||
+        0
+    );
     const totalFees = Number(
         financial.totals?.retainedFees ||
-        operationalFee + paymentIntermediationFee
+        operationalFee + paymentIntermediationFee + rideInsuranceFee
     );
     const tollAmount = Number(
         breakdown.tollPassThrough?.amount ||
@@ -174,6 +179,7 @@ function buildStoredReceiptSummary(receipt = {}, role = 'customer') {
         ...(role === 'driver' ? { driverNetAmount } : {}),
         operationalFee,
         paymentIntermediationFee,
+        rideInsuranceFee,
         totalFees,
         tollAmount,
         pickup: receipt.trip?.pickup?.address || 'Origem indisponível',
