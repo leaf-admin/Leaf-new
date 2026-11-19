@@ -290,6 +290,9 @@ module.exports = {
     },
     android: {
         package: "br.com.leaf.ride",
+        // Sem backup automático do Android: tokens de sessão e dados locais não vão
+        // para o backup do Google nem passam para outro aparelho por restauração.
+        allowBackup: false,
         versionCode: AppConfig.android_app_version,
         googleServicesFile: process.env.GOOGLE_SERVICES_JSON || (fs.existsSync("./google-services.json") ? "./google-services.json" : undefined),
         permissions: [
