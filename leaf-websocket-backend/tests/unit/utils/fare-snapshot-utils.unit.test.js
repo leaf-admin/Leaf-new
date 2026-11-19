@@ -17,6 +17,7 @@ describe('fare-snapshot-utils', () => {
     expect(buildEstimatedFareSnapshot(paymentService, 18.4, 0)).toEqual({
       estimatedOperationalFee: 2.4,
       estimatedPaymentIntermediationFee: 0.61,
+      estimatedRideInsuranceFee: 0,
       estimatedTotalFees: 3.01,
       estimatedDriverNetAmount: 15.39,
     });

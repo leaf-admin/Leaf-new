@@ -225,3 +225,112 @@ describe('ride-financial-contract', () => {
     });
   });
 });
+
+describe('ride-financial-contract seguro APP', () => {
+  const { buildDriverIntroFeeContext } = require('../../../services/driver-intro-fee-policy');
+  const insurancePolicy = (overrides = {}) => ({
+    ...require('../../../services/ride-financial-contract').DEFAULT_POLICY,
+    rideInsuranceFeeCents: 13,
+    ...overrides
+  });
+
+  it('keeps the insurance at zero by default so current settlements do not change', () => {
+    const contract = buildRideFinancialContract({ passengerPaidCents: 3000 });
+    expect(contract.rideInsuranceFeeCents).toBe(0);
+    expect(contract.driverNetAmountCents).toBe(3000 - 149 - 50);
+    expect(describeFinancialPolicy().rideInsurance).toEqual({ perRideCents: 0 });
+  });
+
+  it('takes the insurance from the passenger payment and leaves the driver net unchanged', () => {
+    const withoutInsurance = buildRideFinancialContract({ passengerPaidCents: 3000 });
+    const contract = buildRideFinancialContract({ passengerPaidCents: 3013, policy: insurancePolicy() });
+    expect(contract).toMatchObject({
+      grossFareCents: 3000,
+      leafOperationalFeeCents: 149,
+      paymentIntermediationFeeCents: 50,
+      rideInsuranceFeeCents: 13,
+      retainedTotalCents: 149 + 50 + 13,
+      balanced: true
+    });
+    expect(contract.driverNetAmountCents).toBe(withoutInsurance.driverNetAmountCents);
+  });
+
+  it('keeps the fee tier of the ride without the insurance', () => {
+    const contract = buildRideFinancialContract({ passengerPaidCents: 2513, policy: insurancePolicy() });
+    expect(contract.leafOperationalFeeCents).toBe(99);
+    expect(contract.driverNetAmountCents).toBe(2500 - 99 - 50);
+  });
+
+  it('keeps the toll whole for the driver', () => {
+    const contract = buildRideFinancialContract({
+      passengerPaidCents: 2000 + 13 + 1500,
+      tollFeeCents: 1500,
+      policy: insurancePolicy()
+    });
+    expect(contract.rideInsuranceFeeCents).toBe(13);
+    expect(contract.driverNetAmountCents).toBe(2000 - 99 - 50 + 1500);
+    expect(contract.balanced).toBe(true);
+  });
+
+  it('leaves the launch promotion fee and the driver net as they are', () => {
+    const introFee = buildDriverIntroFeeContext({
+      driverId: 'driver-1',
+      qualifiedCompletedRides: 0,
+      historyVerified: true,
+      historySnapshotId: 'history-1',
+      paymentFeeIncluded: true,
+      pixExcessChargedToDriver: true
+    });
+    const contract = buildRideFinancialContract({
+      passengerPaidCents: 3013,
+      policy: insurancePolicy(),
+      driverIntroFee: introFee
+    });
+    expect(contract.leafOperationalFeeCents + contract.paymentIntermediationFeeCents).toBe(99);
+    expect(contract.rideInsuranceFeeCents).toBe(13);
+    expect(contract.driverNetAmountCents).toBe(3000 - 99);
+    expect(contract.balanced).toBe(true);
+    const snapshot = buildAuthoritativeFinancialSnapshot({
+      passengerPaidCents: 3013,
+      operationalFeeCents: contract.leafOperationalFeeCents,
+      paymentIntermediationFeeCents: contract.paymentIntermediationFeeCents,
+      rideInsuranceFeeCents: 13,
+      driverNetAmountCents: contract.driverNetAmountCents,
+      driverIntroFee: introFee
+    });
+    expect(snapshot.grossFareCents).toBe(3000);
+  });
+
+  it('carries the insurance in the authoritative snapshot and validates it', () => {
+    const snapshot = buildAuthoritativeFinancialSnapshot({
+      passengerPaidCents: 3013,
+      operationalFeeCents: 149,
+      paymentIntermediationFeeCents: 50,
+      rideInsuranceFeeCents: 13,
+      driverNetAmountCents: 2801
+    });
+    expect(snapshot).toMatchObject({ rideInsuranceFeeCents: 13, grossFareCents: 3000, retainedTotalCents: 212 });
+    expect(validateAuthoritativeFinancialSnapshot(snapshot, { passengerPaidCents: 3013 })).toMatchObject({ valid: true });
+  });
+
+  it('accepts snapshots written before the insurance existed', () => {
+    const legacy = buildAuthoritativeFinancialSnapshot({
+      passengerPaidCents: 3000,
+      operationalFeeCents: 149,
+      paymentIntermediationFeeCents: 50,
+      driverNetAmountCents: 2801
+    });
+    delete legacy.rideInsuranceFeeCents;
+    expect(validateAuthoritativeFinancialSnapshot(legacy).valid).toBe(true);
+  });
+
+  it('rejects a snapshot that pays the insurance to the driver', () => {
+    expect(() => buildAuthoritativeFinancialSnapshot({
+      passengerPaidCents: 3013,
+      operationalFeeCents: 149,
+      paymentIntermediationFeeCents: 50,
+      rideInsuranceFeeCents: 13,
+      driverNetAmountCents: 2814
+    })).toThrow(expect.objectContaining({ code: 'FINANCIAL_SNAPSHOT_UNBALANCED' }));
+  });
+});

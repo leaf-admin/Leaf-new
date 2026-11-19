@@ -156,6 +156,42 @@ describe("end of ride on the receipt screen", () => {
     expect(screen.getByTestId("closing-details-stage")).toBeTruthy();
   });
 
+  it("keeps the seguro APP out of the driver receipt: same ride value, fees and net", async () => {
+    const insuredReceipt = {
+      ...receipt,
+      fare: 25.13,
+      finalFare: 25.13,
+      rideInsuranceFee: 0.13,
+      totalFees: 3.79,
+      driverNetAmount: 21.34,
+    };
+    const { screen } = renderScreen({ role: "driver", routeReceipt: insuredReceipt });
+
+    expect(screen.getByText("+ R$ 21,34")).toBeTruthy();
+    fireEvent.press(screen.getByTestId("closing-view-receipt-button"));
+    await waitFor(() => expect(screen.getByTestId("closing-details-stage")).toBeTruthy());
+    expect(screen.getByTestId("driver-closing-fees-row")).toHaveTextContent(/R\$\s?3,66/);
+    expect(screen.queryByText(/Seguro APP/)).toBeNull();
+    expect(screen.getByText("R$ 25,00")).toBeTruthy();
+  });
+
+  it("shows the passenger the full amount paid with the seguro APP inside the ride value", async () => {
+    const insuredReceipt = {
+      ...receipt,
+      fare: 25.13,
+      finalFare: 25.13,
+      rideInsuranceFee: 0.13,
+      totalFees: 3.79,
+      driverNetAmount: 21.34,
+    };
+    const { screen } = renderScreen({ role: "passenger", routeReceipt: insuredReceipt });
+
+    fireEvent.press(screen.getByTestId("closing-air-conditioning-yes"));
+    await waitFor(() => expect(screen.getByTestId("closing-rate-stage")).toBeTruthy());
+    expect(screen.getByText("R$ 25,13")).toBeTruthy();
+    expect(screen.queryByText(/Seguro APP/)).toBeNull();
+  });
+
   it("does not offer stars while the final financial receipt is missing", () => {
     const { screen } = renderScreen({
       role: "driver",

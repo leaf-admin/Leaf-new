@@ -62,3 +62,20 @@ describe("tripFinancialSummary", () => {
     expect(resolveTripGrossAmount(receipt)).toBe(27.5);
   });
 });
+
+describe('seguro APP no extrato do motorista', () => {
+  const { buildTripFinancialTotals } = require('./tripFinancialSummary');
+  const insured = { finalFare: 30.13, totalFees: 1.12, driverNetAmount: 29.01, rideInsuranceFee: 0.13 };
+
+  it('não soma o seguro nas taxas nem no bruto do motorista', () => {
+    const totals = buildTripFinancialTotals([insured], { role: 'driver' });
+    expect(totals.totalFees).toBe(0.99);
+    expect(totals.totalGross).toBe(30);
+    expect(totals.totalNet).toBe(29.01);
+  });
+
+  it('mostra ao passageiro o total pago com o seguro', () => {
+    const totals = buildTripFinancialTotals([insured], { role: 'passenger' });
+    expect(totals.totalGross).toBe(30.13);
+  });
+});

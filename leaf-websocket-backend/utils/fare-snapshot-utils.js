@@ -10,6 +10,7 @@ function readEstimatedFareSnapshot(payload = {}) {
 
     const estimatedOperationalFee = toFiniteMoney(payload?.estimatedOperationalFee);
     const estimatedPaymentIntermediationFee = toFiniteMoney(payload?.estimatedPaymentIntermediationFee);
+    const estimatedRideInsuranceFee = toFiniteMoney(payload?.estimatedRideInsuranceFee);
     const estimatedTotalFees = toFiniteMoney(payload?.estimatedTotalFees);
     const estimatedDriverNetAmount = toFiniteMoney(payload?.estimatedDriverNetAmount);
 
@@ -27,6 +28,7 @@ function readEstimatedFareSnapshot(payload = {}) {
     return {
         ...(estimatedOperationalFee !== null ? { estimatedOperationalFee } : {}),
         ...(estimatedPaymentIntermediationFee !== null ? { estimatedPaymentIntermediationFee } : {}),
+        ...(estimatedRideInsuranceFee !== null ? { estimatedRideInsuranceFee } : {}),
         ...(estimatedTotalFees !== null ? { estimatedTotalFees } : {}),
         ...(estimatedDriverNetAmount !== null ? { estimatedDriverNetAmount } : {})
     };
@@ -53,6 +55,7 @@ function buildEstimatedFareSnapshot(paymentService, estimatedFare, tollFee = 0, 
     return {
         estimatedOperationalFee: toFiniteMoney(breakdown?.operationalFee) ?? 0,
         estimatedPaymentIntermediationFee: toFiniteMoney(breakdown?.paymentIntermediationFee) ?? 0,
+        estimatedRideInsuranceFee: toFiniteMoney(breakdown?.rideInsuranceFee) ?? 0,
         estimatedTotalFees: toFiniteMoney(breakdown?.totalFees) ?? 0,
         estimatedDriverNetAmount: toFiniteMoney(breakdown?.driverNetAmount) ?? 0
     };

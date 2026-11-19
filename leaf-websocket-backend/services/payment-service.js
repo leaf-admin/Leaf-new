@@ -8,6 +8,7 @@ const {
   isRefundedPaymentStatus,
   isCapturedPaymentStatus,
 } = require('./payment-service/shared');
+const { resolveRideInsuranceFeeCents } = require('./ride-insurance-policy');
 
 class PaymentService {
   constructor() {
@@ -38,6 +39,9 @@ class PaymentService {
     this.WOOVI_FEE_PERCENTAGE = 0.008; // 0,8% da transação
     this.WOOVI_FEE_MINIMUM = 50; // R$ 0,50 mínimo (em centavos)
     this.WITHDRAW_FEE_FLAT_CENTS = 100; // R$ 1,00 por saque, qualquer valor
+    // Seguro APP: embutido na tarifa do passageiro, separado antes da parte do
+    // motorista. Ver services/ride-insurance-policy.js.
+    this.RIDE_INSURANCE_FEE_CENTS = resolveRideInsuranceFeeCents();
     this.SUBSCRIPTION_DAILY_BILLING_ENABLED =
       String(process.env.SUBSCRIPTION_DAILY_BILLING_ENABLED || 'false').toLowerCase() === 'true';
     this.SUBSCRIPTION_DAILY_FEE_NOMINAL_CENTS = Math.max(

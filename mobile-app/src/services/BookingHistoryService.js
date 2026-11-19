@@ -86,6 +86,7 @@ function mapReceiptToBooking(receipt) {
         )),
         operationalFee: parseOptionalMoney(receipt?.operationalFee),
         paymentIntermediationFee: parseOptionalMoney(receipt?.paymentIntermediationFee),
+        rideInsuranceFee: parseOptionalMoney(receipt?.rideInsuranceFee),
         totalFees: parseOptionalMoney(firstPresentValue(receipt?.totalFees, receipt?.feeAmount)),
         tollAmount: parseOptionalMoney(firstPresentValue(
             receipt?.tollAmount,

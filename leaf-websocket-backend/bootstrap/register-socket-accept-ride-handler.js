@@ -451,6 +451,7 @@ function registerSocketAcceptRideHandler({
                     ...(estimatedBreakdown ? {
                         estimatedOperationalFee: estimatedBreakdown.operationalFee,
                         estimatedPaymentIntermediationFee: estimatedBreakdown.paymentIntermediationFee,
+                        estimatedRideInsuranceFee: estimatedBreakdown.rideInsuranceFee || 0,
                         estimatedTotalFees: estimatedBreakdown.totalFees,
                         estimatedDriverNetAmount: estimatedBreakdown.driverNetAmount
                     } : {}),

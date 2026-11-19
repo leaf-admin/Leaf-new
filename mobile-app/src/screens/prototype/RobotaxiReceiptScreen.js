@@ -375,6 +375,7 @@ function buildRouteReceiptFromParams(params = {}) {
     passengerName: passengerName || "Passageiro Leaf",
     operationalFee: toNumber(params.operationalFee, NaN),
     paymentIntermediationFee: toNumber(params.paymentIntermediationFee, NaN),
+    rideInsuranceFee: toNumber(params.rideInsuranceFee, NaN),
     totalFees: toNumber(params.totalFees, NaN),
     driverNetAmount: toNumber(params.driverNetAmount, NaN),
     tollAmount: toNumber(params.tollAmount, 0),
@@ -1081,17 +1082,46 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
   );
   const resolvedFeeAmount = resolveTripFeeAmount(selected);
   const finalTotalFees = toOptionalNumber(resolvedFeeAmount);
+  // Seguro APP (acidentes pessoais): vem embutido no valor pago pelo passageiro
+  // e não sai do repasse. Para o motorista, o valor da corrida é sem ele e as
+  // taxas são só as da Leaf. Corridas antigas não têm o campo e valem zero.
+  const rawRideInsuranceFee = toOptionalNumber(
+    selected?.rideInsuranceFee ?? selected?.fareBreakdown?.rideInsuranceFee,
+  );
+  const finalRideInsuranceFee =
+    Number.isFinite(rawRideInsuranceFee) && rawRideInsuranceFee > 0
+      ? rawRideInsuranceFee
+      : 0;
+  const finalLeafFees = Number.isFinite(finalTotalFees)
+    ? Math.max(0, Number((finalTotalFees - finalRideInsuranceFee).toFixed(2)))
+    : finalTotalFees;
+  const driverRideAmount = Math.max(
+    0,
+    Number((totalAmount - finalRideInsuranceFee).toFixed(2)),
+  );
+  const driverRideAmountLabel = hasReceiptFinancialContract
+    ? formatCurrency(driverRideAmount)
+    : "--";
   const resolvedDriverNetAmount = resolveTripNetAmountOrNull(selected);
   const finalDriverNetAmount = toOptionalNumber(resolvedDriverNetAmount);
   const hasDriverNetAmount =
     hasReceiptFinancialContract && resolvedDriverNetAmount !== null;
   const safeFeeAmount = Number.isFinite(finalTotalFees) ? finalTotalFees : 0;
   const safeTollAmount = tollAmount === null ? 0 : tollAmount;
+  // Para o passageiro o seguro APP fica dentro de "Corrida" (embutido na
+  // tarifa), então corrida + pedágio + taxa Leaf continua fechando no pago.
   const passengerRideSubtotal =
     Number.isFinite(finalTotalFees) && tollAmount !== null
       ? Math.max(
           0,
-          Number((totalAmount - safeFeeAmount - safeTollAmount).toFixed(2)),
+          Number(
+            (
+              totalAmount -
+              safeFeeAmount +
+              finalRideInsuranceFee -
+              safeTollAmount
+            ).toFixed(2),
+          ),
         )
       : NaN;
   const formatReceiptMoney = useCallback(
@@ -1215,7 +1245,7 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
     : "Passag.";
   const driverSummaryAsideSecondaryValue =
     hasReceiptFinancialContract && Number.isFinite(finalTotalFees)
-    ? formatReceiptMoney(finalTotalFees)
+    ? formatReceiptMoney(finalLeafFees)
     : `${passengersCount}`;
   const closeButtonTestId = isDriverView
     ? "driver-receipt-back-to-map-button"
@@ -1813,9 +1843,9 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
   const buildClosingValueRows = () => {
     if (isDriverView) {
       return [
-        { label: "Pago pelo passageiro", value: totalAmountLabel },
+        { label: "Valor da corrida", value: driverRideAmountLabel },
         { label: "Pedágio repassado", value: formatReceiptMoney(tollAmount), testID: "driver-closing-toll-row" },
-        { label: "Taxas Leaf", value: `− ${formatReceiptMoney(finalTotalFees)}`, testID: "driver-closing-fees-row" },
+        { label: "Taxas Leaf", value: `− ${formatReceiptMoney(finalLeafFees)}`, testID: "driver-closing-fees-row" },
       ];
     }
     if (showPassengerOperationalSettlement) {
@@ -1830,7 +1860,7 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
     return [
       { label: "Corrida", value: formatReceiptMoney(passengerRideSubtotal) },
       { label: "Pedágio", value: formatReceiptMoney(tollAmount), testID: "passenger-closing-toll-row" },
-      { label: "Taxa Leaf", value: formatReceiptMoney(finalTotalFees), testID: "passenger-closing-fees-row" },
+      { label: "Taxa Leaf", value: formatReceiptMoney(finalLeafFees), testID: "passenger-closing-fees-row" },
     ];
   };
 
@@ -2036,7 +2066,7 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                 <>
                   {renderCleanValueRow({
                     title: "Valor da corrida",
-                    value: totalAmountLabel,
+                    value: driverRideAmountLabel,
                   })}
                   {renderCleanValueRow({
                     title: "Pedágio",
@@ -2046,11 +2076,12 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                   })}
                   {renderCleanValueRow({
                     title: "Taxas Leaf",
-                    value: formatReceiptMoney(finalTotalFees),
+                    value: formatReceiptMoney(finalLeafFees),
                     muted: true,
                     testID: "driver-receipt-fees-row",
                     valueTestID: "driver-receipt-fees-amount",
                   })}
+
                   {renderCleanValueRow({
                     title: "Repasse Leaf",
                     subtitle: hasDriverNetAmount ? undefined : "Aguardando dados de repasse",
@@ -2095,7 +2126,7 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                     })}
                     {renderCleanValueRow({
                       title: "Taxa Leaf",
-                      value: formatReceiptMoney(finalTotalFees),
+                      value: formatReceiptMoney(finalLeafFees),
                       testID: "passenger-receipt-fees-row",
                       valueTestID: "passenger-receipt-fees-amount",
                     })}
@@ -2411,7 +2442,7 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                               ]}
                               numberOfLines={2}
                             >
-                              {formatCurrency(totalAmount)}
+                              {formatCurrency(driverRideAmount)}
                             </Text>
                           </View>
                         </View>
@@ -2598,7 +2629,7 @@ export default function RobotaxiReceiptScreen({ navigation, route }) {
                               Total
                             </Text>
                             <Text style={styles.driverFeeDisclosureTotalValue}>
-                              {formatReceiptMoney(finalTotalFees)}
+                              {formatReceiptMoney(finalLeafFees)}
                             </Text>
                           </View>
                         ) : null}

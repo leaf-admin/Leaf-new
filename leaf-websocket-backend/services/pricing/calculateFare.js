@@ -1,3 +1,4 @@
+const { resolveRideInsuranceFeeCents } = require('../ride-insurance-policy');
 const { clamp, roundCurrency } = require('./utils');
 
 const RATE_CARD_VERSION = process.env.PRICING_RATE_CARD_VERSION || 'leaf-go-live-2026-04-10-v1';
@@ -120,7 +121,9 @@ function calculateDynamicFare(input = {}) {
   const nightSurchargeValue = tarifaBase * nightSurchargeRate;
   const subtotalWithSurcharges = (tarifaBase * (1 + dynamicMarkupRate + nightSurchargeRate)) + additionalPickup;
   const minimumFareApplied = subtotalWithSurcharges < rateCard.valor_minimo;
-  const finalPrice = Math.max(rateCard.valor_minimo, subtotalWithSurcharges);
+  // Seguro APP embutido na tarifa do passageiro, fora da dinâmica e do mínimo.
+  const rideInsuranceFee = resolveRideInsuranceFeeCents() / 100;
+  const finalPrice = Math.max(rateCard.valor_minimo, subtotalWithSurcharges) + rideInsuranceFee;
 
   return {
     car_type: rateCard.car_type,
@@ -146,7 +149,8 @@ function calculateDynamicFare(input = {}) {
         ? 'demand_pressure'
         : 'legacy_combined_pressure',
       night_surcharge_value: roundCurrency(nightSurchargeValue),
-      pickup_adjustment: roundCurrency(additionalPickup)
+      pickup_adjustment: roundCurrency(additionalPickup),
+      ride_insurance_fee: roundCurrency(rideInsuranceFee)
     }
   };
 }

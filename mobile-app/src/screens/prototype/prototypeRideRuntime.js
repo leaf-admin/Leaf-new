@@ -4493,6 +4493,7 @@ export function normalizeCompletedTripDriverNetAmount({
   driverNetAmount,
   operationalFee,
   paymentIntermediationFee,
+  rideInsuranceFee,
   totalFees,
 } = {}) {
   const normalizedFinalFare = toFiniteRuntimeMoney(finalFare);
@@ -4510,7 +4511,8 @@ export function normalizeCompletedTripDriverNetAmount({
   const feesFromParts =
     normalizedOperationalFee !== null || normalizedPaymentIntermediationFee !== null
       ? Number(normalizedOperationalFee || 0) +
-        Number(normalizedPaymentIntermediationFee || 0)
+        Number(normalizedPaymentIntermediationFee || 0) +
+        Number(toFiniteRuntimeMoney(rideInsuranceFee) || 0)
       : null;
   const resolvedFees =
     feesFromTotal ?? (feesFromParts !== null && feesFromParts > 0
@@ -7296,6 +7298,9 @@ function extractPayloadFeeBreakdown(payload = {}, { estimated = false } = {}) {
   const intermediationKey = estimated
     ? "estimatedPaymentIntermediationFee"
     : "paymentIntermediationFee";
+  const insuranceKey = estimated
+    ? "estimatedRideInsuranceFee"
+    : "rideInsuranceFee";
   const totalKey = estimated ? "estimatedTotalFees" : "totalFees";
   const netKey = estimated ? "estimatedDriverNetAmount" : "driverNetAmount";
   const tollKey = estimated ? "estimatedTollFee" : "tollFee";
@@ -7311,6 +7316,12 @@ function extractPayloadFeeBreakdown(payload = {}, { estimated = false } = {}) {
     payload?.fareBreakdown?.[intermediationKey],
     payload?.paymentBreakdown?.[intermediationKey],
     payload?.financialBreakdown?.[intermediationKey],
+  );
+  const rideInsuranceFee = pickPreferredRuntimeMoney(
+    payload?.[insuranceKey],
+    payload?.fareBreakdown?.[insuranceKey],
+    payload?.paymentBreakdown?.[insuranceKey],
+    payload?.financialBreakdown?.[insuranceKey],
   );
   const totalFees = pickPreferredRuntimeMoney(
     payload?.[totalKey],
@@ -7360,6 +7371,7 @@ function extractPayloadFeeBreakdown(payload = {}, { estimated = false } = {}) {
     ...(hasIntermediation
       ? { paymentIntermediationFee: paymentIntermediationFee }
       : {}),
+    ...(rideInsuranceFee !== null ? { rideInsuranceFee } : {}),
     ...(hasTotal ? { totalFees: totalFees } : {}),
     ...(hasNet ? { driverNetAmount: driverNetAmount } : {}),
   };
@@ -8522,6 +8534,11 @@ export function buildRuntimeReceiptFromRecoveredReceipt(
     totals?.wooviFee,
     receipt?.paymentIntermediationFee,
   );
+  const rideInsuranceFee = pickPreferredRuntimeMoney(
+    breakdown?.rideInsurance?.amount,
+    totals?.rideInsurance,
+    receipt?.rideInsuranceFee,
+  );
   const driverNetAmount = pickPreferredRuntimeMoney(
     breakdown?.driverAmount?.amount,
     totals?.driverReceived,
@@ -8537,7 +8554,9 @@ export function buildRuntimeReceiptFromRecoveredReceipt(
   const totalFees =
     operationalFee !== null || paymentIntermediationFee !== null
       ? roundCurrencyValue(
-          Number(operationalFee || 0) + Number(paymentIntermediationFee || 0),
+          Number(operationalFee || 0) +
+            Number(paymentIntermediationFee || 0) +
+            Number(rideInsuranceFee || 0),
         )
       : totalPaid !== null && driverNetAmount !== null
         ? roundCurrencyValue(Math.max(0, totalPaid - driverNetAmount))
@@ -8595,6 +8614,7 @@ export function buildRuntimeReceiptFromRecoveredReceipt(
       : {}),
     ...(operationalFee !== null ? { operationalFee } : {}),
     ...(paymentIntermediationFee !== null ? { paymentIntermediationFee } : {}),
+    ...(rideInsuranceFee !== null ? { rideInsuranceFee } : {}),
     ...(tollFee !== null ? { tollFee } : {}),
     ...(totalFees !== null ? { totalFees } : {}),
     ...(driverNetAmount !== null ? { driverNetAmount } : {}),
@@ -9107,6 +9127,12 @@ export function mergeCompletedReceiptForHistory(existingReceipt, incomingReceipt
     preferredFinancialReceipt?.estimatedPaymentIntermediationFee,
     fallbackFinancialReceipt?.estimatedPaymentIntermediationFee,
   );
+  const rideInsuranceFee = pickPreferredRuntimeMoney(
+    preferredFinancialReceipt?.rideInsuranceFee,
+    fallbackFinancialReceipt?.rideInsuranceFee,
+    preferredFinancialReceipt?.estimatedRideInsuranceFee,
+    fallbackFinancialReceipt?.estimatedRideInsuranceFee,
+  );
   const tollFee = pickPreferredRuntimeMoney(
     preferredFinancialReceipt?.tollFee,
     fallbackFinancialReceipt?.tollFee,
@@ -9128,6 +9154,7 @@ export function mergeCompletedReceiptForHistory(existingReceipt, incomingReceipt
     driverNetAmount: rawDriverNetAmount,
     operationalFee,
     paymentIntermediationFee,
+    rideInsuranceFee,
     totalFees,
   });
   const incomingDistanceKm = toFiniteRuntimeMoney(incomingReceipt?.distanceKm);
@@ -9215,6 +9242,9 @@ export function mergeCompletedReceiptForHistory(existingReceipt, incomingReceipt
   }
   if (paymentIntermediationFee !== null) {
     mergedReceipt.paymentIntermediationFee = paymentIntermediationFee;
+  }
+  if (rideInsuranceFee !== null) {
+    mergedReceipt.rideInsuranceFee = rideInsuranceFee;
   }
   if (tollFee !== null) {
     mergedReceipt.tollFee = tollFee;

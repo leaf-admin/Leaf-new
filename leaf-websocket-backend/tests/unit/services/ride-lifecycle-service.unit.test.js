@@ -420,3 +420,42 @@ describe('ride-lifecycle-service', () => {
     }
   });
 });
+
+describe('early end with the seguro APP embedded in the fare', () => {
+  const previous = process.env.RIDE_INSURANCE_FEE_ENABLED;
+  beforeEach(() => { process.env.RIDE_INSURANCE_FEE_ENABLED = 'true'; });
+  afterEach(() => {
+    if (previous === undefined) delete process.env.RIDE_INSURANCE_FEE_ENABLED;
+    else process.env.RIDE_INSURANCE_FEE_ENABLED = previous;
+  });
+
+  it('keeps the insurance whole and applies the ratio only to the rest of the fare', () => {
+    const booking = {
+      estimatedFare: '30.13',
+      paymentAmountInCents: '3013',
+      routeDistanceKm: '10',
+      routeDurationSecs: '600'
+    };
+    const settlement = calculateExecutedFareSettlement(booking, {
+      distanceKm: 5,
+      durationSecs: 300,
+      minChargeRatio: 0.25
+    });
+    expect(settlement.rideInsuranceFee).toBe(0.13);
+    expect(settlement.executedFare).toBe(Math.round((0.13 + 30 * settlement.appliedRatio) * 100) / 100);
+    expect(Math.round((settlement.executedFare + settlement.estimatedRefund) * 100)).toBe(3013);
+  });
+
+  it('keeps toll and insurance whole on the rider early end', () => {
+    const booking = {
+      estimatedFare: '35.13',
+      paymentAmountInCents: '3513',
+      tollFee: '5',
+      routeDistanceKm: '10',
+      routeDurationSecs: '600'
+    };
+    const settlement = calculateRiderEarlyEndSettlement(booking, { distanceKm: 5, durationSecs: 300 });
+    const expectedCents = 500 + 13 + Math.round(3000 * settlement.appliedRatio);
+    expect(Math.round(settlement.executedFare * 100)).toBe(expectedCents);
+  });
+});

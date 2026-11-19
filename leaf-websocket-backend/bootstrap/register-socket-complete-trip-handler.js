@@ -423,6 +423,9 @@ function registerSocketCompleteTripHandler({
                     ...(Number.isFinite(Number(result.data?.paymentIntermediationFee))
                         ? { paymentIntermediationFee: Number(result.data.paymentIntermediationFee) }
                         : {}),
+                    ...(Number.isFinite(Number(result.data?.rideInsuranceFee))
+                        ? { rideInsuranceFee: Number(result.data.rideInsuranceFee) }
+                        : {}),
                     ...(Number.isFinite(Number(result.data?.totalFees))
                         ? { totalFees: Number(result.data.totalFees) }
                         : {}),
@@ -732,6 +735,7 @@ function registerSocketCompleteTripHandler({
                                 grossAmount: fareBreakdown.grossAmount,
                                 operationalFee: fareBreakdown.operationalFee,
                                 paymentIntermediationFee: fareBreakdown.paymentIntermediationFee,
+                                rideInsuranceFee: fareBreakdown.rideInsuranceFee || 0,
                                 totalFees: fareBreakdown.totalFees,
                                 driverNetAmount: fareBreakdown.driverNetAmount,
                                 tollFee: fareBreakdown.tollFee,

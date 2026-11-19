@@ -216,6 +216,7 @@ function resolveCompletedFinancialResultFields(bookingData = {}) {
         'operationalFee',
         'paymentIntermediationFee',
         'subscriptionRetainedFee',
+        'rideInsuranceFee',
         'totalFees',
         'driverNetAmount'
     ];
@@ -279,6 +280,7 @@ function resolveDriverEarlyEndInconsistency({
         cents(breakdown.operationalFee) +
         cents(breakdown.paymentIntermediationFee) +
         cents(breakdown.subscriptionRetainedFee) +
+        cents(breakdown.rideInsuranceFee) +
         driverNetCents;
     if (allocatedCents !== executedFareCents) {
         return 'SETTLEMENT_UNBALANCED';
@@ -698,6 +700,9 @@ class CompleteTripCommand extends Command {
                     subscriptionRetainedFeeCents: Math.round(
                         Number(completedFareBreakdown.subscriptionRetainedFee || 0) * 100
                     ),
+                    rideInsuranceFeeCents: Math.round(
+                        Number(completedFareBreakdown.rideInsuranceFee || 0) * 100
+                    ),
                     driverNetAmountCents: Math.round(Number(completedFareBreakdown.driverNetAmount || 0) * 100),
                     driverIntroFee
                 });
@@ -783,6 +788,7 @@ class CompleteTripCommand extends Command {
                         operationalFee: completedFareBreakdown.operationalFee,
                         paymentIntermediationFee: completedFareBreakdown.paymentIntermediationFee,
                         subscriptionRetainedFee: completedFareBreakdown.subscriptionRetainedFee,
+                        rideInsuranceFee: completedFareBreakdown.rideInsuranceFee || 0,
                         totalFees: completedFareBreakdown.totalFees,
                         driverNetAmount: completedFareBreakdown.driverNetAmount,
                         authoritativeSnapshot: true,
@@ -817,6 +823,7 @@ class CompleteTripCommand extends Command {
                     operationalFee: String(completedFareBreakdown.operationalFee || 0),
                     paymentIntermediationFee: String(completedFareBreakdown.paymentIntermediationFee || 0),
                     subscriptionRetainedFee: String(completedFareBreakdown.subscriptionRetainedFee || 0),
+                    rideInsuranceFee: String(completedFareBreakdown.rideInsuranceFee || 0),
                     totalFees: String(completedFareBreakdown.totalFees || 0),
                     driverNetAmount: String(completedFareBreakdown.driverNetAmount || 0),
                     authoritativeSnapshot: 'true',
@@ -1025,6 +1032,7 @@ class CompleteTripCommand extends Command {
                     operationalFee: completedFareBreakdown.operationalFee,
                     paymentIntermediationFee: completedFareBreakdown.paymentIntermediationFee,
                     subscriptionRetainedFee: completedFareBreakdown.subscriptionRetainedFee,
+                    rideInsuranceFee: completedFareBreakdown.rideInsuranceFee || 0,
                     totalFees: completedFareBreakdown.totalFees,
                     driverNetAmount: completedFareBreakdown.driverNetAmount,
                     authoritativeSnapshot: true,
