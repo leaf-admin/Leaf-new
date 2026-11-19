@@ -220,14 +220,25 @@ export function resolveTripDisplayLabel(item = {}, { role = 'driver' } = {}) {
   return amount === null ? '--' : formatCurrencyBRL(amount);
 }
 
+// Seguro APP: embutido no valor pago pelo passageiro, não é taxa do motorista.
+export function resolveTripRideInsuranceFee(item = {}) {
+  const fee =
+    toFiniteMoney(item?.rideInsuranceFee, null) ??
+    toFiniteMoney(item?.fareBreakdown?.rideInsuranceFee, null);
+  return fee !== null && fee > 0 ? roundMoney(fee) : 0;
+}
+
 export function buildTripFinancialTotals(history = [], { role = 'driver' } = {}) {
   const normalizedHistory = Array.isArray(history) ? history.filter(Boolean) : [];
 
   return normalizedHistory.reduce(
     (summary, item) => {
-      const gross = resolveTripGrossAmount(item);
+      // Para o motorista, o seguro APP não entra no bruto nem nas taxas.
+      const driverInsurance = role === 'driver' ? resolveTripRideInsuranceFee(item) : 0;
+      const gross = roundMoney(Math.max(0, resolveTripGrossAmount(item) - driverInsurance));
       const net = resolveTripNetAmount(item);
-      const fees = resolveTripFeeAmount(item);
+      const rawFees = resolveTripFeeAmount(item);
+      const fees = rawFees === null ? null : roundMoney(Math.max(0, rawFees - driverInsurance));
 
       return {
         count: summary.count + 1,
