@@ -666,7 +666,7 @@ class ReceiptService {
                     formatted: `R$ ${wooviFee.toFixed(2).replace('.', ',')}`
                 },
 
-                // Seguro APP (acidentes pessoais), descontado do repasse do motorista.
+                // Seguro APP (acidentes pessoais), embutido na tarifa do passageiro.
                 rideInsurance: {
                     amount: rideInsuranceFee,
                     formatted: `R$ ${rideInsuranceFee.toFixed(2).replace('.', ',')}`,

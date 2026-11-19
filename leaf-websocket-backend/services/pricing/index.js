@@ -174,6 +174,7 @@ function buildPricingResponse(engineResult) {
     pickup_adjustment: fare.adicional_pickup,
     minimum_fare_applied: fare.valor_minimo_aplicado,
     final_price: fare.preco_final,
+    ride_insurance_fee: fare.breakdown.ride_insurance_fee || 0,
     operational_state: operationalState,
     pricing_model: activePricingModel,
     pricing_model_mode: pricingModelMode,

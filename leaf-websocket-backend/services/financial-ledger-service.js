@@ -363,7 +363,7 @@ class FinancialLedgerService {
     }
 
     if (rideInsuranceFee > 0) {
-      // Prêmio do seguro APP descontado do motorista: a Leaf repassa à seguradora
+      // Seguro APP embutido no valor pago pelo passageiro: a Leaf repassa à seguradora
       // na fatura mensal, então é passivo, não receita.
       lines.push({
         account: 'liability:ride_insurance_premium_payable',
@@ -371,7 +371,7 @@ class FinancialLedgerService {
         amountCents: rideInsuranceFee,
         entityType: 'ride',
         entityId: rideId,
-        memo: 'Seguro APP (acidentes pessoais) descontado do repasse'
+        memo: 'Seguro APP (acidentes pessoais) embutido na tarifa'
       });
     }
 

@@ -1,4 +1,5 @@
 const { logStructured } = require('../utils/logger');
+const { resolveRideInsuranceFeeCents } = require('./ride-insurance-policy');
 const {
   buildPaymentInclusiveCharge,
   toCents
@@ -411,7 +412,15 @@ function calculateExecutedFareSettlement(bookingHash = {}, options = {}) {
     1
   );
 
-  const executedFare = roundMoney(Math.max(0, originalFare * appliedRatio));
+  // Seguro APP: a cobertura valeu desde o aceite, então fica inteiro e fora
+  // da proporção (vai para a fatura da seguradora, não para o motorista).
+  const rideInsuranceFee = Math.min(
+    resolveRideInsuranceFeeCents() / 100,
+    Math.max(0, originalFare - tollFee)
+  );
+  const executedFare = roundMoney(
+    Math.max(0, rideInsuranceFee + (originalFare - rideInsuranceFee) * appliedRatio)
+  );
   const estimatedRefund = roundMoney(Math.max(0, prepaidAmount - executedFare));
 
   const settlement = {
@@ -420,6 +429,7 @@ function calculateExecutedFareSettlement(bookingHash = {}, options = {}) {
     prepaidAmount: roundMoney(prepaidAmount),
     executedFare,
     tollFee: roundMoney(tollFee),
+    rideInsuranceFee: roundMoney(rideInsuranceFee),
     estimatedRefund,
     appliedRatio,
     progressRatio: progress.progressRatio,
@@ -474,7 +484,8 @@ function applyTollPassThroughRule(settlement = {}, tollCrossing = null) {
 
   const originalFareCents = positiveMoneyToCents(settlement.originalFare);
   const prepaidCents = positiveMoneyToCents(settlement.prepaidAmount);
-  const fareWithoutTollCents = originalFareCents - tollFeeCents;
+  const rideInsuranceCents = positiveMoneyToCents(settlement.rideInsuranceFee);
+  const fareWithoutTollCents = originalFareCents - tollFeeCents - rideInsuranceCents;
   if (!(fareWithoutTollCents > 0)) {
     return {
       ...settlement,
@@ -491,7 +502,7 @@ function applyTollPassThroughRule(settlement = {}, tollCrossing = null) {
   const appliedRatio = clamp(parseMoneyValue(settlement.appliedRatio, 0), 0, 1);
   const executedFareWithoutTollCents = Math.round(fareWithoutTollCents * appliedRatio);
   const executedFareCents = Math.min(
-    chargedTollCents + executedFareWithoutTollCents,
+    chargedTollCents + rideInsuranceCents + executedFareWithoutTollCents,
     prepaidCents
   );
   const estimatedRefundCents = Math.max(0, prepaidCents - executedFareCents);

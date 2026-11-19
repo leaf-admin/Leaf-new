@@ -11,8 +11,9 @@ const DEFAULT_POLICY = Object.freeze({
   threshold50Cents: 5000,
   paymentIntermediationPercentage: 0.008,
   paymentIntermediationMinimumCents: 50,
-  // Seguro APP (acidentes pessoais de motorista e passageiro), cobrado por corrida
-  // realizada e descontado do repasse. Fica em 0 até a apólice estar ativa.
+  // Seguro APP (acidentes pessoais de motorista e passageiro): vem embutido no
+  // valor pago pelo passageiro e sai antes da parte do motorista. Fica em 0 até
+  // a apólice estar ativa (services/ride-insurance-policy.js).
   rideInsuranceFeeCents: 0
 });
 
@@ -150,9 +151,18 @@ function buildRideFinancialContract({
 } = {}) {
   const totalAmountCents = toCents(passengerPaidCents);
   const tollPassThroughCents = clampCents(tollFeeCents, totalAmountCents);
-  const grossFareCents = Math.max(0, totalAmountCents - tollPassThroughCents);
+  // Seguro APP: parte do valor pago pelo passageiro que vai para a fatura da
+  // seguradora. Sai antes de tudo, então as taxas e o repasse do motorista são
+  // os mesmos da corrida sem o seguro.
+  const requestedRideInsuranceFeeCents = toCents(policy.rideInsuranceFeeCents);
+  const rideInsuranceFeeCents = clampCents(
+    requestedRideInsuranceFeeCents,
+    totalAmountCents - tollPassThroughCents
+  );
+  const grossFareCents = Math.max(0, totalAmountCents - tollPassThroughCents - rideInsuranceFeeCents);
   const introFeeContext = normalizeDriverIntroFeeContext(driverIntroFee);
-  // Woovi charges intermediation on the full passenger transaction, including toll.
+  // Woovi charges intermediation on the full passenger transaction, including toll
+  // and the seguro APP.
   const requestedPaymentIntermediationFeeCents = toCents(resolvePaymentIntermediationFee(totalAmountCents, policy));
   const promotionIncludesPaymentFee = introFeeContext?.eligible && introFeeContext.paymentFeeIncluded;
   const promotionChargesPixExcess = promotionIncludesPaymentFee && introFeeContext.pixExcessChargedToDriver;
@@ -176,17 +186,10 @@ function buildRideFinancialContract({
   const paymentIntermediationFeeCents = promotionIncludesPaymentFee
     ? includedPaymentFeeCents
     : clampCents(requestedPaymentIntermediationFeeCents, remainingAfterOperationalFeeCents);
-  // Seguro APP: valor fixo por corrida, descontado do repasse depois das taxas e
-  // nunca do pedágio, que é repasse integral ao motorista.
-  const requestedRideInsuranceFeeCents = toCents(policy.rideInsuranceFeeCents);
-  const rideInsuranceFeeCents = clampCents(
-    requestedRideInsuranceFeeCents,
-    grossFareCents - leafOperationalFeeCents - paymentIntermediationFeeCents
-  );
   const requestedSubscriptionRetainedFeeCents = toCents(subscriptionRetainedFeeCents);
   const remainingBeforeSubscriptionCents = Math.max(
     0,
-    grossFareCents - leafOperationalFeeCents - paymentIntermediationFeeCents - rideInsuranceFeeCents
+    grossFareCents - leafOperationalFeeCents - paymentIntermediationFeeCents
   );
   const subscriptionRetainedCents = clampCents(
     requestedSubscriptionRetainedFeeCents,
@@ -196,8 +199,7 @@ function buildRideFinancialContract({
     0,
     grossFareCents -
       leafOperationalFeeCents -
-      paymentIntermediationFeeCents -
-      rideInsuranceFeeCents +
+      paymentIntermediationFeeCents +
       tollPassThroughCents -
       subscriptionRetainedCents
   );
@@ -279,7 +281,7 @@ function buildAuthoritativeFinancialSnapshot({
   const driverNetAmount = resolveRequiredCents(driverNetAmountCents, 'driverNetAmountCents');
   const introFeeContext = normalizeDriverIntroFeeContext(driverIntroFee);
   const introFeeRetainedCents = operationalFee + (introFeeContext?.paymentFeeIncluded ? paymentIntermediationFee : 0);
-  const grossFare = passengerPaid - tollPassThrough;
+  const grossFare = passengerPaid - tollPassThrough - rideInsuranceFee;
   const introFeeMismatch = introFeeContext?.pixExcessChargedToDriver
     ? operationalFee !== Math.min(introFeeContext.leafFeeCents, Math.max(0, grossFare - paymentIntermediationFee))
     : introFeeRetainedCents !== Math.min(introFeeContext?.operationalFeeCents, grossFare);
@@ -291,7 +293,7 @@ function buildAuthoritativeFinancialSnapshot({
   const retainedTotalCents = operationalFee + paymentIntermediationFee + rideInsuranceFee + subscriptionRetainedFee;
   const allocatedTotalCents = driverNetAmount + retainedTotalCents;
 
-  if (tollPassThrough > passengerPaid || allocatedTotalCents !== passengerPaid) {
+  if (tollPassThrough + rideInsuranceFee > passengerPaid || allocatedTotalCents !== passengerPaid) {
     const error = new Error('Snapshot financeiro final não fecha em centavos');
     error.code = 'FINANCIAL_SNAPSHOT_UNBALANCED';
     throw error;
@@ -304,7 +306,7 @@ function buildAuthoritativeFinancialSnapshot({
     authoritativeSnapshot: true,
     financialSnapshotSource: 'backend_final',
     passengerPaidCents: passengerPaid,
-    grossFareCents: passengerPaid - tollPassThrough,
+    grossFareCents: passengerPaid - tollPassThrough - rideInsuranceFee,
     tollFeeCents: tollPassThrough,
     driverTollPassThroughCents: tollPassThrough,
     operationalFeeCents: operationalFee,

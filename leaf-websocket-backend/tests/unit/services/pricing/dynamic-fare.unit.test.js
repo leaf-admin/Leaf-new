@@ -58,3 +58,25 @@ describe('pricing/calculateFare', () => {
     expect(result.valor_minimo_aplicado).toBe(true);
   });
 });
+
+describe('pricing/calculateFare seguro APP', () => {
+  const previous = process.env.RIDE_INSURANCE_FEE_ENABLED;
+  afterEach(() => {
+    if (previous === undefined) delete process.env.RIDE_INSURANCE_FEE_ENABLED;
+    else process.env.RIDE_INSURANCE_FEE_ENABLED = previous;
+  });
+
+  it('adds R$ 0,13 to the passenger price outside the dynamic markup and the minimum fare', () => {
+    delete process.env.RIDE_INSURANCE_FEE_ENABLED;
+    const input = { distance_km: 8, duration_min_traffic: 20, dynamic_markup_rate: 0.2 };
+    const without = calculateDynamicFare(input);
+    process.env.RIDE_INSURANCE_FEE_ENABLED = 'true';
+    const withInsurance = calculateDynamicFare(input);
+    expect(withInsurance.breakdown.ride_insurance_fee).toBe(0.13);
+    expect(Math.round((withInsurance.preco_final - without.preco_final) * 100)).toBe(13);
+
+    const short = calculateDynamicFare({ distance_km: 0.5, duration_min_traffic: 1 });
+    expect(short.valor_minimo_aplicado).toBe(true);
+    expect(short.preco_final).toBe(Math.round((short.breakdown.valor_minimo + 0.13) * 100) / 100);
+  });
+});

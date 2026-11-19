@@ -264,15 +264,15 @@ describe('FinancialLedgerService', () => {
     const result = await service.recordRideSettlement({
       rideId: 'ride_insured_1',
       driverId: 'driver_1',
-      totalAmountCents: 3000,
-      netAmountCents: 2788,
+      totalAmountCents: 3013,
+      netAmountCents: 2801,
       operationalFeeCents: 149,
       wooviFeeCents: 50,
       rideInsuranceFeeCents: 13
     });
 
     const event = firestore.docs.get(`financial_ledger_events/${result.eventId}`);
-    expect(result).toMatchObject({ success: true, totalDebitCents: 3000, totalCreditCents: 3000 });
+    expect(result).toMatchObject({ success: true, totalDebitCents: 3013, totalCreditCents: 3013 });
     expect(event.lines).toEqual(expect.arrayContaining([
       expect.objectContaining({
         account: 'liability:ride_insurance_premium_payable',

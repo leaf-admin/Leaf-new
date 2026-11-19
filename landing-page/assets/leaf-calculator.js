@@ -10,9 +10,6 @@
   const promoFeeCents = 99;
   const promoLeafFeeCents = 49;
   const pixMinimumCents = 50;
-  // Seguro APP (acidentes pessoais): R$ 0,13 por corrida, descontado do repasse.
-  // Acompanha RIDE_INSURANCE_FEE_CENTS em services/payment-service.js.
-  const rideInsuranceCents = 13;
   // Tabela regular: acompanha DEFAULT_POLICY de services/ride-financial-contract.js.
   const regularLeafFeeCents = rideCents => {
     if (rideCents <= 1000) return 79;
@@ -26,8 +23,8 @@
     const rideCents = Math.round(value * 100);
     const validNumber = Number.isFinite(value) && value >= 0 && Number.isSafeInteger(rideCents * 8);
     const pixFeeCents = validNumber ? Math.max(50, Math.floor((rideCents * 8 + 500) / 1000)) : 0;
-    const regularTotalCents = regularLeafFeeCents(rideCents) + pixFeeCents + rideInsuranceCents;
-    const promoTotalCents = promoLeafFeeCents + pixFeeCents + rideInsuranceCents;
+    const regularTotalCents = regularLeafFeeCents(rideCents) + pixFeeCents;
+    const promoTotalCents = promoLeafFeeCents + pixFeeCents;
     const pixExcessCents = Math.max(0, pixFeeCents - pixMinimumCents);
     const format = cents => money.format(cents / 100);
     const warning = document.getElementById('value-warning');
@@ -43,7 +40,7 @@
     document.getElementById('total-fees').textContent = validNumber ? format(promoTotalCents) : '—';
     document.getElementById('net-amount').textContent = validNumber ? format(Math.max(0, rideCents - promoTotalCents)) : '—';
     document.getElementById('regular-note').textContent = validNumber
-      ? `Depois da promoção, nesta mesma corrida: taxa Leaf de ${format(regularLeafFeeCents(rideCents))}, Pix de ${format(pixFeeCents)}, Seguro APP de ${format(rideInsuranceCents)} e repasse de ${format(Math.max(0, rideCents - regularTotalCents))}.`
+      ? `Depois da 25ª corrida, nesta mesma corrida: taxa Leaf de ${format(regularLeafFeeCents(rideCents))}, Pix de ${format(pixFeeCents)} e repasse de ${format(Math.max(0, rideCents - regularTotalCents))}.`
       : '';
   }
 
