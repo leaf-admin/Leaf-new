@@ -27,3 +27,27 @@ describe('Santiago zero-downtime deploy contract', () => {
     }
   });
 });
+
+describe('Santiago load balancer edge contract', () => {
+  const nginx = read('nginx.santiago.conf');
+  const compose = read('docker-compose.santiago.yml');
+
+  it('serves the load balancer on PROXY-protocol listeners next to the public ones', () => {
+    expect(nginx).toContain('listen 80 default_server;');
+    expect(nginx).toContain('listen 8080 proxy_protocol;');
+    expect(nginx).toContain('listen 443 ssl default_server;');
+    expect(nginx).toContain('listen 8443 ssl proxy_protocol;');
+  });
+
+  it('forwards exactly one client address, from the PROXY header when present', () => {
+    expect(nginx).toMatch(/map \$proxy_protocol_addr \$leaf_client_addr \{\s*''\s+\$remote_addr;\s*default \$proxy_protocol_addr;\s*\}/);
+    expect(nginx).not.toContain('$proxy_add_x_forwarded_for');
+    expect(nginx).not.toContain('X-Real-IP $remote_addr');
+    expect(nginx).toContain('proxy_set_header X-Forwarded-For $leaf_client_addr;');
+  });
+
+  it('keeps the PROXY listeners off the public interface', () => {
+    expect(compose).toContain('"${SANTIAGO_LB_BIND_IP:-127.0.0.1}:8080:8080"');
+    expect(compose).toContain('"${SANTIAGO_LB_BIND_IP:-127.0.0.1}:8443:8443"');
+  });
+});
