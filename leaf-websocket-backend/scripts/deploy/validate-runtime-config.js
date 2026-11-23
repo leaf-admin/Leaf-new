@@ -595,6 +595,7 @@ function main() {
       blockers.push('CPF_REVIEW_ENABLED=false não é permitido em produção');
     }
   }
+  blockers.push(...require('../../services/iza-insurance/iza-client').izaConfigErrors(process.env));
   const hasDefaultWooviWebhookPublicKey =
     nodeEnv === 'production' &&
     !paymentProviderSandboxRuntime &&
