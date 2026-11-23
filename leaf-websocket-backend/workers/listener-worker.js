@@ -28,6 +28,8 @@ const { Server } = require('socket.io');
 const { createAdapter } = require('@socket.io/redis-adapter');
 const redisPool = require('../utils/redis-pool');
 const { buildWorkerConsumerName } = require('./worker-consumer-identity');
+const { getDefaultIzaInsuranceService } = require('../services/iza-insurance/iza-insurance-service');
+const { extractIzaRideEvent } = require('../services/iza-insurance/iza-ride-events');
 
 const WORKER_STREAM_NAME = process.env.WORKER_STREAM_NAME || 'ride_events';
 const WORKER_GROUP_NAME = process.env.WORKER_GROUP_NAME || 'listener-workers';
@@ -81,16 +83,54 @@ workerManager.registerListener(EVENT_TYPES.RIDE_ACCEPTED, async (event) => {
     }
 });
 
+// Seguro por corrida (IZA). Nunca lança: falhas ficam no estado do seguro e o
+// ciclo de 1 min repete. Assim o retry do WorkerManager não reexecuta os outros
+// listeners do mesmo evento por causa da seguradora.
+async function forwardToIzaInsurance(eventType, event) {
+    const izaInsurance = getDefaultIzaInsuranceService();
+    if (!izaInsurance.enabled()) return;
+    try {
+        const ride = extractIzaRideEvent(eventType, event);
+        if (!ride) return;
+        if (ride.kind === 'started') await izaInsurance.handleRideStarted(ride);
+        else await izaInsurance.handleRideEnded(ride);
+    } catch (error) {
+        logStructured('warn', 'Falha ao repassar evento da corrida ao seguro (IZA)', {
+            service: 'listener-worker',
+            eventType,
+            error: error?.message
+        });
+    }
+}
+
 workerManager.registerListener(EVENT_TYPES.RIDE_STARTED, async (event) => {
+    await forwardToIzaInsurance(EVENT_TYPES.RIDE_STARTED, event);
     await startTripTimer(event, io);
 });
 
+workerManager.registerListener(EVENT_TYPES.RIDE_COMPLETED, async (event) => {
+    await forwardToIzaInsurance(EVENT_TYPES.RIDE_COMPLETED, event);
+});
+
 workerManager.registerListener(EVENT_TYPES.RIDE_CANCELED, async (event) => {
+    await forwardToIzaInsurance(EVENT_TYPES.RIDE_CANCELED, event);
     const { bookingId } = event.data;
     const GradualRadiusExpander = require('../services/gradual-radius-expander');
     const expander = new GradualRadiusExpander(io);
     await expander.stopSearch(bookingId);
 });
+
+// Ciclo do seguro: repete o que falhou, encerra corrida terminada sem evento, troca
+// o período acima de 2 h e manda o GPS de 1 em 1 min. Um líder por vez (lock no Redis).
+const IZA_SWEEP_INTERVAL_MS = 60000;
+setInterval(() => {
+    const izaInsurance = getDefaultIzaInsuranceService();
+    if (!izaInsurance.enabled()) return;
+    izaInsurance.sweep().catch((error) => logStructured('warn', 'Falha no ciclo do seguro (IZA)', {
+        service: 'listener-worker',
+        error: error?.message
+    }));
+}, IZA_SWEEP_INTERVAL_MS).unref?.();
 
 // Tratamento de sinais para shutdown graceful
 process.on('SIGTERM', async () => {

@@ -752,6 +752,20 @@ async function recomputeDriverActivationStatus(driverId) {
     });
   }
 
+  if (['APPROVED_NEEDS_LIVENESS', 'ACTIVE'].includes(String(canonicalState?.state || '').toUpperCase())) {
+    // Cadastro aprovado: registra o motorista no seguro por corrida (IZA). Não
+    // bloqueia a ativação; se falhar, o ciclo do listener-worker repete e a
+    // primeira corrida tenta de novo antes de abrir o período.
+    const { getDefaultIzaInsuranceService } = require('./iza-insurance/iza-insurance-service');
+    getDefaultIzaInsuranceService().registerDriver(safeDriverId).catch((error) => {
+      logStructured('warn', 'Falha ao cadastrar o motorista no seguro (IZA)', {
+        service: 'driver-activation-queue',
+        driverId: safeDriverId,
+        error: error?.message || String(error)
+      });
+    });
+  }
+
   if (canGoOnline) {
     try {
       // Carregado sob demanda para não criar ciclo de inicialização.
